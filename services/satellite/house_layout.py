@@ -64,14 +64,19 @@ class Layout:
                         self._device_room.setdefault(str(key).lower(), name)
 
     # ── places ──────────────────────────────────────────────────────────────────
-    def split(self, text: str) -> tuple[list[str] | None, str]:
-        """(the rooms the longest place phrase in `text` names, the rest of the words); (None, text) when it names no place."""
+    def take(self, text: str) -> tuple[list[str] | None, str, str]:
+        """(the rooms the longest place phrase in `text` names, that phrase, the rest of the words); (None, "", text) when it names no place."""
         have = words(text)
         for phrase, rooms in self._phrases:
             i = _has(have, phrase)
             if i >= 0:
-                return list(rooms), " ".join(have[:i] + have[i + len(phrase):])
-        return None, " ".join(have)
+                return list(rooms), " ".join(phrase), " ".join(have[:i] + have[i + len(phrase):])
+        return None, "", " ".join(have)
+
+    def split(self, text: str) -> tuple[list[str] | None, str]:
+        """(the rooms the longest place phrase in `text` names, the rest of the words); (None, text) when it names no place."""
+        rooms, _, rest = self.take(text)
+        return rooms, rest
 
     def place(self, text: str) -> list[str] | None:
         """The rooms `text` names when it is ONLY a place ("upstairs", "the theater", "everywhere"); None otherwise."""

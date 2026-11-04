@@ -157,3 +157,13 @@ def test_switching_forwarding_off_from_the_portal_clears_the_queue():
     asyncio.run(hc.once(Hub()))
     hc.emit(room, "heard", text="again")
     assert hc.forward is False and list(hc.queue) == []
+
+
+def test_the_actions_line_says_what_was_asked_and_where_it_plays():
+    from housemem import action_line
+    assert action_line({"tool": "play_music", "args": {"speaker": "upstairs", "genre": "heavy metal", "shuffle": True}}) == "music: heavy metal · upstairs"
+    assert action_line({"tool": "play_music", "args": {"what": "Pink Floyd", "speaker": "here"}}) == "music: Pink Floyd"       # the garbled words of 2026-11-04 showed here
+    assert action_line({"tool": "play_music", "args": {"mode": "discovery", "speaker": "everywhere"}}) == "music: discovery · everywhere"
+    assert action_line({"tool": "speakers", "args": {"what": "music", "place": "upstairs", "play": True}}) == "speakers: upstairs"
+    assert action_line({"tool": "music", "args": {"action": "louder"}}) == "music" and action_line({"tool": "set_timer", "args": {"label": "pasta"}}) == "timer: pasta"
+    assert action_line({"tool": "home_control", "args": {"name": "Desk Lamp"}}) == "home: Desk Lamp"

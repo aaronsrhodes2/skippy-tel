@@ -591,9 +591,8 @@ class Room:
         if self.hlog is not None:
             self._record("command", words=command, tools=[c["tool"] for c in calls], outcome=outcome, reply=reply, seconds=round(time.time() - started, 1))
             self.hlog.actions(self.name, calls)
-        from housemem import ACTIONS                            # noqa: PLC0415
-        tools = [ACTIONS[c["tool"]] + (": " + str(c.get("args", {}).get("name") or c.get("args", {}).get("what") or c.get("args", {}).get("label") or "")).rstrip(": ")
-                 for c in calls if c.get("tool") in ACTIONS]
+        from housemem import DISPLAY, action_line               # noqa: PLC0415
+        tools = [action_line(c) for c in calls if c.get("tool") in DISPLAY]
         if tools:
             self._emit("actions", tools=tools[:8])
         await self.say(reply, follow_up=True, silent=not speak, typed=typed)
@@ -1208,7 +1207,8 @@ MUSIC_TOOLS = [
                                           "or a song, in his words; 'favorites' for his favorites list; 'everything' for the whole library. shuffle=true for "
                                           "'shuffle ...'. queue=true for 'after this', 'queue ...', 'add ... to the queue' (it plays after what plays now, Spotify "
                                           "included). His grammar: mode (discovery / favorites) + filters (genre, playlist, artist, album, song, new) + speaker; "
-                                          "never ask him to confirm, just play it.",
+                                          "where it plays goes in speaker ONLY, never in what, genre or artist ('heavy metal upstairs on the Enclave' is genre=heavy metal, "
+                                          "speaker=upstairs); never ask him to confirm, just play it.",
      "input_schema": {"type": "object", "properties": {"what": {"type": "string", "description": "e.g. 'Pink Floyd', 'Comfortably Numb', 'favorites', 'everything'"},
                                                        "mode": {"type": "string", "enum": ["discovery", "favorites"],
                                                                 "description": "discovery: all his songs, his favorites about one in four, and Spotify suggestions; "

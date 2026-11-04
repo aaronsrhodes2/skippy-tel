@@ -1,7 +1,7 @@
 """Skippy's quick brain for the house: the persona, spoken style, a short memory, and timers as its only tool."""
 from types import SimpleNamespace as NS
 
-from brain import FORGET_AFTER_S, TOOLS, Brain, say_duration
+from brain import FORGET_AFTER_S, TOOLS, UNCLAIM, Brain, say_duration
 from timers import Timers
 
 
@@ -176,3 +176,45 @@ def test_a_tool_call_written_with_a_colon_and_commas_is_still_caught():
     assert m and m.group(1) == "play_music"
     assert {a.group(1): next(g for g in a.groups()[1:] if g is not None) for a in TEXT_ARG.finditer(m.group(2))} == {"what": "everything", "speaker": "everywhere"}
     assert TEXT_CALL.search('[list action="read" list="shopping"]').group(1) == "list"
+
+
+# ── 2026-11-04: the model said it played, moved and turned up the music, and called nothing ─────────────────────────────────────────────────────────
+# "Playing your heavy metal library on the theater's Sony speakers right now." and "Playing ... *turns an imaginary dial* There. Magnificently loud and appropriately
+# chaotic for housekeeping staff." (the radio's log had no tool call for either): the music stayed on the theater's own speakers and the housekeeper upstairs
+# heard it only on the box. A reply that claims music was played, moved or turned, to a request for it, with no music tool run, is asked again.
+def music_brain(*rounds):
+    ran = []
+    tools = [{"name": n, "description": n, "input_schema": {"type": "object", "properties": {}}} for n in ("play_music", "music", "speakers")]
+    b, c, *_ = make(*rounds)
+    b.extra_tools, b.run_extra = tools, lambda name, args: ran.append((name, args)) or f"({name} done)"
+    return b, c, ran
+
+
+def test_a_claim_of_music_with_no_music_tool_run_is_asked_again_and_the_second_try_can_do_it():
+    b, c, ran = music_brain([text("*turns an imaginary dial* There. Magnificently loud and appropriately chaotic for housekeeping staff.")],
+                            [tool("music", action="louder")], [text("Louder, for the maid.")])
+    assert b.reply("Skippy, crank it up for the maid, make the volume louder") == "Louder, for the maid." and ran == [("music", {"action": "louder"})]
+    assert "you called no music tool" in str(c.calls[1]["messages"]) and "tools" in c.calls[1]
+    b, c, ran = music_brain([text("Consider it done. Playing your heavy metal library on the theater's Sony speakers right now.")], [text("I did it, honest.")])
+    assert b.reply("Skippy, put something loud on, play some heavy metal for me") == UNCLAIM and not ran       # still nothing run: he hears that it did not happen
+
+
+def test_chatter_about_music_and_answers_after_a_music_tool_are_left_alone():
+    for heard, said in (("do you like playing music at night", "Playing music at night is fine, monkey."),
+                        ("can you recommend some good heavy metal bands", "Playing it safe: Judas Priest, Iron Maiden, Black Sabbath. Classic songs, all of them."),
+                        ("tell me a joke about a band playing music", "A band walks into a bar, playing music: ouch."),
+                        ("play me a haiku", "Playing along: autumn moon, bright, a beer can sighs, nobody listens.")):
+        b, c, ran = music_brain([text(said)])
+        assert b.reply(heard) == said and len(c.calls) == 1 and not ran, heard
+    b, c, ran = music_brain([tool("play_music", genre="goth")], [text("Playing goth upstairs, as ordered.")])
+    assert b.reply("play something dark for the maid, goth please") == "Playing goth upstairs, as ordered." and len(c.calls) == 2           # a tool ran: not a claim
+
+
+def test_play_it_on_the_upstairs_stereo_runs_the_speakers_tool_before_the_model_answers():
+    b, c, ran = music_brain([text("Upstairs it is. The maid will be thrilled, I'm sure.")])
+    said = b.reply("Play it on the upstairs stereo. The maid is coming over to clean and they like heavy metal")
+    assert ran == [("speakers", {"what": "music", "place": "upstairs", "play": True})] and said.startswith("Upstairs it is")
+    assert "(speakers done)" in str(c.calls[0]["messages"]) and "tools" not in c.calls[0]          # the tool ran first; the model only words the answer
+    b, c, ran = music_brain([text("Heavy metal, upstairs, on the Enclave.")])
+    b.reply("Play heavy metal music upstairs on the enclave")
+    assert ran == [("play_music", {"speaker": "upstairs", "genre": "heavy metal", "shuffle": True})]

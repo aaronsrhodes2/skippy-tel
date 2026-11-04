@@ -276,6 +276,20 @@ one more router output, `enclave`, whose part is a URL instead of a Windows devi
   recently added; genres by family from the files' tags (goth covers gothic rock, deathrock, post-punk ...); playlists are Traktor's
   (collection.nml) or Spotify's, and a Spotify row he owns plays from Bilby. A filter that matches nothing is said in one line and the
   closest plays.
+  **Every place said is taken out of the search words** (2026-11-04: "play heavy metal music upstairs on the enclave" took out only
+  "upstairs", searched the library for "heavy metal on enclave", found nothing and played a random shuffle while Skippy said the library
+  was empty of metal): `brain._take_places` removes each place phrase, with "stereo / speakers" beside it ("the upstairs stereo"); two
+  different places are everywhere; "on the stereo" is where it plays now; "house" alone is a genre. Also dropped: lead-ins ("make sure you",
+  "I want to hear", "can you"), time and "for the maid" tails ("today", "tonight"), and a second sentence that only explains ("The maid is
+  coming over ..."; `brain.lead_clause`). A bare genre ("play heavy metal") needs no "music" after it. `station.clean_what` does the same for
+  a free `what` the model sends ("heavy metal on enclave": place and time out, the place becomes the speaker) after a plain search finds nothing.
+* **"Play it on the upstairs stereo"** (2026-11-04): "it", "this", "that" (or "the music" with move / send / switch ...) plus a place is the
+  `speakers` tool (`brain.speakers_route`), run before the model answers; with play / put and nothing playing, the library starts there
+  (`play` flag, `station.run`). Before this the model heard it, said "Playing ... *turns an imaginary dial*" and called no tool.
+* **A claim with no tool** (2026-11-04): when he asked for music (a command, not "do you like music?") and the reply says it played, moved
+  or turned something but no music tool ran, the model is asked again with the tools (`brain.MUSIC_CLAIMED`, `ASK_AGAIN_MUSIC`); still
+  nothing, and he hears that it did not happen. **To tell what really ran, read `state/radio.log`**: every music tool call the hubs make is
+  there as `[radio] <room> <tool> {args} -> <answer>`; a spoken "Playing ..." with no such line was a claim, not an action.
 * **Announcements upstairs** (`SATELLITE_ANNOUNCE_OUT=enclave`, 2026-11-01): outputs in a place with no pod and no microphone play every
   room's announcements (the morning and bedtime routines, timers, messages typed in the portal's Home chat), never a conversation's
   replies. sync.py never measures them (no mic hears them), so they are never taken for off; they get the one-voice cushion and, when

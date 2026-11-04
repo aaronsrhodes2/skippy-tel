@@ -15,6 +15,20 @@ from pathlib import Path
 ACTIONS = {"home_control": "home", "set_timer": "timer", "cancel_timers": "timer", "music": "music", "play_music": "music",
            "set_alarm": "alarm", "set_reminder": "reminder", "cancel_alarm": "alarm", "list": "list", "announce": "announce"}   # tool -> what it is
 MAX_TEXT = 300
+DISPLAY = {**ACTIONS, "speakers": "speakers"}                  # what the portal's Home chat folds into one line (the house log keeps ACTIONS as they were)
+
+
+def action_line(call: dict) -> str:
+    """One tool call as the Home chat shows it: "music: heavy metal · upstairs" (what he asked for and where it plays), "timer: pasta", "speakers: upstairs".
+    A grammar request has no `what` (genre, artist ... instead), and the garbled words used to be the only trace of what a request became (2026-11-04)."""
+    args = call.get("args") or {}
+    tool = str(call.get("tool") or "")
+    words = args.get("name") or args.get("what") or args.get("label") or args.get("genre") or args.get("artist") or args.get("playlist")         or args.get("album") or args.get("song") or args.get("mode") or ""
+    if tool == "speakers" and words == "music":
+        words = ""                                              # "move the music upstairs": the place says it
+    where = args.get("speaker") or args.get("place") or ""
+    detail = " · ".join(str(x) for x in (words, "" if where in ("here", "stereo") else where) if x)
+    return DISPLAY[tool] + (": " + detail if detail else "")
 
 
 def home_dir(env: dict | None = None) -> Path:

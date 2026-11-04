@@ -89,6 +89,31 @@ def speaker_kinds(env: dict, speaker: str, room: str = "") -> list[str] | None:
     return speaker_out.place_kinds(env, s)
 
 
+_TIME = re.compile(r"\b(?:today|tonight|tomorrow|later|right now|for now|all (?:day|night)(?: long)?|this (?:morning|afternoon|evening)|please)\b")
+_STEREO_WORDS = ("stereo", "the stereo")                        # where it plays now, not a place
+
+
+def clean_what(env: dict, what: str) -> tuple[str, str]:
+    """(`what` without the places and the times in it, the first speaker place's words or ""): the model puts "on the Enclave" or "today" into a free `what`
+    ("heavy metal on enclave": the Captain, 2026-11-04, a search for that found nothing and he was told the library was empty of metal). A place is a place with a
+    speaker (house_layout.json's outputs), and "stereo" is where it plays now: neither is part of a name. Used only after a plain search found nothing."""
+    import house_layout                                         # noqa: PLC0415
+    lay, place, rest = house_layout.default(), "", what.lower()
+    for _ in range(3):
+        rooms, phrase, left = lay.take(rest)
+        if rooms is None or not (lay.outputs(phrase) or phrase in _STEREO_WORDS):
+            break
+        if phrase not in _STEREO_WORDS:
+            place = place or phrase
+        rest = left
+    rest = " ".join(_TIME.sub(" ", rest).split())
+    while True:                                                 # what the place leaves dangling: "heavy metal on", "in the"
+        n = re.sub(r"^(?:on|in|to|through|at|the|for)\s+|\s+(?:on|in|to|through|at|the|for)$", "", rest)
+        if n == rest:
+            return rest, place
+        rest = n
+
+
 async def grammar_queue(args: dict, house, favorites) -> tuple[list[str], str, bool]:
     """mixes.resolve with the radio's sources: the gate's catalog, his favorites, Spotify (liked, suggestions, playlists: the station's client)
     and Traktor's playlists (the DJ's collection.nml, cached in state/dj)."""
@@ -133,9 +158,16 @@ async def find(args: dict, house, favorites) -> tuple[list[str], str, bool, bool
             found = [t for t in found if t not in tired]
         return found, note, mixed, premixed, f"Nothing in his library matches {what!r}."
     found = music_mod.search(await house.media.catalog(), what)
-    if not found and what.strip():                              # not a name: maybe a genre ("polka"); else the closest is the shuffle, said in one line
-        found, note, _ordered = await grammar_queue({**(args or {}), "genre": what, "shuffle": True}, house, favorites)
-        mixed = premixed = True
+    if not found and what.strip():                              # not a name: maybe a place and a time said inside it, maybe a genre ("polka"); else the closest is the shuffle
+        clean, place = clean_what(getattr(house, "env", None) or {}, what)
+        if place and isinstance(args, dict) and not args.get("speaker"):
+            args["speaker"] = place                             # "heavy metal on enclave": it plays there (play_music reads the speaker after this)
+        if clean and clean != what.strip().lower():
+            found = music_mod.search(await house.media.catalog(), clean)
+        if not found:
+            found, note, _ordered = await grammar_queue({**(args or {}), "genre": clean or what, "shuffle": True}, house, favorites)
+            mixed = premixed = True
+        what = clean or what
     return found, note, mixed, premixed, f"Nothing in his library matches {what!r}."
 
 
@@ -285,6 +317,10 @@ async def run(house, name: str, args: dict, room: str = "", favorites=None) -> s
         if not kinds:
             return "I don't know that place: everywhere, downstairs, upstairs, or a room."
         house.move(kinds)
+        if args.get("play") and not house.playing:              # "play it upstairs" with nothing playing: the library, shuffled, there
+            n = await house.shuffle()
+            if n:
+                return f"Nothing was playing, so the library is shuffled: {n} tracks {where_said(house)}." + not_there(house)
         return f"Done: the music plays {where_said(house)} from now on." + not_there(house)
     if name == "music":
         return await music(house, args, room, favorites)

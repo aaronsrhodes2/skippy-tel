@@ -318,3 +318,69 @@ def test_local_first_a_spotify_song_he_owns_plays_from_bilby_and_a_refusal_moves
             await asyncio.sleep(0.01)
         assert p.asked == [S3] and p.played == ["http://x/Bauhaus/In the Flat Field/Dark Entries.mp3"] and box.idx == 1
     asyncio.run(go())
+
+
+# ── 2026-11-04: "Play heavy metal music upstairs on the enclave" searched the library for "heavy metal on enclave" ──────────────────────────────────
+# The grammar took out only the FIRST place phrase, so the second stayed in the search words, nothing matched, the closest (a shuffle of everything) played, and the
+# housekeeper upstairs was told the library "is apparently empty" of metal. Before that, at 08:20 and 08:21, two requests the grammar did not understand reached the
+# model, which said "Playing ..." and "*turns an imaginary dial*" and called no tool: the music never left the theater's own speakers.
+def test_a_request_that_names_two_places_loses_both_from_the_search_words():
+    g = brain.music_grammar
+    metal = {"speaker": "upstairs", "genre": "heavy metal", "shuffle": True}
+    assert g("Play heavy metal music upstairs on the enclave") == metal
+    assert g("play heavy metal music on the enclave upstairs") == metal
+    assert g("play heavy metal upstairs in the living room") == metal
+    assert g("play heavy metal for the maid on the upstairs stereo") == metal
+    assert g("play goth music downstairs on the sony") == {"speaker": "downstairs", "genre": "goth", "shuffle": True}
+    assert g("play goth music upstairs and downstairs")["speaker"] == "everywhere"          # two different places are both
+    assert g("play music on the upstairs stereo") == {"speaker": "upstairs", "what": "everything", "shuffle": True}   # "stereo" was searched for as a name
+    assert g("play goth music on the stereo")["speaker"] == "stereo"                        # where it plays now
+    assert g("play house music") == {"genre": "house", "shuffle": True}                     # "house" alone was "the whole house": everywhere, the whole library
+    assert g("play goth music in the house")["speaker"] == "everywhere"
+    assert g("play stereo love") is None                                                    # a song, not a speaker
+
+
+def test_polite_and_explaining_words_around_a_request_are_not_search_words():
+    g = brain.music_grammar
+    metal = {"genre": "heavy metal", "shuffle": True}
+    assert g("Skippy, make sure you play heavy metal today.") == metal                      # 08:20: not a plain request, so the model heard it, and claimed
+    assert g("I want to hear some heavy metal tonight") == metal and g("go ahead and play heavy metal") == metal
+    assert g("hey skippy, could you please play heavy metal music upstairs") == {**metal, "speaker": "upstairs"}
+    assert g("Play heavy metal music upstairs. The maid is coming over to clean and they like heavy metal") == {**metal, "speaker": "upstairs"}
+    assert g("Play heavy metal. Upstairs.") == {**metal, "speaker": "upstairs"}              # a place said on its own is part of the request
+    assert g("play some music by Mr. Mister") == {"artist": "mr mister"}                    # "Mr." does not end a sentence
+    assert g("Play some music by U.S. Girls") == {"artist": "u s girls"}                    # nor does an initialism: one word after it is no explanation
+    assert g("play jazz") == {"genre": "jazz", "shuffle": True}                             # a genre needs no "music" after it
+    for not_this in ("play Pink Floyd upstairs", "play it", "what is playing upstairs", "do you like playing music"):
+        assert g(not_this) is None, not_this
+
+
+def test_play_it_on_the_upstairs_stereo_moves_the_music_it_is_not_a_search_for_a_song_called_it():
+    s = brain.speakers_route
+    for said in ("Play it on the upstairs stereo. The maid is coming over to clean and they like heavy metal", "play it upstairs", "put it on the enclave",
+                 "put the music on the enclave", "Skippy, play it in the living room please"):
+        assert s(said) == {"what": "music", "place": "upstairs", "play": True}, said         # `play`: with nothing playing, the library starts there
+    assert s("move the music to the enclave") == {"what": "music", "place": "upstairs"}
+    assert s("send it everywhere") == {"what": "music", "place": "everywhere"} and s("switch to downstairs") == {"what": "music", "place": "downstairs"}
+    assert s("play it in the theater and upstairs") == {"what": "music", "place": "everywhere", "play": True}
+    for not_this in ("play it", "play it back", "play goth music upstairs", "play the music upstairs", "turn it up upstairs", "play it upstairs, then turn it up",
+                     "play Pink Floyd upstairs", "put the lights on upstairs"):
+        assert s(not_this) is None, not_this
+
+
+def test_the_hub_moves_the_music_and_a_place_the_model_left_in_what_still_plays_there():
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    room, house = Room(), House()
+    _, run = hub.music_tools(lambda: room, loop, favorites=None, stereo=lambda: house)
+    house.playing = True
+    assert run("speakers", {"what": "music", "place": "upstairs"}) .startswith("Done: the music plays upstairs") and house.moved == {"enclave"}
+    # the model's own call, with the place inside the words (what the grammar did to the Captain's sentence): cleaned after a plain search finds nothing
+    house.moved = None
+    said = run("play_music", {"what": "darkwave on the enclave"})
+    assert said.startswith("Playing 3 tracks") and house.moved == {"enclave"} and "enclave" not in said
+    said = run("play_music", {"what": "darkwave today", "speaker": "downstairs"})
+    assert said.startswith("Playing 3 tracks") and house.moved == {"hdmi"}                   # a speaker it was given wins; "today" is no part of a name
+    said = run("play_music", {"what": "polka upstairs on the enclave"})
+    assert said.startswith("Nothing polka in his library, so here is the closest.") and house.moved == {"enclave"}
+    loop.call_soon_threadsafe(loop.stop)
