@@ -7,7 +7,7 @@ FROM python:3.12-slim
 # sigma-ground at a pinned commit, from the house's own git: skippy-core's deployer (core/cd/cd.py, vendor()) puts it in
 # .vendor/sigma-ground/ of the build context (`git archive` of the pin). The core library is pure Python; the MCP layer's
 # dependencies are in requirements.txt.
-ARG SIGMA_GROUND_REF=5ff1e7e53a3ce3bc43b60d377af9897f8a1e43a9
+ARG SIGMA_GROUND_REF=7d16a7a2ed802d8156a0051f570ab620d3005193
 COPY .vendor/sigma-ground/ /opt/sigma-ground/
 
 WORKDIR /app
