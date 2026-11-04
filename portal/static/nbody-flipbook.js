@@ -236,6 +236,21 @@
       });
     } };
   }
+  function skyWidePlate(W) {                                                // the whole sky: every public observation of the nightly-scored bodies against our frozen predictions, by class and by lead
+    var classes = Object.keys(W.by_class), leads = Object.keys(W.by_lead);
+    return { kind: "html", title: "The whole sky", text: W.n_bodies.toLocaleString() + " bodies, " + W.n_obs.toLocaleString() + " Minor Planet Center observations scored against our own prediction from the MPC orbit of the day each body was first seen, never refreshed; " + W.n_forward.toLocaleString() + " of them were observed after that day, so they are forecasts in the strict sense.", html: function () {
+      var d = el("div");
+      d.append(el("p", null, "The daily scoreboard above follows a few dozen bodies with JPL beside them. This table is the rest of the sky: every night the pipeline reads the Minor Planet Center's orbit update, freezes a start for any body it has not seen, fetches the observations of the near-Earth bodies touched that day and a rotating sample of the others, and scores them all with the same engine in one pass. A miss at lead zero or less is the orbit fit's own residual; a miss at positive lead is ours ahead of the telescopes."));
+      var t = el("table", "skywide"), h = el("tr"); ["class", "bodies", "observations", "median (all)", "median (forward)"].forEach(function (x) { h.append(el("th", null, x)); }); t.append(h);
+      classes.forEach(function (k) { var v = W.by_class[k], r = el("tr"); [k, v.bodies.toLocaleString(), v.n_obs.toLocaleString(), v.median_arcsec.toFixed(3) + "″", v.median_forward_arcsec == null ? "—" : v.median_forward_arcsec.toFixed(3) + "″"].forEach(function (x) { r.append(el("td", null, x)); }); t.append(r); });
+      d.append(t);
+      var t2 = el("table", "skywide"), h2 = el("tr"); ["lead", "observations", "median", "90th percentile"].forEach(function (x) { h2.append(el("th", null, x)); }); t2.append(h2);
+      leads.forEach(function (k) { var v = W.by_lead[k], r = el("tr"); [k, v.n.toLocaleString(), v.median_arcsec.toFixed(3) + "″", v.p90_arcsec.toFixed(3) + "″"].forEach(function (x) { r.append(el("td", null, x)); }); t2.append(r); });
+      d.append(t2);
+      d.append(el("p", "dim", "As of " + fmtDate(W.generated_utc) + ", " + W.nights.length + " night" + (W.nights.length === 1 ? "" : "s") + ". Each night's forecast for the next seven midnights is sealed and hashed before the observations exist (sigma-ground fixtures/mpc_live/sky_seal_log.jsonl)."));
+      return d;
+    } };
+  }
   function skyPlates() {
     var S = B && B.sky; if (!S || !S.bodies || !S.bodies.length) return [];
     var P = [], eros = S.bodies.filter(function (b) { return b.number === 433; })[0];
@@ -249,6 +264,7 @@
     if (eros) P.push(skyBodyPlate(eros));
     if (S.eros_fit) P.push(erosFitPlate(S.eros_fit));
     P.push(skySetPlate(S));
+    if (B.sky_wide && B.sky_wide.by_class && Object.keys(B.sky_wide.by_class).length) P.push(skyWidePlate(B.sky_wide));
     return P;
   }
   function blanketPlates() {

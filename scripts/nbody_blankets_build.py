@@ -95,8 +95,10 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=OUT)
     ap.add_argument("--sky", type=Path, default=SIGMA_FIX / "mpc_live" / "scoreboard_portal.json", help="sigma-ground's daily MPC scoreboard (C27): ours and JPL against fresh telescope positions")
     ap.add_argument("--eros-fit", type=Path, default=SIGMA_FIX / "small_body_starts" / "own_fit_433.json", help="sigma-ground's own Eros orbit solution and its out-of-sample test (C28)")
+    ap.add_argument("--sky-wide", type=Path, default=SIGMA_FIX / "mpc_live" / "sky_report.json", help="sigma-ground's whole-sky report (C36): every scored observation by class and lead; omitted when absent")
     a = ap.parse_args()
     sky = sky_section(a.sky, a.eros_fit)
+    sky_wide = json.loads(a.sky_wide.read_text(encoding="utf-8")) if a.sky_wide and a.sky_wide.exists() else None
     runs = [r for p in a.sources for r in load_runs(p)]
     rel = releases()
     gm = masses()
@@ -220,7 +222,7 @@ def main() -> None:
                      "words": WORDS, "issue_years": [round(rel[v], 2) for v in vintages], "vintages": vintages, "targets": targets, "bodies": bodies,
                      "runs": len(ours_runs), "kernel_rows": len(runs) - len(ours_runs), "built_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                      "how": "cell = median over the runs of that ephemeris whose lead lands on that target year; empty before the release; band = DE440 against DE442 at the target"},
-            "blankets": blankets, "composite": composite, "composite_body": composite_body, "by_lead": by_lead, "sky": sky}
+            "blankets": blankets, "composite": composite, "composite_body": composite_body, "by_lead": by_lead, "sky": sky, "sky_wide": sky_wide}
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")
     print(f"{a.out} ({a.out.stat().st_size // 1024} KB): {len(vintages)} ephemerides x {len(targets)} target years, {len(bodies)} bodies, {len(runs)} runs, truth {data['meta']['truth']}")
