@@ -8,6 +8,7 @@ FLATPAK_ID=org.example.NotARealApp
 WATCH_S=0.3
 HANG_S=3
 eval "$(sed -n '/^new_lines() {/p;/^watch() {/,/^}/p' "$RUN")"
+logger() { :; }                                                    # watch() tells the journal; a test must not (a run on skippy-core itself would)
 bad=0
 ok() { if [[ "$2" == "$3" ]]; then echo "ok    $1"; else echo "FAIL  $1 (wanted $2, got $3)"; bad=1; fi; }
 state() { if kill -0 "$1" 2>/dev/null; then echo alive; else echo dead; fi; }
