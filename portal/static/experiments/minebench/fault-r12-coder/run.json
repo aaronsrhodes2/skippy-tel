@@ -1,0 +1,33 @@
+{
+ "n": 37,
+ "title": "Round 12 (vs Haiku's round 4): a lump of red blobs",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8) as a vanilla agent (Claude Code with purple's system prompt, an empty setup, effort high, a 131K window) plus purple's generic help: the eyes, the stop gate's work check (MineBench's runtime as the checker, the renderer as the viewer, an 80K output-token budget) and its fix-the-worst-fault loop (Core's big model reviews each new version's picture against the task and names the worst fault; the coder is sent back to fix it until none is left, five sends at most)",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 194124,
+ "minutes": 58,
+ "size": "241 x 55 x 76",
+ "verdict": "Haiku won, blind. The coder's build is a mass of red rounded blobs with white roofs and a yellow bar, hard to read as a train; Haiku's is a clear train with coaches and smoke beside a river. Three fault sends (thin and schematic, then small solid wheels twice).",
+ "stats": {
+  "started": "2026-11-04T05:09:10.693Z",
+  "minutes": 58,
+  "tokens": {
+   "input": 159108,
+   "cache_read": 7222331,
+   "output": 153469,
+   "total": 7534908
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 159108,
+     "cache_read": 7222331,
+     "output": 153469
+    }
+   }
+  ]
+ },
+ "series": "fault-loop",
+ "request": "experiments/minebench/fault-r12-coder/request.txt"
+}
