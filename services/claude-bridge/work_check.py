@@ -6,7 +6,8 @@ A project opts in with `.skippy-check.json` at its root:
 
     {"checks": [{"files": "build.json",                       # a glob, relative to the root
                  "check": "node tools/check.mjs {file}",      # exit 0 = good; anything else is the agent's to fix, output included
-                 "show":  "python tools/render.py {file} {png}"}],   # optional: draws the file as a picture
+                 "show":  "python tools/render.py {file} {png}",     # optional: draws the file as a picture
+                 "review": "python tools/render.py {file} {png} --big"}],   # optional: the drawing the reviewer gets (else show's)
      "budget": 60000}                                         # optional: output tokens a run is expected to spend on such work
 
 Only files matching a glob that this run changed (written after it started) count, so a run that never touched them is never
@@ -168,8 +169,13 @@ def unfinished(clone: str, started: float, memo: dict, transcript: str = "", env
                     continue                        # its sends are spent: a review now would change nothing
                 if task:
                     import eyes
+                    look = png
+                    if c.get("review"):                 # a drawing made for the reviewer (one big view): it must see the work, not a thumbnail
+                        big = png[:-4] + "-review.png"
+                        if _run(c["review"], clone, file=rel, png=big)[0] == 0 and os.path.isfile(big):
+                            look = big
                     try:
-                        seen, worst = eyes.worst_fault(url, key, png, task, faults.get(rel, ""), post=post, drawn=rel, reference=ref)
+                        seen, worst = eyes.worst_fault(url, key, look, task, faults.get(rel, ""), post=post, drawn=rel, reference=ref)
                     except Exception:                                # noqa: BLE001 — Core couldn't review: the plain look below
                         seen = worst = None
                     if seen is not None:
@@ -179,7 +185,7 @@ def unfinished(clone: str, started: float, memo: dict, transcript: str = "", env
                             continue                # no major fault left in this version
                         faults[rel] = worst
                         against = f"against your task and the reference picture ({ref['image']})" if ref else "against your task"
-                        why = send("fault", f"Skippy Core's big model looked at {rel} as it is now ({png}, no need to open it) "
+                        why = send("fault", f"Skippy Core's big model looked at {rel} as it is now ({look}, no need to open it) "
                                             f"{against}. Its review:\n\n{seen}\n\nThe worst fault: {worst}\n"
                                             "Fix that one first, then stop again: the new version is drawn and reviewed the same "
                                             "way until no major fault is left.")

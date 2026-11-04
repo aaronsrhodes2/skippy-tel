@@ -58,17 +58,21 @@ FAULT_ASK = ("\nEnd with one last line, exactly `WORST FAULT: ` and then the sin
 DRAWN_AS = ("This picture is the builder's {file} as the project's own viewer draws it. The file itself is checked elsewhere, so judge "
             "only the work the picture shows, never whether the picture proves the file or its format. The drawing itself (its views, "
             "angles, lighting, scale, layout) is fixed and is never a fault.\n\n")
-REFERENCE_SAID = ("There are two pictures. The FIRST is a reference picture of what the task asks for, found before the work began; "
-                  "the SECOND is the work. Everything below about \"the picture\" means the second one. Focus on the reference: the work "
-                  "must read, at a glance, as the same kind of thing the reference shows, in its own medium (its material, style and "
-                  "level of detail are never faults). What makes the reference recognisable:\n<reference>\n{sheet}\n</reference>\n"
+REFERENCE_SAID = ("There are two pictures. The FIRST is the reference: examples of the kind of thing the task asks for, side by side, "
+                  "found before the work began. The SECOND is the work, possibly drawn from several views at once (that layout is the viewer's, "
+                  "never a fault). Everything below about \"the picture\" means the second one. Focus on the reference, as the kind it "
+                  "shows, not as the one to copy: the work must read, at a glance, as the same KIND of thing they all are. Its medium, style, colours "
+                  "and level of detail are its own, and detail finer than the work's own scale is never a fault; so is a setting around it (a landscape, a station), the builder's choice, unless it hides the thing or makes it hard to find. What makes any example "
+                  "of the kind recognisable:\n<reference>\n{sheet}\n</reference>\n"
                   "Start your review with that list, item by item: for each, whether the work shows it (present, wrong, or missing), "
                   "looking at the reference again for each one. Then say whether someone shown both pictures side by side would call "
                   "them the same kind of thing, and why.\n\n")
-FAULT_ASK_REF = ("\nEnd with one last line, exactly `WORST FAULT: ` and then the single biggest difference between the work and the "
-                 "reference (a listed item missing or wrong, a part out of proportion, the thing lost in its own scene), in one sentence "
-                 "the builder can act on, or `WORST FAULT: none` only when every item on the list is present and right and someone shown "
-                 "both pictures would call them the same kind of thing at a glance.")
+FAULT_ASK_REF = ("\nEnd with two last lines. First `RECOGNISED: ` and a whole number from 1 to 10: how surely someone shown only the "
+                 "work, who didn't know the task, would name it as the reference's kind of thing at a glance (10: at once and without "
+                 "doubt; 7: after a moment; 4: only once told; 1: never). Then `WORST FAULT: ` and the single biggest way the work fails "
+                 "to read as that kind of thing (a listed item missing or wrong, a part far out of proportion, the thing hard to find in "
+                 "its own scene), in one sentence the builder can act on, or `WORST FAULT: none`.")
+RECOGNISED_PASS = 8                  # a review scoring the work this recognisable ends the loop, whatever detail it would still add
 FIXED_ASK = "The builder was told to fix this fault last time: {fault}\nSay first, in one line, whether this picture shows it fixed.\n\n"
 GATE_SAID = ("Stop hook feedback", "<local-command", "Caveat:")   # what the harness itself writes as a user turn: never the task
 TASK_CHARS = 4000
@@ -167,6 +171,9 @@ def worst_fault(url: str, key: str, path: str, task: str, previous: str = "", po
     if not named:
         raise RuntimeError("the review named no worst fault")
     worst = named[-1].strip().strip("*`").strip()
+    score = re.findall(r"RECOGNISED:\**\s*(\d+)", seen)
+    if said and score and int(score[-1]) >= RECOGNISED_PASS:
+        return seen, ""                  # a stranger would name it: against a reference the 35B always finds one more detail to add
     return seen, "" if worst.lower().rstrip(".").strip() in ("none", "") else worst
 
 
