@@ -20,6 +20,7 @@ so a second copy cannot run. The portal side is portal/starter.py; docs/portal/r
 """
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import socket
@@ -66,6 +67,8 @@ TASKLIST_TIMEOUT_S = 90          # `tasklist` took 51 s on 2026-11-02 (1,093 pro
 VBCABLE_PS = "(Get-CimInstance Win32_SoundDevice | Where-Object { $_.Name -match 'VB-Audio|CABLE' } | Measure-Object).Count"
 VBCABLE_EVERY_S = 60
 LOCK_PORT = 9339
+NVML_DLL = os.environ.get("NVML_DLL", r"C:\Windows\System32\nvml.dll")     # the NVIDIA driver puts it there
+NVML_RETRY_S = 300               # after NVML fails: how long before it is opened again (opening it is itself a ~150 ms GPU stall: never every poll)
 VAULTS = ("D:/Aaron/development/.env", "G:/My Drive/vault/.env")
 # skippy-pc's own UPS (a CyberPower on USB, which Windows sees as a battery): after this long on battery the starter stops the stack
 # and shuts Windows down, leaving the UPS's runtime to skippy-core and the cameras. skippy-core wakes it when the power is back
@@ -149,9 +152,70 @@ def toolhelp_images() -> set[str] | None:
         return None
 
 
+class _NvmlMemory(ctypes.Structure):                               # nvmlMemory_t, bytes
+    _fields_ = [("total", ctypes.c_ulonglong), ("free", ctypes.c_ulonglong), ("used", ctypes.c_ulonglong)]
+
+
+class _NvmlUtilization(ctypes.Structure):                         # nvmlUtilization_t, percent
+    _fields_ = [("gpu", ctypes.c_uint), ("memory", ctypes.c_uint)]
+
+
+class Nvml:
+    """The card's memory and busy share, asked of NVML INSIDE this process: nvml.dll loaded and initialised once, after which a query is a function
+    call (0.1 ms, measured 2026-11-05). The starter used to run `nvidia-smi` on every poll: each call took 0.5-0.9 s and stalled the GPU for over
+    100 ms, Sunshine's NvEnc "encode wait timeout" followed 20 of 23 of them by 0.1-0.2 s, and Sunshine tore its encoder down and built it again
+    (the bedroom TV froze ~1.5 s, a game on this PC hitched) every ~12 s. So nothing here, or anywhere on a timer, runs nvidia-smi.
+    read() is None where the card can't be asked (not Windows, no driver, a lost GPU); a failure drops the session and it is opened again only after
+    NVML_RETRY_S, because opening it stalls the GPU too and a card that keeps failing must not bring the hitch back at every poll."""
+
+    def __init__(self, dll: str = NVML_DLL, loader=None, clock=time.monotonic):
+        self.dll, self._load = dll, loader or getattr(ctypes, "WinDLL", None)          # WinDLL exists on Windows only
+        self._lib, self._handle = None, None
+        self._clock, self._retry_at = clock, -1e9
+
+    def _open(self) -> bool:
+        if self._handle is not None:
+            return True
+        if self._load is None or self._clock() < self._retry_at:
+            return False
+        try:
+            lib = self._load(self.dll)
+            if lib.nvmlInit_v2() == 0:
+                handle = ctypes.c_void_p()
+                if lib.nvmlDeviceGetHandleByIndex_v2(0, ctypes.pointer(handle)) == 0:
+                    self._lib, self._handle = lib, handle
+                    return True
+                lib.nvmlShutdown()
+        except (OSError, AttributeError):                          # no nvml.dll (no NVIDIA driver), or one without these functions
+            pass
+        self._retry_at = self._clock() + NVML_RETRY_S
+        return False
+
+    def close(self) -> None:
+        lib, self._lib, self._handle = self._lib, None, None
+        try:
+            if lib is not None:
+                lib.nvmlShutdown()
+        except (OSError, AttributeError):
+            pass
+
+    def read(self) -> tuple[float, float, float] | None:
+        """(total MiB, used MiB, busy %) of the first card, or None."""
+        if not self._open():
+            return None
+        mem, util = _NvmlMemory(), _NvmlUtilization()
+        if self._lib.nvmlDeviceGetMemoryInfo(self._handle, ctypes.pointer(mem)) != 0 or self._lib.nvmlDeviceGetUtilizationRates(self._handle, ctypes.pointer(util)) != 0:
+            self.close()
+            self._retry_at = self._clock() + NVML_RETRY_S
+            return None
+        return mem.total / 1048576, mem.used / 1048576, float(util.gpu)
+
+
 class Starter:
-    def __init__(self, run=run, http=http, spawn=None, sleep=time.sleep, clock=time.monotonic, token: str = "", root: Path = ROOT, say=say, now=datetime.now, state_file=None):
+    def __init__(self, run=run, http=http, spawn=None, sleep=time.sleep, clock=time.monotonic, token: str = "", root: Path = ROOT, say=say, now=datetime.now, state_file=None,
+                 gpu_read=None):
         self.run, self.http, self.sleep, self.clock, self.token, self.root, self.say, self.now = run, http, sleep, clock, token, root, say, now
+        self.gpu_read = gpu_read or Nvml().read
         self.state_file = Path(state_file) if state_file else root / "state" / "starter.json"
         self.spawn = spawn or self._spawn
         self.openaudible_probe = self.openaudible_web
@@ -365,15 +429,14 @@ class Starter:
         return False, "OpenAudible was started but its web server is not answering (Preferences > Web Server must be on)."
 
     def gpu(self) -> dict:
-        """skippy-pc's card, from nvidia-smi: how much of its memory is free and how busy it is (the portal starts a patient job, a
-        picture or a song, only when it is mostly free: portal/patient.py). Empty when there is no nvidia-smi or it doesn't answer."""
-        rc, out = self.run(["nvidia-smi", "--query-gpu=memory.total,memory.used,utilization.gpu", "--format=csv,noheader,nounits"], 15)
-        try:
-            total, used, util = (float(x) for x in out.splitlines()[0].split(","))
-        except (ValueError, IndexError):
+        """skippy-pc's card: how much of its memory is free and how busy it is (the portal starts a patient job, a picture or a song, only
+        when it is mostly free: portal/patient.py). Asked of NVML inside this process (Nvml), NEVER by running nvidia-smi, which stalls the GPU
+        for over 100 ms a call: Sunshine rebuilt its encoder after every poll, so the TV and games stuttered every ~12 s (2026-11-05).
+        Empty when there is no card or NVML doesn't answer."""
+        got = self.gpu_read()
+        if not got or got[0] <= 0:
             return {}
-        if rc != 0 or total <= 0:
-            return {}
+        total, used, util = got
         return {"gpu_free_pct": int(round(100 * (total - used) / total)), "gpu_util_pct": int(round(util))}
 
     def ups(self) -> dict:

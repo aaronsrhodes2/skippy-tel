@@ -34,6 +34,7 @@ class World:
         self.t = [0.0]
         self.procs, self.vb = ["Spotify.exe"], "1"                    # the desktop apps running, and whether VB-Cable is installed
         self.oa_running, self.oa_web, self.oa_web_on_start = False, False, True      # OpenAudible: the app, its web server
+        self.gpu = None                                                             # NVML's (total MiB, used MiB, busy %): no card until a test gives one
 
     def run(self, cmd, timeout=120, cwd=None, env=None):
         self.cmds.append(cmd)
@@ -110,7 +111,7 @@ def make(state_file=None, **kw):
     w = World(**kw)
     state_file = state_file or Path(tempfile.mkdtemp()) / "starter.json"
     s = ss.Starter(run=w.run, http=w.http, spawn=w.spawn, sleep=w.sleep, clock=lambda: w.t[0], token="home-token", root=Path("/repo"), say=lambda *_: None,
-                   now=lambda: NOW[0], state_file=state_file)
+                   now=lambda: NOW[0], state_file=state_file, gpu_read=lambda: w.gpu)
     s.state_file = state_file
     s.openaudible_probe = lambda: w.oa_web
     return s, w
@@ -203,7 +204,7 @@ def test_garbage_commands_are_answered_and_nothing_runs():
     s, w = make()
     w.pending_commands = [{"id": "aaaa1111", "op": "rm -rf /"}, {"id": "bbbb2222"}, "nope", {"op": "start"}, {"id": 5, "op": "start"}]
     s.poll_once(threaded=False)
-    assert w.cmds == [c for c in w.cmds if (c[0] == "docker" and c[1] == "ps") or c[0] in ("nvidia-smi", "tasklist") or (c[0] == "powershell.exe" and ss.VBCABLE_PS in c)]   # only the status looks, no operation
+    assert w.cmds == [c for c in w.cmds if (c[0] == "docker" and c[1] == "ps") or c[0] == "tasklist" or (c[0] == "powershell.exe" and ss.VBCABLE_PS in c)]   # only the status looks, no operation
     s.poll_once(threaded=False)
     assert {r["id"]: r["summary"] for r in w.posts[1][0]["results"]} == {"aaaa1111": "I do not do that.", "bbbb2222": "I do not do that."}
 
@@ -377,21 +378,97 @@ def test_a_hung_docker_gets_the_clean_restart_by_itself_after_two_minutes_but_no
     assert s2.watch_docker() is False and s2.watch_docker() is False and not w2.docker
 
 
-def test_the_status_carries_skippy_pcs_gpu_for_the_patient_queue_and_nothing_when_there_is_no_nvidia_smi():
+def test_the_status_carries_skippy_pcs_gpu_for_the_patient_queue_and_nothing_when_there_is_no_card():
     s, w = make()
-    real = w.run
-
-    def run(cmd, timeout=120, cwd=None, env=None):
-        if cmd[0] == "nvidia-smi":
-            return 0, "16376, 12780, 86"
-        return real(cmd, timeout, cwd, env)
-    w.run = run
-    s.run = run
+    assert "gpu_free_pct" not in s.status()                                  # no card, or NVML silent
+    w.gpu = (16376.0, 12780.0, 86.0)
     st = s.status()
     assert st["gpu_free_pct"] == 22 and st["gpu_util_pct"] == 86
-    w.run = lambda cmd, timeout=120, cwd=None, env=None: (127, "not found") if cmd[0] == "nvidia-smi" else real(cmd, timeout, cwd, env)
-    s.run = w.run
+    w.gpu = (0.0, 0.0, 0.0)
     assert "gpu_free_pct" not in s.status()
+    w.gpu = None
+    assert "gpu_free_pct" not in s.status()
+
+
+def test_the_starter_never_runs_nvidia_smi():
+    """Each nvidia-smi call took 0.5-0.9 s and stalled the GPU for over 100 ms: Sunshine's NvEnc timed out 0.1-0.2 s after 20 of 23 of them and Sunshine rebuilt
+    its encoder, so every poll froze the bedroom TV ~1.5 s and hitched a game on this PC (2026-11-05, the Captain: "a stutter every 10 seconds or so").
+    The card is asked through NVML inside this process (Nvml), so no command names it, whatever the poll does."""
+    s, w = make()
+    w.gpu = (16376.0, 4000.0, 3.0)
+    for _ in range(3):
+        s.poll_once(threaded=False)
+    assert s.status()["gpu_free_pct"] == 76
+    assert not [c for c in w.cmds if "nvidia-smi" in " ".join(c).lower()]
+    assert '"nvidia-smi"' not in Path(ss.__file__).read_text(encoding="utf-8")        # nor a direct subprocess call, which w.cmds cannot see
+
+
+class FakeNvml:
+    """nvml.dll as ctypes calls it: every call is counted, and the answers can be spoilt."""
+
+    def __init__(self, total_mib=16376, used_mib=12780, busy=86):
+        self.total, self.used, self.busy = total_mib << 20, used_mib << 20, busy
+        self.calls, self.init_rc, self.query_rc = [], 0, 0
+
+    def nvmlInit_v2(self):
+        self.calls.append("init")
+        return self.init_rc
+
+    def nvmlDeviceGetHandleByIndex_v2(self, index, out):
+        out.contents.value = 4242
+        return 0
+
+    def nvmlDeviceGetMemoryInfo(self, handle, out):
+        self.calls.append("memory")
+        out.contents.total, out.contents.used, out.contents.free = self.total, self.used, self.total - self.used
+        return self.query_rc
+
+    def nvmlDeviceGetUtilizationRates(self, handle, out):
+        out.contents.gpu = self.busy
+        return self.query_rc
+
+    def nvmlShutdown(self):
+        self.calls.append("shutdown")
+        return 0
+
+
+def test_nvml_is_opened_once_and_every_read_after_that_is_a_function_call():
+    lib = FakeNvml()
+    n = ss.Nvml(loader=lambda path: lib)
+    assert n.read() == (16376.0, 12780.0, 86.0)
+    assert n.read() == (16376.0, 12780.0, 86.0)
+    assert lib.calls.count("init") == 1 and lib.calls.count("memory") == 2
+
+
+def test_nvml_with_no_driver_says_nothing_and_opens_when_the_driver_comes_up():
+    def no_dll(path):
+        raise OSError("no nvml.dll")
+    assert ss.Nvml(loader=no_dll).read() is None
+    lib, t = FakeNvml(), [0.0]
+    lib.init_rc = 9                                                           # NVML_ERROR_DRIVER_NOT_LOADED
+    n = ss.Nvml(loader=lambda path: lib, clock=lambda: t[0])
+    assert n.read() is None and n.read() is None
+    assert lib.calls.count("init") == 1                                       # opening NVML stalls the GPU: not again at the next poll
+    lib.init_rc = 0
+    t[0] += ss.NVML_RETRY_S - 1
+    assert n.read() is None and lib.calls.count("init") == 1
+    t[0] += 2
+    assert n.read() == (16376.0, 12780.0, 86.0)
+
+
+def test_a_failed_nvml_query_drops_the_session_and_it_is_opened_again_only_after_the_retry_time():
+    lib, t = FakeNvml(), [0.0]
+    n = ss.Nvml(loader=lambda path: lib, clock=lambda: t[0])
+    assert n.read() is not None
+    lib.query_rc = 15                                                         # NVML_ERROR_GPU_IS_LOST
+    assert n.read() is None and "shutdown" in lib.calls
+    lib.query_rc = 0
+    for _ in range(5):                                                        # a card that keeps failing must not stall the GPU at every poll
+        t[0] += ss.POLL_S
+        assert n.read() is None
+    assert lib.calls.count("init") == 1
+    t[0] += ss.NVML_RETRY_S
+    assert n.read() == (16376.0, 12780.0, 86.0) and lib.calls.count("init") == 2
 
 
 # ── skippy-pc's own UPS ──
