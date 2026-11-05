@@ -628,27 +628,170 @@
    *  Bilby, a crossfade of `mix.xfade` seconds), "mix" (Bilby into Bilby, beat-matched, while DJ mode is on), else "cut". */
   const STEREO_ID = "skippyroom-stereo";
   const isSpotifyUri = t => typeof t === "string" && /^spotify:/.test(t);
+  /** An audiobook in a queue is an item named `book:<id>` (the stereo's stream plays it like a song; its title comes with `titles`). It is never a file
+   *  this browser could play. `srcOf` says which of the three a queue item is. */
+  const isBookItem = t => typeof t === "string" && /^book:/.test(t);
+  const srcOf = path => (isSpotifyUri(path) ? "spotify" : isBookItem(path) ? "book" : "library");
+  const KINDS = ["song", "spotify", "book"];
+  /** What the current item of a device's queue is: "song", "spotify" or "book" ("" when nothing is). The stereo says it (`kind`); an older radio does not,
+   *  so it is read from the track (a Spotify URI) or from the queue item the stream is at (`book:<id>`; a book leaves `track` empty). */
+  function kindOf(state) {
+    const s = state || {};
+    if (KINDS.includes(s.kind)) return s.kind;
+    const q = Array.isArray(s.queue) ? s.queue : [], at = Number.isInteger(s.idx) && s.idx >= 0 && s.idx < q.length ? s.idx : 0;
+    const cur = s.track || q[at] || "";
+    return !cur ? "" : srcOf(cur) === "library" ? "song" : srcOf(cur);
+  }
+  /** Does this device have something to offer another one (a song to pick up, a Spotify song or a book to be a remote for)? A pod reading a book
+   *  on its own has no queue item and says nothing here: only the stereo, whose stream a book is part of, does. */
+  const offers = state => !!(state && (state.track || kindOf(state) === "book"));
+  /** "Play here" takes up another device's queue and place. Spotify and audiobooks play on the house stereo and nowhere else: why not, or "". */
+  const HERE_SPOTIFY = "That's Spotify: it plays on the house stereo, not in the browser.";
+  const HERE_BOOK = "That's an audiobook: it plays on the house stereo, not in the browser.";
+  function hereRefusal(state) {
+    const s = state || {}, q = Array.isArray(s.queue) ? s.queue : [], at = Number.isInteger(s.idx) && s.idx >= 0 && s.idx < q.length ? s.idx : 0;
+    const cur = s.track || q[at] || "";
+    if (s.kind === "spotify" || isSpotifyUri(cur)) return HERE_SPOTIFY;
+    if (s.kind === "book" || isBookItem(cur)) return HERE_BOOK;
+    return "";
+  }
+  /** What "Play here" does with another device's state: the songs of its queue this library has, in order (a Spotify or `book:<id>` item is no file of ours and
+   *  drops out, so neither is ever queued for the browser), and where in them its current song is; or `no`, the sentence for the toast, when it cannot be taken up
+   *  at all. `index(path)` is a track's place in this library, or undefined. */
+  function pickUp(state, index) {
+    const no = hereRefusal(state);
+    if (no) return { no };
+    const s = state || {}, items = (Array.isArray(s.queue) ? s.queue : []).map(p => index(p)).filter(i => i !== undefined), at = items.indexOf(index(s.track));
+    return at < 0 ? { no: "That song isn't in the library any more." } : { items, at };
+  }
   function stereoView(state, lookup) {
-    const s = state || {}, q = Array.isArray(s.queue) && s.queue.length ? s.queue : (s.track ? [s.track] : []);
+    const s = state || {}, kind = kindOf(s), book = s.book && typeof s.book === "object" && typeof s.book.id === "string" ? s.book : null;
+    let q = Array.isArray(s.queue) && s.queue.length ? s.queue : (s.track ? [s.track] : []);
+    if (!q.length && kind === "book" && book) q = ["book:" + book.id];            // a book the stream is playing with no queue sent
     const mix = { on: !!(s.mix && s.mix.on), xfade: Math.max(0, Number(s.mix && s.mix.xfade) || 0) };
     const names = s.titles && typeof s.titles === "object" ? s.titles : {};
     const idx = Number.isInteger(s.idx) && s.idx >= 0 && s.idx < q.length ? s.idx : Math.max(0, q.indexOf(s.track));
     const items = q.map((path, i) => {
-      const spot = isSpotifyUri(path), n = Array.isArray(names[path]) ? names[path] : null, l = !spot && lookup ? lookup(path) : null;
+      const src = srcOf(path), n = Array.isArray(names[path]) ? names[path] : null, l = src === "library" && lookup ? lookup(path) : null;
       let title = i === idx && s.title ? s.title : n ? n[0] : l ? l.t : "", artist = i === idx && s.artist ? s.artist : n ? n[1] || "" : l ? l.a || "" : "";
-      if (!title) title = spot ? "Spotify" : String(path).replace(/\.\w+$/, "").split("/").pop();
+      if (!title && i === idx && src === "book" && book) title = book.title || "";
+      if (!title) title = src === "spotify" ? "Spotify" : src === "book" ? "Audiobook" : String(path).replace(/\.\w+$/, "").split("/").pop();
       let trans = "";
       if (i > 0) {
-        const ps = isSpotifyUri(q[i - 1]);
-        trans = ps && !spot && mix.xfade > 0 ? "fade" : !ps && !spot && mix.on ? "mix" : "cut";
+        const prev = srcOf(q[i - 1]);       // a fade is Spotify into Bilby, a mix is Bilby into Bilby; an audiobook is never mixed with anything
+        trans = prev === "spotify" && src === "library" && mix.xfade > 0 ? "fade" : prev === "library" && src === "library" && mix.on ? "mix" : "cut";
       }
-      return { path, src: spot ? "spotify" : "library", title, artist: artist || "", cur: i === idx, trans };
+      return { path, src, title, artist: artist || "", cur: i === idx, trans, playable: src === "library" };       // (a row of the stereo's pane is never a play button; `playable` says whether the browser could play it)
     });
-    return { items, idx, mix, playing: !!s.playing, spotify: items.some(i => i.src === "spotify"), now: items[idx] || null };
+    const now = items[idx] || null;
+    // the book the stream is on (kind "book"): its chapter, as the hub counts it (1 for the first; 0 when it does not say)
+    const chapter = kind === "book" && book ? Math.max(0, Math.floor(Number(book.chapter) || 0)) : 0;
+    return { items, idx, mix, kind, chapter, playing: !!s.playing, spotify: items.some(i => i.src === "spotify"), hasBook: items.some(i => i.src === "book"), now };
+  }
+
+  // ── the house stereo's speakers: one stream, played on whichever speakers are switched on ───────────────────────────
+  const OUT_ID = /^[a-z0-9_-]{1,24}(?::[a-z0-9_-]{1,24})?$/;
+  const floorOf = f => (f === "upstairs" || f === "downstairs" ? f : "");
+  const FLOOR_RANK = { upstairs: 0, downstairs: 1, "": 2 };
+  const OUT_HOLD_MS = 12000;       // the hub checks in every 2 s while it plays and every 4 s when it does not (held, paused): up to 4 s to hear the command, up to 4 s to say it did it
+  /** The speakers as the toggles show them: [{id, name, floor, on, open, away, asking}], a floor's speakers together (upstairs, downstairs, the rest), the
+   *  stereo's own order within a floor. `on` is the person's switch, `open` the speaker really being there; `away` is a switch on for a speaker that is not
+   *  there (the toggle waits, it does not light a lamp). `pending` is what this page has just asked for ({id: {on, until}}): shown until the stereo's own
+   *  check-in agrees or the wait runs out, so a tap does not jump back while the radio is still acting on it (`asking`). */
+  function outsView(state, pending, now) {
+    const list = state && Array.isArray(state.outs) ? state.outs : [], seen = new Set(), out = [];
+    for (const o of list) {
+      if (out.length >= 12) break;
+      if (!o || typeof o.id !== "string" || !OUT_ID.test(o.id) || seen.has(o.id)) continue;
+      seen.add(o.id);
+      const p = pending && pending[o.id], asked = p && p.until > now ? !!p.on : null, real = o.on === true;
+      const on = asked === null ? real : asked;
+      out.push({ id: o.id, name: typeof o.name === "string" && o.name ? o.name : o.id.split(":").pop(), floor: floorOf(o.floor),
+                 on, open: o.open === true, away: on && o.open !== true, asking: asked !== null && asked !== real });
+    }
+    return out.map((o, i) => [o, i]).sort((a, b) => FLOOR_RANK[a[0].floor] - FLOOR_RANK[b[0].floor] || a[1] - b[1]).map(x => x[0]);
+  }
+  /** What is still being waited for: the asks of `pending` that the stereo has not agreed with yet and that have not run out. */
+  function settleOuts(pending, state, now) {
+    const have = new Map((state && Array.isArray(state.outs) ? state.outs : []).filter(o => o && typeof o.id === "string").map(o => [o.id, o.on === true])), kept = Object.create(null);
+    for (const id of Object.keys(pending || {})) {
+      const p = pending[id];
+      if (p && p.until > now && have.has(id) && have.get(id) !== !!p.on) kept[id] = p;
+    }
+    return kept;
+  }
+  /** The toggles (outToggles) cut into lines that fit `width` px, a toggle taking SO_W and a floor gap GAP_W as the stylesheet draws them (bilby-player.css .souts). Each
+   *  line is a row of the bridge's list, so a short screen breaks between lines and never hides a speaker: a list row has a fixed height and the page does not scroll.
+   *  A gap that would start or end a line is dropped. */
+  const SO_W = 76, GAP_W = 17;
+  function outsLines(row, width) {
+    const room = Math.max(SO_W, (Number(width) || 320) - 12), lines = [];
+    let line = [], used = 0, gap = false;
+    for (const t of row || []) {
+      if (t.gap) { gap = line.length > 0; continue; }
+      if (line.length && used + SO_W + (gap ? GAP_W : 0) > room) { lines.push(line); line = []; used = 0; gap = false; }
+      if (gap) { line.push({ gap: true }); used += GAP_W; gap = false; }
+      line.push(t); used += SO_W;
+    }
+    if (line.length) lines.push(line);
+    return lines;
+  }
+  /** The command that flips a speaker's switch, or "" for an id the portal would refuse. */
+  const outCommand = (id, on) => (typeof id === "string" && OUT_ID.test(id) ? `out:${id}:${on ? "on" : "off"}` : "");
+  /** The toggles, as the page draws them: one hexagon key per speaker (`pressed` is lit when its switch is on, dark when off; `wait` makes the glyph breathe,
+   *  as a toggle does while it waits, for a switch that is on for a speaker that is not there: toggles carry no lamp), and `{gap: true}` between floors.
+   *  `tap` is the command a tap sends: it flips the switch. Every key carries the same telemetry name, a floor of the page: without these keys a stream that
+   *  paused for want of a speaker could not be brought back, so the nightly tidy (portal/adaptive.py) must never retire them. */
+  const TOGGLE_TEL = "music:speaker-toggle";
+  const outGlyph = id => (id === "hdmi" ? "pip" : id.startsWith("pod:") ? "can" : "vol");
+  function outToggles(outs) {
+    const row = [];
+    let floor = null;
+    for (const o of outs || []) {
+      if (floor !== null && o.floor !== floor) row.push({ gap: true });
+      floor = o.floor;
+      const label = o.name + (o.floor ? ` (${o.floor})` : ""), said = o.away ? `${label}: on, but not there right now` : `${label}: ${o.on ? "on" : "off"}`;
+      row.push({ id: o.id, name: o.name, glyph: outGlyph(o.id), pressed: !!o.on, wait: !!o.away, label: o.away ? said : label, title: said, tel: TOGGLE_TEL, tap: outCommand(o.id, !o.on) });
+    }
+    return row;
+  }
+  /** The stream is paused by the radio itself: {why, since, secs} (why: the radio's own short sentence; secs: how long, 0 when unknown), or null. */
+  function heldView(state, now) {
+    const h = state && state.held;
+    if (!h || typeof h !== "object") return null;
+    const since = Number(h.since) > 0 ? Number(h.since) : 0;
+    return { why: typeof h.why === "string" ? h.why.trim().slice(0, 80) : "", since, secs: since && now >= since ? Math.floor(now - since) : 0 };
+  }
+  /** Why it is held, as far as the page can tell: "speaker" when nobody hears it (no speaker is both on and there), which a switch brings back, by itself; "other" when
+   *  a speaker is listening all the same (the radio also holds a book the car has taken over: only its own `why` says so, and a switch would not bring that back);
+   *  "" when it is not held. */
+  function holdKind(state) {
+    if (!heldView(state, 0)) return "";
+    const outs = outsView(state, null, 0);
+    return outs.length && !outs.some(o => o.on && o.open) ? "speaker" : "other";
+  }
+  /** The words of the held line: for want of a speaker, a fixed sentence (it says what to do) and under it the radio's reason and how long it has waited (once that is a
+   *  minute); for any other hold, the radio's own sentence and how long. `now` in epoch seconds; `kind` is holdKind(). */
+  function heldText(held, now, kind) {
+    const secs = held && held.since > 0 && now >= held.since ? Math.floor(now - held.since) : 0, lasted = secs >= 60 ? fmtLong(secs) : "", why = held && held.why ? held.why : "";
+    if (kind === "other") return { line: why ? why.charAt(0).toUpperCase() + why.slice(1) : "Paused for now.", detail: lasted };
+    return { line: "Waiting for a speaker. Switch one on.", detail: [why, lasted].filter(Boolean).join(" · ") };
+  }
+  /** The one line the Devices menu says of a held stereo. */
+  function heldNote(state) {
+    const k = holdKind(state);
+    return !k ? "" : k === "speaker" ? "Waiting for a speaker. Switch one on in the House stereo." : heldText(heldView(state, 0), 0, k).line;
+  }
+  /** What the stereo pane shows, as one string: when it changes the pane is drawn again (its keys, its speakers, the wait for one, the chapter). */
+  function stereoSig(state) {
+    const s = state || {}, h = heldView(s, 0), b = s.book && typeof s.book === "object" ? s.book : null;
+    return [s.playing === true ? 1 : 0, kindOf(s), h ? h.since + "/" + h.why : "", outsView(s, null, 0).map(o => `${o.id}.${o.on ? 1 : 0}${o.open ? 1 : 0}`).join(","),
+            b ? b.id + "." + (b.chapter | 0) + "." + (b.playing === true ? 1 : 0) : ""].join("|");
   }
 
   return {
-    STEREO_ID, isSpotifyUri, stereoView,
+    STEREO_ID, isSpotifyUri, isBookItem, srcOf, kindOf, offers, hereRefusal, pickUp, stereoView,
+    outsView, outsLines, SO_W, GAP_W, settleOuts, outCommand, outToggles, TOGGLE_TEL, heldView, holdKind, heldText, heldNote, stereoSig, OUT_ID, OUT_HOLD_MS,
     paginate, pageOf,
     fold, squash, sortKey, letterOf, cmp,
     fmtTime, fmtLong, fmtAgo, fmtBytes, genreLabel,

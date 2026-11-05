@@ -134,3 +134,26 @@ def test_the_player_reads_what_the_real_gate_serves(tmp_path):
     assert ["The Beatles", "Help!", 1965] == got["albums"][[a[1] for a in got["albums"]].index("Help!")][:3]
     assert got["search"] == ["Hunter"]                                                           # "bjork" finds Björk
     assert got["pick"] in (1, 2, 3)                                                              # Bilby DJ: never the track it was given (0)
+
+
+@needs_node
+def test_every_speaker_command_the_page_builds_is_one_the_portal_accepts_and_they_refuse_the_same_ids(tmp_path):
+    """The house stereo's speaker switch is written twice, in the page (bilby-player.js outCommand) and in the portal (player.OUT_ID, player.OUT): run the
+    page's own function over good and bad ids and hold its answers up to the portal's."""
+    import player as player_mod
+    ids = ["enclave", "hdmi", "pod:living", "pod:living-room", "pod:on", "a_b-c9", "a" * 24, "a" * 24 + ":" + "b" * 24,       # well formed
+           "", "Enclave", "a:b:c", "a" * 25, "pod:", ":x", "a b", "pod:" + "b" * 25, "enclave\n", "../x", "pod/living", "é", "enclave:on:off"]   # not
+    (tmp_path / "ids.json").write_text(json.dumps(ids), encoding="utf-8")
+    (tmp_path / "out.js").write_text('const fs = require("node:fs"); const C = require(process.argv[2]);'
+                                     'const ids = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));'
+                                     'console.log(JSON.stringify(ids.map(id => [C.outCommand(id, true), C.outCommand(id, false), C.OUT_ID.test(id)])));', encoding="utf-8")
+    run = subprocess.run([NODE, str(tmp_path / "out.js"), str(CORE), str(tmp_path / "ids.json")], capture_output=True, text=True, encoding="utf-8",
+                         errors="replace", timeout=60)
+    assert run.returncode == 0, run.stderr[-2000:]
+    for oid, (on, off, js_ok) in zip(ids, json.loads(run.stdout)):
+        py_ok = bool(player_mod.OUT_ID.fullmatch(oid))
+        assert js_ok == py_ok, oid                                                              # the page and the portal call the same ids well formed
+        assert bool(on) == bool(off) == py_ok, oid
+        if py_ok:
+            assert on == f"out:{oid}:on" and off == f"out:{oid}:off", oid
+            assert player_mod.OUT.fullmatch(on) and player_mod.OUT.fullmatch(off), oid           # and the portal queues what the page sends

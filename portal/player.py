@@ -12,6 +12,11 @@ in memory (the portal runs one instance); a redeploy forgets it, and the players
 A browser only makes sound after a tap on the page, and that starts over at every reload, so a player also says whether
 it is "armed" (a play() has worked since its page loaded) and whether it is waiting for a tap. A remote's Play to a player
 nobody has tapped can then say so instead of silently doing nothing.
+
+The house stereo (the hub's radio, Connect device skippyroom-stereo) plays ONE stream on whichever speakers are switched on, and says so in its
+check-in: `kind` (song, spotify or book: what the current queue item is), `outs` (its speakers: id, name, on, open, floor) and `held` (paused
+because no speaker is listening). The page flips a speaker with the command `out:<id>:on|off`. All of it is additive: a radio that sends none
+of it reads as no speakers and not held, and a portal that does not know it simply never keeps it.
 """
 from __future__ import annotations
 
@@ -49,6 +54,13 @@ TAKE = re.compile(r"take:[A-Za-z0-9_-]{8,40}")      # "pick up what that device 
 # (services/satellite/audiobooks.py COMMAND, kept identical): play:<book id>[:<second>], pause, resume, skip:<seconds>, chapter:<1|-1>, speed:<x>.
 BOOK_CMD = re.compile(r"book:(?:play:[a-z0-9-]{1,200}(?::\d{1,6}(?:\.\d)?)?|pause|resume|skip:-?\d{1,4}|chapter:-?1|speed:\d(?:\.\d{1,2})?)")
 MIX = re.compile(r"mix:(?:on|off)")                  # the house stereo's DJ mode (services/satellite/dj.py), switched from Bilby's stereo pane
+# The house stereo's speakers (services/satellite/radio.py): one stream, played on whichever speakers the person switched on. A speaker's id is
+# "enclave", "hdmi" or "pod:<room>" (a colon inside it), and the page's `out:<id>:on|off` flips that speaker's switch ("off" means off).
+OUT_ID = re.compile(r"[a-z0-9_-]{1,24}(?::[a-z0-9_-]{1,24})?")
+OUT = re.compile(r"out:" + OUT_ID.pattern + r":(?:on|off)")
+OUT_FLOORS = ("upstairs", "downstairs")
+KINDS = ("song", "spotify", "book")                  # what the current item of a queue is
+MAX_OUTS = 12
 REPEATS = ("off", "all", "one")
 GATE_URL = re.compile(r"https://[a-z0-9-]+(\.[a-z0-9-]+)*\.ts\.net")
 
@@ -64,6 +76,29 @@ def sign(key: bytes, exp: int) -> str:
 
 def _text(value, limit: int) -> str:
     return value[:limit] if isinstance(value, str) else ""
+
+
+def _outs(value) -> list[dict]:
+    """The house stereo's speakers, each typed and kept short: {id, name, on, open, floor}. An entry with a malformed id (or a repeat of one) is dropped, so a
+    page that turns an id into a command can only ever send one OUT accepts. on: the person's switch; open: the speaker is really there right now."""
+    out, seen = [], set()
+    for o in value[:MAX_OUTS] if isinstance(value, list) else []:
+        oid = o.get("id") if isinstance(o, dict) else None
+        if not isinstance(oid, str) or not OUT_ID.fullmatch(oid) or oid in seen:
+            continue
+        seen.add(oid)
+        out.append({"id": oid, "name": _text(o.get("name"), 40) or oid.rsplit(":", 1)[-1], "on": o.get("on") is True, "open": o.get("open") is True,
+                    "floor": o.get("floor") if o.get("floor") in OUT_FLOORS else ""})
+    return out
+
+
+def _held(value) -> dict | None:
+    """The stream is paused BECAUSE no speaker is listening: {why (a short sentence), since (epoch seconds)}, else None. It resumes by itself."""
+    if not isinstance(value, dict):
+        return None
+    since = value.get("since")
+    since = round(float(since), 1) if isinstance(since, (int, float)) and not isinstance(since, bool) and 0 <= since < 4e9 else 0.0
+    return {"why": _text(value.get("why"), 80), "since": since}
 
 
 def _state(body: dict, previous: dict | None = None) -> dict:
@@ -110,7 +145,10 @@ def _state(body: dict, previous: dict | None = None) -> dict:
             "repeat": body.get("repeat") if body.get("repeat") in REPEATS else "off",
             # armed: None for an older page that does not say; otherwise has a play() worked since the page loaded?
             # tap: the page is waiting for someone to tap it (a play was refused, or a saved queue came back after a reload)
-            "armed": armed if isinstance(armed, bool) else None, "tap": body.get("tap") is True}
+            "armed": armed if isinstance(armed, bool) else None, "tap": body.get("tap") is True,
+            # the house stereo (all three are additive: an older radio omits them, and then they read "", [] and None):
+            # kind: what the current item is; outs: the speakers one stream plays on; held: paused because no speaker is listening
+            "kind": body.get("kind") if body.get("kind") in KINDS else "", "outs": _outs(body.get("outs")), "held": _held(body.get("held"))}
 
 
 class Player:
@@ -182,7 +220,7 @@ class Player:
             return self._list(user, "", self.clock())
 
     def command(self, user: str, device: str, action: str) -> bool:
-        if action not in ACTIONS and not TAKE.fullmatch(action) and not MIX.fullmatch(action) and not BOOK_CMD.fullmatch(action):
+        if action not in ACTIONS and not TAKE.fullmatch(action) and not MIX.fullmatch(action) and not BOOK_CMD.fullmatch(action) and not OUT.fullmatch(action):
             return False
         with self._lock:
             d = self._devices.get(user, {}).get(device)

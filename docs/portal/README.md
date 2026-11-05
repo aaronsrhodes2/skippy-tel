@@ -381,6 +381,14 @@ sent with the queue) and `mix` (`{on, xfade}`); the commands are the usual `play
 state is `BilbyCore.stereoView` (`portal/tests/js/stereo.test.js`). A hub that does not send `titles`/`mix` yet still shows (names fall back to the catalog
 or the file name, the mix key hides), so the page and the hub deploy in either order; the hub needs its restart to send them.
 
+**The speakers' switches, the hold and the books** (2026-11-05; the Captain: *"a single audio stream going out and the devices decide if they are outputting that stream or not"*, *"If no
+devices are listening, the stream should pause"*). The House stereo's state also carries `kind` (`song` / `spotify` / `book`), `outs` (each speaker: `{id, name, on, open, floor}`: the Sony,
+the Enclave, a room's box `pod:<room>`) and `held` (`{why, since}` or null: the stream is waiting because no speaker listens, and carries on by itself when one is back). The pane shows one
+hexagon toggle per speaker (lit = on, `data-tel`; a speaker that is on but gone says so) and the command is `out:<id>:on|off`; the radio keeps the switches on disk
+(`services/satellite/outputs.py`, `state/radio/outputs.json`), so a restart of the radio or the hub changes nothing. An audiobook is an item of the queue (`book:<id>`, named in `titles`): it shows
+by title, "Play here" refuses it like a Spotify row, and while it is current the state's `track` is empty (the car's hand-over reads the newest track as Bilby). All the fields are additive:
+an old radio sends none of them and the page hides what it does not get; an old page ignores them.
+
 ## Audiobooks (the Captain's converted audiobooks, `/audiobooks`)
 
 His own DRM-free conversions of books he bought (OpenAudible writes them to `D:\Audiobooks`: `books/`, `art/`, `books.json`), in any browser and on a pod. **The Captain
@@ -397,9 +405,10 @@ Audible or OpenAudible; there is no Audible sync (Audible has no official API; O
 * **Places:** the browser PUTs its place to the gate (every 15 s while playing, on pause, seek and close). The gate writes one small file per book into `state/audiobooks-inbox/`; the hub's
   `audiobooks.Store` merges that inbox (newest `last_played` wins, either way), so "continue my book" by voice starts where the page stopped, and the page reads the hub's
   `state/audiobooks.json` back through the gate. (This replaces writing places back through the home reporter: no extra hop, and no portal in the way.)
-* **Play on a pod:** the hub's box checks in through Bilby's Connect and now says what its book is doing (`state.book`); the page lists the live room boxes (`/audiobooks/rooms`) and
-  queues `book:play:<id>[:<second>]`, `book:pause`, `book:resume`, `book:skip:<±s>`, `book:chapter:<±1>`, `book:speed:<x>` (`/audiobooks/command`; the same grammar in `player.BOOK_CMD` and
-  the hub's `audiobooks.COMMAND`, a test keeps them equal). The hub's `BookPlayer` plays it (pod speaker and PC outputs, as by voice) and the page becomes its remote.
+* **Play on a pod (since 2026-11-05 the book is an item of Bilby's one stream):** the **House stereo** (the house radio, Connect device `skippyroom-stereo`) says what its book is doing (`state.book`,
+  never as a `track`) and the page lists the live boxes (`/audiobooks/rooms`) and queues `book:play:<id>[:<second>]`, `book:pause`, `book:resume`, `book:skip:<±s>`, `book:chapter:<±1>`,
+  `book:speed:<x>` (`/audiobooks/command`; the same grammar in `player.BOOK_CMD` and `audiobooks.COMMAND`, a test keeps them equal). The radio plays it as the queue's item `book:<id>` on whichever
+  speakers are switched on (a room's box forwards its command and that room's speakers play it) and the page becomes its remote. The hub holds no book player, so a hub restart never stops a book.
 * **Home reporter:** capability `book_gate` (ready only when the gate's own `/health` says there are books); `docker-compose.override.yml` gives it `BOOK_GATE_URL` and `BOOK_GATE_PUBLIC`.
 * **Dev:** `python portal/tests/dev_books.py` runs the portal beside the REAL gate on the real library (read-only; places go to a temp inbox, or `--real-state`), with a stand-in
   "Office" box, then open `http://127.0.0.1:8765/dev-login`. Tests: `portal/tests/test_audiobooks.py`, `tests/js/books.test.js`, `services/audiobook-gate/tests`,

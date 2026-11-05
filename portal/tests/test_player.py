@@ -598,3 +598,223 @@ def test_the_stereos_spotify_names_and_mix_are_kept_and_the_mix_command_is_allow
     assert not p.command(ADMIN, "skippyroom-stereo", "mix:loud")
     p.checkin(ADMIN, "phone1234", "iPhone", state(mix="no"))
     assert next(d for d in p.checkin(ADMIN, "other1234", "PC", None)["devices"] if d["id"] == "phone1234")["state"]["mix"] is None
+
+
+# ── the house stereo's speakers (services/satellite/radio.py): `kind`, `outs` and `held` ride along in its check-in, and the page flips a speaker with out:<id>:on|off ──
+
+def stereo_state(**kw):
+    """What the radio sends: an audiobook as the current item of the one stream, three speakers, nothing held."""
+    return {"track": "", "title": "Dune", "artist": "Frank Herbert", "pos": 0, "playing": True, "kind": "book", "idx": 1,
+            "queue": ["A/B/one.mp3", "book:dune-m4b"], "titles": {"book:dune-m4b": ["Dune", "Frank Herbert"]},
+            "book": {"id": "dune-m4b", "title": "Dune", "pos": 100.0, "chapter": 2, "playing": True, "speed": 1.0},
+            "outs": [{"id": "enclave", "name": "Enclave", "on": True, "open": True, "floor": "upstairs"},
+                     {"id": "hdmi", "name": "Sony", "on": False, "open": True, "floor": "downstairs"},
+                     {"id": "pod:living", "name": "Living room box", "on": True, "open": False, "floor": ""}],
+            "held": None, **kw}
+
+
+def stereo_seen_by_a_phone(p, **kw):
+    """The hub checks the House stereo in with this state; what another player (the Captain's phone) is then shown for it."""
+    p.checkin(ADMIN, "skippyroom-stereo", "House stereo", stereo_state(**kw), room="box-stereo", box=True)
+    return next(d for d in p.checkin(ADMIN, "phone1234", "iPhone", None)["devices"] if d["id"] == "skippyroom-stereo")["state"]
+
+
+def test_the_stereos_kind_speakers_and_hold_are_kept_typed_and_short():
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    got = stereo_seen_by_a_phone(p, held={"why": "no speaker is on", "since": 1_800_000_000, "evil": "<script>"})
+    assert got["kind"] == "book" and got["track"] == "" and got["playing"] is True
+    assert got["outs"] == [{"id": "enclave", "name": "Enclave", "on": True, "open": True, "floor": "upstairs"},
+                           {"id": "hdmi", "name": "Sony", "on": False, "open": True, "floor": "downstairs"},
+                           {"id": "pod:living", "name": "Living room box", "on": True, "open": False, "floor": ""}]
+    assert got["held"] == {"why": "no speaker is on", "since": 1_800_000_000.0}                  # (nothing but why and since)
+    assert got["queue"] == ["A/B/one.mp3", "book:dune-m4b"] and got["titles"] == {"book:dune-m4b": ["Dune", "Frank Herbert"]}   # a book is an item of the queue
+    assert got["book"] == {"id": "dune-m4b", "title": "Dune", "pos": 100.0, "chapter": 2, "playing": True, "speed": 1.0}
+    assert [stereo_seen_by_a_phone(p, kind=k)["kind"] for k in ("song", "spotify", "book")] == ["song", "spotify", "book"]
+    assert [stereo_seen_by_a_phone(p, kind=k)["kind"] for k in ("podcast", "", None, 7, True, ["book"], {"a": 1})] == [""] * 7      # a word it does not know is dropped
+
+
+def test_a_garbled_speaker_list_is_cleaned_not_trusted():
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    garbled = [{"id": "enclave", "name": "E" * 100, "on": "yes", "open": 1, "floor": "attic"},         # not real booleans, not a floor, a name too long
+               {"id": "enclave", "name": "again", "on": True},                                         # a repeat of an id
+               {"id": "Bad Id"}, {"id": "a:b:c"}, {"id": "x" * 25}, {"id": ""}, {"id": 7}, {"id": "pod:"}, {"id": "../etc"}, {"id": "enclave\n"}, "enclave",
+               {"id": "pod:living-room", "on": True, "open": True, "floor": "upstairs"}]                 # no name: the last part of its id
+    assert len(garbled) == player_mod.MAX_OUTS
+    later = [{"id": ":x"}, {"id": "pod:" + "y" * 25}, None, 5, ["enclave"], {"name": "no id"}, {"id": "hdmi", "name": "past the twelfth"}]      # (only the first twelve are looked at)
+    assert stereo_seen_by_a_phone(p, outs=garbled + later)["outs"] == [
+        {"id": "enclave", "name": "E" * 40, "on": False, "open": False, "floor": ""},
+        {"id": "pod:living-room", "name": "living-room", "on": True, "open": True, "floor": "upstairs"}]
+    many = [{"id": f"pod:r{i}", "name": f"R{i}", "on": True, "open": True} for i in range(30)]
+    assert [o["id"] for o in stereo_seen_by_a_phone(p, outs=many)["outs"]] == [f"pod:r{i}" for i in range(player_mod.MAX_OUTS)] and player_mod.MAX_OUTS == 12
+    for not_a_list in ("enclave", {"id": "enclave"}, 5, None, True):
+        assert stereo_seen_by_a_phone(p, outs=not_a_list)["outs"] == []
+
+
+def test_a_hold_is_a_short_sentence_and_a_time_and_nothing_else():
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    for not_held in (None, False, True, "no speaker", 5, [], ["x"], 0):
+        assert stereo_seen_by_a_phone(p, held=not_held)["held"] is None, not_held
+    assert stereo_seen_by_a_phone(p, held={"why": "w" * 200, "since": 1_800_000_000.25})["held"] == {"why": "w" * 80, "since": 1_800_000_000.2}
+    for since in ("soon", None, True, -5, float("nan"), float("inf"), 5e9, [1]):                     # not an epoch time: 0, and the hold itself still stands
+        assert stereo_seen_by_a_phone(p, held={"why": "x", "since": since})["held"] == {"why": "x", "since": 0.0}, since
+    assert stereo_seen_by_a_phone(p, held={"why": 7, "since": 5})["held"] == {"why": "", "since": 5.0}
+    assert stereo_seen_by_a_phone(p, held={})["held"] == {"why": "", "since": 0.0}                   # a held stream with no details is still held
+
+
+def test_a_hold_ends_with_the_check_in_that_no_longer_says_it():
+    """The stream resumes by itself when a speaker comes back: the page must not keep showing a wait the radio has stopped reporting."""
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    assert stereo_seen_by_a_phone(p, held={"why": "no speaker is on", "since": 5})["held"]["why"] == "no speaker is on"
+    assert stereo_seen_by_a_phone(p, held=None)["held"] is None
+    held_again = stereo_state(held={"why": "no speaker is on", "since": 5})
+    p.checkin(ADMIN, "skippyroom-stereo", "House stereo", held_again, room="box-stereo", box=True)
+    del held_again["held"], held_again["outs"]                                                          # a lighter check-in, or an older radio: nothing is carried over
+    p.checkin(ADMIN, "skippyroom-stereo", "House stereo", held_again, room="box-stereo", box=True)
+    [dev] = [d for d in p.checkin(ADMIN, "phone1234", "iPhone", None)["devices"] if d["id"] == "skippyroom-stereo"]
+    assert dev["state"]["held"] is None and dev["state"]["outs"] == []
+
+
+def test_an_older_radio_that_sends_none_of_it_reads_as_no_speakers_and_not_held():
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    p.checkin(ADMIN, "skippyroom-stereo", "House stereo", state(), room="box-stereo", box=True)
+    [dev] = p.checkin(ADMIN, "phone1234", "iPhone", None)["devices"]
+    got = dev["state"]
+    assert (got["kind"], got["outs"], got["held"]) == ("", [], None)
+    assert got["track"] == "A/B/one.mp3" and got["playing"] is True and got["queue"] == ["A/B/one.mp3", "A/B/two.mp3"] and got["idx"] == 0      # everything else as it was
+    assert set(got) == {"book", "titles", "mix", "track", "title", "artist", "pos", "playing", "queue", "idx", "dj", "shuffle", "repeat", "armed", "tap",
+                        "kind", "outs", "held"}                                                       # the whitelist, whole: a new field is a decision
+    assert set(player_mod._state({})) == set(got)
+    assert (player_mod._state({})["kind"], player_mod._state({})["outs"], player_mod._state({})["held"]) == ("", [], None)
+
+
+@pytest.mark.parametrize("action", ["out:enclave:on", "out:enclave:off", "out:hdmi:on", "out:pod:living:off", "out:pod:living-room:on", "out:pod:on", "out:a_b-c9:off",
+                                    "out:" + "a" * 24 + ":" + "b" * 24 + ":off"])
+def test_a_well_formed_speaker_switch_is_queued_for_the_stereo(action):
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    p.checkin(ADMIN, "skippyroom-stereo", "House stereo", stereo_state(), room="box-stereo", box=True)
+    assert p.command(ADMIN, "skippyroom-stereo", action)
+    assert p.checkin(ADMIN, "skippyroom-stereo", "House stereo", None, room="box-stereo", box=True)["commands"] == [action]       # handed over once
+    assert p.checkin(ADMIN, "skippyroom-stereo", "House stereo", None, room="box-stereo", box=True)["commands"] == []
+
+
+@pytest.mark.parametrize("action", ["out:enclave", "out:enclave:", "out:enclave:toggle", "out:enclave:ON", "out::on", "out:ENCLAVE:on", "out:pod:a:b:on", "out:x y:on",
+                                    "out:" + "a" * 25 + ":on", "out:pod:" + "b" * 25 + ":on", "out:enclave:on ", "out:enclave:on\n", "out:../etc:on", "OUT:enclave:on",
+                                    "out:pod:living:off;rm", "out:pod:living:off:on:on", "out:pod/living:on", "out:é:on", "out:enclave:on:off:on", "out", "out:"])
+def test_only_a_well_formed_speaker_switch_is_queued(action):
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    p.checkin(ADMIN, "skippyroom-stereo", "House stereo", stereo_state(), room="box-stereo", box=True)
+    assert not p.command(ADMIN, "skippyroom-stereo", action)
+    assert p.checkin(ADMIN, "skippyroom-stereo", "House stereo", None, room="box-stereo", box=True)["commands"] == []
+
+
+def test_the_speaker_switch_joins_the_old_commands_without_changing_them():
+    clock = Clock()
+    p = player_mod.Player(paired_home(clock), clock=clock)
+    p.checkin(ADMIN, "skippyroom-stereo", "House stereo", stereo_state(), room="box-stereo", box=True)
+    for action in ("pause", "mix:on", "take:phone1234", "book:pause", "out:hdmi:on", "next"):
+        assert p.command(ADMIN, "skippyroom-stereo", action), action
+    assert p.checkin(ADMIN, "skippyroom-stereo", "House stereo", None, room="box-stereo", box=True)["commands"] == ["mix:on", "take:phone1234", "book:pause", "out:hdmi:on", "next"]   # (the last five are kept: as ever)
+    for old_bad in ("halt", "mix:loud", "take:", "book:play:../x", "play now"):
+        assert not p.command(ADMIN, "skippyroom-stereo", old_bad), old_bad
+    assert not p.command(FRIEND, "skippyroom-stereo", "out:hdmi:on")                              # someone else's stereo is not theirs to switch
+    clock.now += player_mod.LIVE_S + 1
+    assert not p.command(ADMIN, "skippyroom-stereo", "out:hdmi:on")                               # and a stereo that stopped checking in cannot be told anything
+
+
+def test_the_hub_reports_the_stereos_speakers_and_the_page_flips_one(client):
+    auth = {"Authorization": f"Bearer {TOKEN}"}
+    body = {"device": "skippyroom-stereo", "name": "House stereo", "room": "box-stereo",
+            "state": stereo_state(held={"why": "no speaker is on", "since": 1_800_000_000, "evil": "<script>"})}
+    assert client.post("/home/music/checkin", json=body, headers=auth).get_json()["commands"] == []
+    login(client, ADMIN)
+    reply = client.post("/music/checkin", json={"device": "phone1234", "name": "iPhone"}).get_json()
+    [stereo] = [d for d in reply["devices"] if d["id"] == "skippyroom-stereo"]
+    assert stereo["room"] == "box-stereo" and stereo["state"]["kind"] == "book"
+    assert [(o["id"], o["on"], o["open"]) for o in stereo["state"]["outs"]] == [("enclave", True, True), ("hdmi", False, True), ("pod:living", True, False)]
+    assert stereo["state"]["held"] == {"why": "no speaker is on", "since": 1_800_000_000.0}
+    ok = client.post("/music/command", json={"device": "skippyroom-stereo", "action": "out:pod:living:off"})
+    assert ok.status_code == 200 and ok.get_json() == {"queued": True, "needs_tap": False}
+    for bad in ("out:pod:living:maybe", "out:BAD:on", "out:", "out:enclave:on;rm"):
+        assert client.post("/music/command", json={"device": "skippyroom-stereo", "action": bad}).status_code == 409, bad
+    assert client.post("/home/music/checkin", json=body, headers=auth).get_json()["commands"] == ["out:pod:living:off"]      # the radio gets exactly that one
+    assert client.post("/home/music/checkin", json=body, headers=auth).get_json()["commands"] == []
+
+
+def test_a_book_the_stereo_plays_is_not_bilbys_last_song_and_nothing_to_favorite_and_still_a_room_for_the_books_app():
+    """The new fields must not turn an audiobook into a song: drive.bilby_last and favorites.now_playing read `track`, which is empty for a book."""
+    import audiobooks as books_mod
+    import drive
+    import favorites as favorites_mod
+    clock = Clock()
+    home = paired_home(clock)
+    p = player_mod.Player(home, clock=clock)
+    p.checkin(ADMIN, "skippyroom-stereo", "House stereo", stereo_state(), room="box-stereo", box=True)
+    listing = p.listing(ADMIN)
+    assert listing[0]["state"]["track"] == "" and listing[0]["state"]["kind"] == "book"
+    assert drive.bilby_last(listing, {}, clock.now) is None                                          # a book, not Bilby (test_drive says the same of a pod's)
+    assert favorites_mod.now_playing(listing) is None
+    p.checkin(ADMIN, "skippyroom-office", "Office (Skippy)", {"track": "M/P/one.mp3", "title": "One", "artist": "M", "pos": 5, "playing": True,
+                                                                "queue": ["M/P/one.mp3"], "kind": "song", "outs": [], "held": None}, room="box-office", box=True)
+    last = drive.bilby_last(p.listing(ADMIN), {}, clock.now)
+    assert last["track"] == "M/P/one.mp3" and last["where"] == "Office (Skippy)"                       # the song, not the book that is newer or older
+    rooms = books_mod.Books(home, p, clock=clock).rooms(ADMIN)
+    stereo = next(r for r in rooms if r["id"] == "skippyroom-stereo")
+    assert set(stereo) == {"id", "name", "live", "age", "book"}                                       # the speakers and the hold are not the Books app's business
+    assert stereo["book"] == {"id": "dune-m4b", "title": "Dune", "pos": 100.0, "chapter": 2, "playing": True, "speed": 1.0}
+    assert not books_mod.Books(home, p, clock=clock).command(ADMIN, "skippyroom-stereo", "out:hdmi:on")      # that route passes only `book:` commands
+
+
+def test_the_speaker_toggles_are_hexagons_with_a_telemetry_name_the_nightly_tidy_never_retires():
+    import adaptive
+    core = (STATIC / "bilby-player.js").read_text(encoding="utf-8")
+    app = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
+    shared = (STATIC / "bridge.css").read_text(encoding="utf-8")
+    tel = re.search(r'TOGGLE_TEL = "([^"]+)"', core).group(1)
+    assert tel.startswith("music:") and not adaptive.retirable_control(tel)                            # a floor: without these keys a held stream cannot be brought back
+    row = re.sub(r"//[^\n]*", "", re.search(r"makers\.souts = \{.*?\n  \};", app, re.S).group(0))      # (the code, not its comments)
+    assert 'el("button", "key")' in row and 'setAttribute("aria-pressed"' in row and "b.dataset.tel = t.tel" in row and "dataset.out = t.id" in row
+    assert "lamp" not in row and 'b.dataset.s = "boot"' in row                                       # no lamp in a toggle: a speaker that waits breathes, as bridge.css gives a toggle
+    assert '.key[aria-pressed][data-s="boot"] .g' in shared and ".key[aria-pressed] .lamp" in shared and "clip-path: polygon(25% 0, 75% 0, 100% 50%" in shared
+    assert 'case "souts":' in app and "toggleOut(row.dev, b.dataset.out)" in app and "C.outCommand(id, !o.on)" in app
+
+
+def test_every_glyph_the_stereo_pane_draws_is_in_the_glyph_set():
+    drawn = set(re.findall(r'<symbol id="g-([\w-]+)"', (PORTAL / "templates" / "_glyphs.html").read_text(encoding="utf-8")))
+    core = (STATIC / "bilby-player.js").read_text(encoding="utf-8")
+    app = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
+    speakers = set(re.findall(r'[?:] "(\w+)"', re.search(r"const outGlyph = .*?;\n", core).group(0)))     # a speaker, a screen, a pod
+    assert speakers == {"vol", "pip", "can"}
+    pane = speakers | {"mute", "book", "note", "arcs", "mix", "play", "pause", "prev", "next"}            # the held line, a book's glyph, the rows and keys
+    assert 'ico("mute")' in app and 'ico("book")' in app
+    assert pane <= drawn, pane - drawn
+
+
+def test_the_speaker_toggles_are_lined_up_by_the_widths_the_stylesheet_draws():
+    """A list row of the bridge has a fixed height and hides what does not fit, so the script cuts the toggles into lines by the widths it believes
+    (BilbyCore SO_W, GAP_W): they must be the stylesheet's."""
+    css = (STATIC / "bilby-player.css").read_text(encoding="utf-8")
+    core = (STATIC / "bilby-player.js").read_text(encoding="utf-8")
+    so_w, gap_w = (int(n) for n in re.search(r"const SO_W = (\d+), GAP_W = (\d+);", core).groups())
+    width = int(re.search(r"\.souts \.so \{[^}]*?\bwidth: (\d+)px", css).group(1))
+    between = int(re.search(r"\.vrow\.souts \{[^}]*?\bgap: 0 (\d+)px", css).group(1))
+    assert so_w == width + between, (so_w, width, between)                                           # a toggle and the gap to the next
+    side = re.search(r"\.souts \.gap \{[^}]*?margin: \d+px (\d+)px \d+px; border-left: (\d+)px", css)
+    assert gap_w == 2 * int(side.group(1)) + int(side.group(2)) + 2 * between, (gap_w, side.groups(), between)    # a floor's line, its margins and the gaps either side
+    app = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
+    assert 'rows.push({ type: "souts", h: 76, dev: st, line })' in app and "C.outsLines(C.outToggles(outs)" in app          # one row of the list per line
+
+
+def test_the_toggle_commands_the_page_builds_are_the_ones_the_portal_accepts():
+    """bilby-player.js (OUT_ID, outCommand) and player.py (OUT_ID, OUT) are written twice: the same ids pass both."""
+    core = (STATIC / "bilby-player.js").read_text(encoding="utf-8")
+    js_id = re.search(r"const OUT_ID = /\^(.*?)\$/;", core).group(1)
+    assert js_id == player_mod.OUT_ID.pattern, (js_id, player_mod.OUT_ID.pattern)
+    assert re.search(r"out:\$\{id\}:\$\{on \? \"on\" : \"off\"\}", core)
+

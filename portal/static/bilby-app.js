@@ -71,6 +71,7 @@
     sheet: "", tab: "np", loading: false, seeking: false, scrollAt: 0, geo: "",
     // the signal shield: songs held in memory ahead of time, and the way back after a dead zone (on unless switched off)
     shield: prefs.shield !== false, lastTimeAt: 0, waitingAt: 0, netBadAt: 0,
+    outPending: Object.create(null),     // the house stereo's speaker switches this page has just flipped, until the stereo's own check-in agrees (BilbyCore.outsView)
   };
   const savePrefs = () => store.set("prefs", { repeat: S.repeat, shuffle: S.shuffle, dj: S.dj, vol: S.vol, muted: S.muted, sorts: S.sorts, shield: S.shield });
   const curTrack = () => { const c = S.q.cur; return c && S.lib ? S.lib.T[c.t] || null : null; };
@@ -1066,10 +1067,16 @@
       x.kind.replaceChildren(); x.kind.insertAdjacentHTML("beforeend", ico(v.playing ? "play" : "pause"));
       x.kind.append(el("b", "", r.dev.name || "House stereo"));
       if (cur && cur.src === "spotify") x.kind.append(el("span", "spot", "Spotify"));
+      if (cur && cur.src === "book") x.kind.insertAdjacentHTML("beforeend", ico("book"));        // an audiobook is what the stream is on: its title below, its chapter on the meta line
       e.classList.toggle("paused", !v.playing);
       x.h.textContent = cur ? cur.title : "Nothing playing"; x.who.textContent = cur ? cur.artist : "";
-      const lib = v.items.filter(i => i.src === "library").length, sp = v.items.length - lib;
-      counts(x.meta, [[lib, "note"], [sp, "arcs"]].filter(p => p[0] > 0));
+      const n = src => v.items.filter(i => i.src === src).length;
+      counts(x.meta, [[n("library"), "note"], [n("spotify"), "arcs"], [n("book"), "book"]].filter(p => p[0] > 0));
+      if (v.kind === "book" && v.chapter > 0) {
+        const c = el("span", "chap", "¶ " + v.chapter);
+        c.title = "Chapter " + v.chapter; c.setAttribute("aria-label", "Chapter " + v.chapter);
+        x.meta.prepend(c);
+      }
       setIcon(x.play, v.playing ? "pause" : "play"); x.play.setAttribute("aria-label", v.playing ? "Pause" : "Play");
       const m = r.dev.state.mix;
       x.mix.hidden = !m; x.mix.setAttribute("aria-pressed", m && m.on ? "true" : "false");
@@ -1087,11 +1094,47 @@
     },
     bind(e, r) {
       const it = r.it, x = e._r;
-      e.classList.toggle("spotify", it.src === "spotify");
-      x.src.innerHTML = ico(it.src === "spotify" ? "arcs" : "note");
+      e.classList.toggle("spotify", it.src === "spotify"); e.classList.toggle("book", it.src === "book");
+      x.src.innerHTML = it.src === "spotify" ? ico("arcs") : it.src === "book" ? ico("book") : ico("note");     // (a row here is never played in this browser: it is not a button)
       x.l1t.textContent = it.title; x.l2.textContent = it.artist;
       x.tr.innerHTML = it.trans && it.trans !== "cut" ? ico("mix") : "";
       x.tr.title = it.trans === "fade" ? "Fades in from Spotify" : it.trans === "mix" ? "Mixed in on the beat" : "";
+    },
+  };
+  // the house stereo's speakers: a hexagon toggle for each, lit while its switch is on, its name under it. One stream plays on whichever are on. A speaker that is on
+  // but not there right now (the Bluetooth speaker asleep, a pod offline) stays lit and its glyph breathes, as a toggle does while it waits (no lamp: toggles carry none).
+  makers.souts = {
+    make() { const e = el("div", "vrow souts"); e.setAttribute("role", "group"); e.setAttribute("aria-label", "Speakers"); return e; },
+    bind(e, r) {
+      e.replaceChildren(...r.line.map(t => {
+        if (t.gap) return el("i", "gap");                                            // a floor's speakers sit together
+        const u = el("div", "so"), b = el("button", "key");
+        b.type = "button"; b.dataset.r = "s-out"; b.dataset.out = t.id; b.dataset.tel = t.tel;
+        b.innerHTML = ico(t.glyph);
+        b.setAttribute("aria-pressed", t.pressed ? "true" : "false");
+        if (t.wait) b.dataset.s = "boot";                                            // on, but the speaker is not there: the glyph breathes (a toggle has no lamp)
+        b.setAttribute("aria-label", t.label); b.title = t.title;
+        u.dataset.on = t.pressed ? "1" : "0"; u.dataset.away = t.wait ? "1" : "0";
+        u.append(b, el("span", "nm", t.name));
+        return u;
+      }));
+    },
+  };
+  // the radio paused the stream itself. Usually for want of a speaker (nobody hears it: it carries on by itself when one is switched on); the radio also holds a book
+  // the car has taken over, and then the line is its own sentence and a switch is not what brings it back
+  makers.sheld = {
+    make() {
+      const e = el("div", "vrow vmsg sheld"), gl = el("span", "gl"), txt = el("span", "txt"), l1 = el("span", "l1"), l2 = el("span", "l2");
+      txt.append(l1, l2); e.append(gl, txt);
+      e._r = { gl, l1, l2 };
+      return e;
+    },
+    bind(e, r) {
+      const t = C.heldText(r.held, Date.now() / 1000, r.kind), x = e._r;            // how long, as of now (the radio's clock and this one agree to seconds)
+      x.gl.innerHTML = r.kind === "other" ? ico("pause") : ico("mute");
+      x.l1.replaceChildren(el("span", "", t.line));
+      x.l2.textContent = t.detail; x.l2.hidden = !t.detail;
+      e.title = r.held.why || t.line;
     },
   };
 
@@ -1246,7 +1289,12 @@
         const st = stereoDev();
         if (!st) { msg("The house stereo isn't answering right now."); break; }
         const sv = stereoOf(st);
-        rows.push({ type: "sctl", h: 100, dev: st, sv });
+        rows.push({ type: "sctl", h: 100, dev: st, sv, glue: true });
+        // the speakers, right under the keys that drive the stream: a row of the list for each line of them, so a short screen breaks between lines and hides none
+        const outs = C.outsView(st.state, S.outPending, Date.now());
+        for (const line of C.outsLines(C.outToggles(outs), $("#host").clientWidth || innerWidth)) rows.push({ type: "souts", h: 76, dev: st, line });
+        const held = C.heldView(st.state, Date.now() / 1000);
+        if (held) { v.heldRow = rows.length; rows.push({ type: "sheld", h: 64, held, kind: C.holdKind(st.state) }); }
         if (!sv.items.length) { msg("Nothing is queued on the stereo. Say “play something on the stereo”, or ask for Spotify."); break; }
         const up = sv.items.slice(sv.idx + 1);               // the hero is what plays now; the rows are only what comes next
         head("next", up.length ? String(up.length) : "");
@@ -1286,9 +1334,12 @@
     const lib = S.lib, deck = $("#deck");
     const here = connect.others.find(d => d.state && d.state.track && d.live && d.state.playing);
     const units = [];
-    if (here && !isPlaying() && !isSpotify(here.state.track)) units.push(["here", "devices", "Play here, where the other device left off", "", true]);
+    if (here && !isPlaying() && !C.hereRefusal(here.state)) units.push(["here", "devices", "Play here, where the other device left off", "", true]);
     const st = stereoDev();
-    if (st) units.push(["stereo", "arcs", "House stereo: his library and Spotify, mixed", st.state.queue && st.state.queue.length ? String(st.state.queue.length) : "", !!(st.live && st.state.playing)]);
+    // lit while it plays; an amber triangle when it waits for a speaker (the stream is held until one is switched on)
+    const waits = !!st && C.holdKind(st.state) === "speaker";
+    if (st) units.push(["stereo", "arcs", "House stereo: his library and Spotify, mixed", st.state.queue && st.state.queue.length ? String(st.state.queue.length) : "", waits ? "warn" : !!(st.live && st.state.playing)]);
+    if (waits) units[units.length - 1][2] = "House stereo: waiting for a speaker";
     units.push(["artists", "artist", LABELS.artists, lib.artists.length.toLocaleString()], ["albums", "album", LABELS.albums, lib.albums.length.toLocaleString()],
                ["tracks", "note", LABELS.tracks, lib.T.length.toLocaleString()], ["genres", "tag", LABELS.genres, lib.genres.length.toLocaleString()]);
     if (lib.hasAdded) units.push(["added", "plus", LABELS.added, ""]);
@@ -1296,8 +1347,8 @@
     const n = units.length;
     deck.style.setProperty("--rows", Math.ceil(n / 2)); deck.style.setProperty("--rows-wide", Math.ceil(n / 4)); deck.style.setProperty("--rows-side", Math.ceil(n / 5));
     deck.replaceChildren(...units.map(([id, glyph, label, count, lit], k) => {
-      const u = el("div", "unit named" + (lit ? " lit" : "")); u.style.setProperty("--i", k);
-      if (lit) u.dataset.s = "on";
+      const u = el("div", "unit named" + (lit === true ? " lit" : "")); u.style.setProperty("--i", k);
+      if (lit) u.dataset.s = lit === "warn" ? "warn" : "on";
       const hit = el("button", "hit"); hit.type = "button"; hit.dataset.u = id; hit.setAttribute("aria-label", label); hit.title = label;
       u.append(el("i", "plate"), hit);
       const claws = el("i", "claws"); claws.innerHTML = "<b></b><b></b><b></b>"; u.append(claws);
@@ -1455,6 +1506,9 @@
         if (r === "s-mix") { const on = !(d.state.mix && d.state.mix.on); d.state.mix = Object.assign({}, d.state.mix, { on }); scheduleView(); return sendRemote(d, on ? "mix:on" : "mix:off"); }
         break;
       }
+      case "souts":
+        if (r === "s-out") return toggleOut(row.dev, b.dataset.out);
+        break;
       case "hero": {
         const L = row.list;
         if (r === "hero-play") return playList(L, 0);
@@ -1754,18 +1808,24 @@
       if (from && from.state && from.state.track) adopt(from.state, null);
     }
   }
-  const liveOthers = () => connect.others.filter(d => d.live && d.state && d.state.track);
+  // a device with something to offer: a song to pick up, or (the house stereo only) a Spotify song or an audiobook to be a remote for
+  const liveOthers = () => connect.others.filter(d => d.live && C.offers(d.state));
   function connectChanged() {
     const devs = liveOthers(), n = devs.length;
     for (const s of els.devices) s.textContent = n ? String(n) : "";
     const roomSig = connect.others.filter(d => d.room && d.live).map(d => d.id).join(",");
     // redraw an open Devices menu (and Home's "playing elsewhere" card) only when what they show has changed
-    const st = stereoDev(), stSig = st ? [st.state.idx, (st.state.queue || []).length, st.state.mix && st.state.mix.on, st.state.mix && st.state.mix.xfade].join("|") : "";
+    const st = stereoDev();
+    S.outPending = C.settleOuts(S.outPending, st && st.state, Date.now());         // a switch the stereo now agrees with, or that ran out, is no longer a guess
+    const stSig = st ? [st.state.idx, (st.state.queue || []).length, st.state.mix && st.state.mix.on, st.state.mix && st.state.mix.xfade].join("|") : "";
     const sig = devs.map(d => [d.id, d.state.playing, d.state.title, d.state.armed, d.state.tap].join("|")).join(";") + "#" + roomSig + "#" + stSig;
-    if (sig === connect.sig) return;
-    connect.sig = sig;
+    // the stereo's pane also draws its speakers, the wait for one and the chapter: those redraw the pane, not the Devices menu
+    const viewSig = sig + "#" + (st ? C.stereoSig(st.state) : "") + "#" + Object.keys(S.outPending).join(",");
+    if (viewSig === connect.sig) return;
+    const menuSame = sig === connect.menuSig;
+    connect.sig = viewSig; connect.menuSig = sig;
     showSpotify();
-    if (menu && menu.kind === "devices") devicesMenu(menu.anchor);
+    if (!menuSame && menu && menu.kind === "devices") devicesMenu(menu.anchor);
     if ((S.route.name === "home" || S.route.name === "stereo") && !S.search && S.view && S.view.key === S.route.name) scheduleView();
   }
   function post(url, body) {
@@ -1774,10 +1834,10 @@
   /** Pick up another device's queue and place (and ask it to pause, if it is playing). */
   function adopt(s, takeOver) {
     if (!S.lib || !s) return;
-    if (isSpotify(s.track)) { toast("That's Spotify: it plays on the house stereo, not in the browser."); return; }
-    const list = (s.queue || []).map(p => S.lib.byPath.get(p)).filter(i => i !== undefined);
-    const at = list.indexOf(S.lib.byPath.get(s.track));
-    if (at < 0) { toast("That song isn't in the library any more."); return; }
+    // Spotify and audiobooks play on the house stereo and nowhere else (a refusal, shown as a toast); their items in a queue drop out of what is taken up
+    const pick = C.pickUp(s, p => S.lib.byPath.get(p));
+    if (pick.no) { toast(pick.no); return; }
+    const list = pick.items, at = pick.at;
     S.dj = s.dj !== false; S.shuffle = !!s.shuffle; if (["off", "all", "one"].includes(s.repeat)) S.repeat = s.repeat;
     S.q.load(list, at, false); syncToggles(); onQueueChanged();
     startTrack(at, { from: s.pos || 0, play: true });
@@ -1790,6 +1850,24 @@
       if (j && j.queued === false) toast(`${d.name} isn't answering right now.`);
     })).catch(() => toast("Couldn't reach the portal.")).finally(() => [1500, 4000, 7000, 10000].forEach(ms => setTimeout(checkin, ms)));   // the other player picks the command up at its next check-in, up to ~5 s on: look until the answer shows
   }
+  /** Flip one of the house stereo's speakers (`out:<id>:on|off`). The toggle shows the new state at once and holds it until the stereo's own check-in agrees
+   *  (S.outPending, BilbyCore.outsView): the radio acts on the command at its next check-in, and the old state must not flash back in the meantime. A stereo
+   *  that is not answering puts the toggle back. */
+  function toggleOut(d, id) {
+    const o = C.outsView(d.state, S.outPending, Date.now()).find(x => x.id === id), cmd = o ? C.outCommand(id, !o.on) : "";
+    if (!cmd) return;
+    S.outPending[id] = { on: !o.on, until: Date.now() + C.OUT_HOLD_MS };
+    renderView(true);
+    const undo = why => { delete S.outPending[id]; renderView(true); toast(why); };
+    post(cfg.command, { device: d.id, action: cmd }).then(r => r.json().then(j => {
+      if (j && j.queued === false) undo(`${d.name} isn't answering right now.`);
+    })).catch(() => undo("Couldn't reach the portal.")).finally(() => [1500, 4000, 7000, 10000, 13000].forEach(ms => setTimeout(checkin, ms)));    // (the last one is after the hold has run out)
+  }
+  // "Waiting for a speaker" says for how long: keep that one line current, without drawing the speakers again under a finger
+  setInterval(() => {
+    const v = S.view, i = v && Number.isInteger(v.heldRow) ? v.heldRow : -1, row = i >= 0 ? list.rows[i] : null, e = row ? list.el(i) : null;
+    if (e && row.type === "sheld") makers.sheld.bind(e, row);
+  }, 30000);
   /** Send the music to the speakers on skippy-pc. The source is this device if it is playing, else the speaker that is, else
    *  this device's own place. Each target picks the source's queue up (a "take" command); the source stops unless it is a target. */
   async function playOn(targets) {
@@ -1821,12 +1899,14 @@
       who.append(el("b", "", d.name));
       what.textContent = s.playing ? `${s.title || "Playing"} — ${s.artist || ""}` : `${s.title ? s.title + " (paused)" : "Paused"}`;
       if (isSpotify(s.track)) what.prepend(el("span", "spot", "Spotify"), " ");
+      else if (C.kindOf(s) === "book") what.insertAdjacentHTML("afterbegin", ico("book"));       // an audiobook on the stereo: a remote for it, but no "Play here"
       const acts = el("div", "acts");
       const mk = (label, icon, run) => { const b = el("button", "key"); b.type = "button"; b.dataset.tel = "music:remote-" + icon; b.innerHTML = ico(icon); b.setAttribute("aria-label", label); b.title = label; b.onclick = () => { closeMenu(true); run(); }; return b; };
       acts.append(mk(s.playing ? "Pause" : "Play", s.playing ? "pause" : "play", () => sendRemote(d, s.playing ? "pause" : "play")), mk("Next", "next", () => sendRemote(d, "next")),
                   mk("Play here", "link", () => adopt(s, s.playing ? d.id : null)));
       box.append(who, what);
       if (s.armed === false || s.tap) box.append(el("div", "what need", "This player needs a tap first: browsers only play sound after a tap on the page. Play from here still works."));
+      if (s.held) box.append(el("div", "what need", C.heldNote(s)));                  // the radio paused the stream itself (no speaker is listening, or the car has the book)
       box.append(acts); items.push({ node: box });
     }
     openMenu(anchor, "", items, "devices");
@@ -1980,7 +2060,8 @@
   setInterval(() => { if (S.lib && !gate.fresh() && (room || !document.hidden)) gate.ensure().catch(() => {}); }, 5 * 60 * 1000);
   if (window.ResizeObserver) {
     let rt = 0;
-    new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { if (S.lib) { list.resize(); if (S.view && S.view.home) buildDeck(); } }, 120); }).observe($("#stage"));
+    // (the stereo's pane cuts its speakers into lines for the width it has: a different width makes the rows again, not only the screens)
+    new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(() => { if (S.lib) { if (S.view && S.view.key === "stereo" && !S.search) renderView(true); else list.resize(); if (S.view && S.view.home) buildDeck(); } }, 120); }).observe($("#stage"));
     new ResizeObserver(() => qList.resize()).observe($("#q-scroll"));      // the queue is measured only once its sheet is on screen
   }
 
