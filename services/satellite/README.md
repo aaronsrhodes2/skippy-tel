@@ -225,18 +225,19 @@ himself; there is no hook built for it yet.
   where was I, stop in twenty minutes (or at the end of the chapter), read faster / normal speed. These plain commands are caught by `book_voice.pre_route` BEFORE the model
   (Skippy Core's chat model answers "stop" with a joke and never calls a tool): the `audiobook` tool runs first and the model only words the answer in character, with no tools,
   and is told never to read or invent the book. Anything else goes to the model, which has the same `audiobook` tool. "Stop"/"pause" and "resume" mean the book only while a
-  book is playing or was the last thing played; otherwise they are Bilby's.
-* **Where it plays:** the pod's speaker (the hub's media server turns the file into 16 kHz FLAC from any second at any speed: `/b/<secret>/<token>.flac?s=&t=`, the box never sees a
-  path), and skippy-pc's own outputs named in `SATELLITE_OUT` (HDMI, the "Enclave Audio" Bluetooth stereo when it is on), streamed by ffmpeg into sounddevice (`book_out.py`),
-  started with the same `SATELLITE_OUT_DELAYS` as his voice. The clock is the player's, so the outputs only ever start, stop and start again from a second.
-  Starting a book pauses Bilby's music in that room and the other way round.
-* **With his voice:** on the PC outputs the book ducks to 20 % when the name is heard and while Skippy talks, and comes back after the conversation window. The pod's own
-  speaker ducks its media under an announcement itself, as it does for music. The outputs line up by the configured start delays, not by measurement (so there can be a
-  fraction of a second between the pod and a PC output; tune `SATELLITE_OUT_DELAYS` by ear).
+  book is playing or is the station's current item; otherwise they are Bilby's (it is one stop either way).
+* **Where it plays (2026-11-05, the Captain: "Bilby plays all the audio, even Audible books"):** a book is an ITEM OF THE HOUSE RADIO'S QUEUE (`book:<id>`, [RADIO.md](RADIO.md)), so it is the
+  one stream: it comes out of whichever speakers are switched on (the Sony, the Enclave, a box tuned in), the volume is the station's, pause / resume / next (a chapter, in a book) /
+  what's playing are the station's, and Skippy's voice ducks it with everything else. The engine below (`BookPlayer`: the place, the chapters, the speed, the sleep timer) lives in the
+  radio process (`radio.py` builds it on `stereo.StationBookOut`), so a hub restart cannot stop a book and the radio's own restart resumes it at the place the store kept. Music started
+  over a book replaces it and the place is kept ("read my book" carries on); a book that ends goes on to the next item of the queue. The hub holds no book player any more: the
+  `audiobook` tool and the plain commands (`book_voice.pre_route`, reading the radio's `/state` through `radio_client.BookView`) go to the radio like every music tool.
+* **The car:** a book the car is playing (the Drive page saves its place with `src: car, playing` every few seconds) makes the house let go of its copy without writing its own place
+  over the car's (`HouseRadio.car_tick`); "play my book" at home carries on from the car's place.
 * **The portal's Audiobooks app** (`/audiobooks`, docs/portal/README.md): the browser saves its place into `state/audiobooks-inbox/` (through `services/audiobook-gate`), which `Store` merges
-  (newest wins), and the box's Connect check-in carries `state.book`; a `book:` command from the page (`play:<id>[:<s>]`, `pause`, `resume`, `skip:<s>`, `chapter:<±1>`, `speed:<x>`) is run by
-  `audiobooks.run_command` on the room's `BookPlayer`.
-* Tests: `tests/test_sat_audiobooks.py` (real ffmpeg builds a synthetic multi-chapter m4b and a track-per-chapter folder).
+  (newest wins), and the House stereo's Connect check-in carries `state.book` (never as a `track`); a `book:` command from the page (`play:<id>[:<s>]`, `pause`, `resume`, `skip:<s>`,
+  `chapter:<±1>`, `speed:<x>`) is run by `audiobooks.run_command` with the station as its transport (`music.BookTransport`); a pod forwards its own to the radio, which plays on that room.
+* Tests: `tests/test_sat_audiobooks.py` (the engine; real ffmpeg builds a synthetic multi-chapter m4b and a track-per-chapter folder), `tests/test_sat_book_item.py` (the book as the station's queue item).
 
 ## Alarms and timers: the house's alarm clock (`alarm_clock.py`, `alarms.py`, `timers.py`; the portal's `/alarms`)
 
@@ -274,14 +275,27 @@ can change it, or add to it, but they are not the players."* Bilby's music no lo
 * **One stream, every speaker tuned in:** the radio has its own router with the hub's outputs and the hub's delays (sync.py's alignment): the
   Sony on the HDMI (Windows mixes it with the hub's voice), the Enclave on skippy-core's snapserver source `radio` (:4954, its own snapclient
   `enclave-radio`; PipeWire mixes it with the hub's stream), and pods through the `pods` tap (one live FLAC stream, `/live/<secret>.flac` on
-  :47851, that a pod's media player plays from the radio, never the hub). "everywhere / upstairs / downstairs / here / a room" switches which
-  speakers play the one station (`"pod:<room>"` for a pod's own speaker); they never play different songs.
-* **The hub is a remote:** `hub.music_tools` hands every music tool to the radio (`POST /tool`, with the asking room, so "here" is that room's
-  speakers); it keeps only the room's audiobook and where Skippy's voice comes from. The routines' shuffle and stop, Connect commands to a pod
-  ("Play on" a pod puts the station in its room) go to the radio too. The station itself checks in to Connect as "House stereo", so the
-  portal's players and the car steer it.
-* **Ducking:** when Skippy speaks in a room (`Room._woke`, `_say`), that room's speakers duck the station (`POST /duck`, `Router.duck_kinds`),
-  the other floors play on.
+  :47851, that a pod's media player plays from the radio, never the hub). They never play different songs.
+* **The devices decide (2026-11-05, the Captain: "a single audio stream going out and the devices decide if they are outputting that stream or not"):** every speaker has a
+  switch kept in `state/radio/outputs.json` (`outputs.py`): the Sony and the Enclave are on or off (everything on until he says otherwise; a missing or torn file means every
+  stereo on, never silence; the first start after the switches arrived keeps where the stream played), a room's box is `auto` (silent), `on` or `off`. A box on `auto` plays only to
+  cover for its floor's stereo that is switched on but has been gone for 20 s (the Enclave drops for ~30 s on every Tesla charge command); a stereo he switched off is respected
+  and nothing covers for it. "Everywhere / upstairs / downstairs / a room" are only SHORTCUTS that set the switches (exactly those on, the other stereos off), "here" is no longer
+  the default (a play that names no place leaves the switches alone), and the `speakers` tool takes `device` + `on` ("turn the Sony off", "play it on the Sony too":
+  `brain.device_route`). The portal's Bilby page shows them as toggles (Connect state `outs`, command `out:<id>:on|off`). Flipping a switch moves what plays at once: the same
+  play, the same song, never restarted.
+* **No listener, no stream (the Captain, 2026-11-05: "If no devices are listening, the stream should pause"):** `HouseRadio.listen_tick`, once a second. When the last speaker
+  that is on is switched off the stream is held at once; when it is on but drops out it gets 30 s to come back or for a box to cover (`RADIO_HOLD_S`, 0 turns the rule off),
+  then it is held and the place is put back to where the sound was lost, not 30 s on. A play with every speaker off is held at once (the reply says so). It carries on by itself
+  when a speaker is back within 10 minutes (`RADIO_RESUME_S`) and nobody gave a command since (`BoxMusic.epoch`); otherwise it stays an ordinary pause. A hold is the radio's own
+  pause, never counted as his stop (`RadioClient.pauses`), survives a radio restart (`station.json` keeps `held`), and is in `/state` (`held`, `listening`) and Connect.
+* **The hub is a remote:** `hub.music_tools` hands every music tool, the audiobook's too, to the radio (`POST /tool`, with the asking room). It keeps only where
+  Skippy's voice comes from. The routines' shuffle and stop, Connect commands to a pod ("Play on" a pod sets that room's box on) go to the radio too. The station itself
+  checks in to Connect as "House stereo", so the portal's players and the car steer it.
+* **Ducking:** Skippy's voice ducks the WHOLE stream on every speaker, whichever room he is in (he is the only listener). Each voice is a holder with its own expiry
+  (`POST /duck {holder}`: `room:<name>` from `Room._woke` / `_say`, `router` from the hub's router for any clip: an alarm, a timer, an announcement), so one finishing never
+  brings the stream back while another still talks, and a hub that dies mid-sentence cannot leave it ducked. `speaker_out.Ducker` leaves the radio's process alone (it ducks
+  itself; the Sony would be ducked twice).
 * **A hub restart never stops or skips the music:** nothing the hub holds plays; a pod tuned in keeps the radio's stream, and a hub that comes
   back finds it playing and leaves it alone. Tests: `tests/test_sat_radio.py`, `tests/test_sat_esphome.py` (the pod as tuner and remote).
 * **Stopping Bilby, and the chat knowing what Bilby is (the Captain, 2026-11-04):** *"Bilby plays all the audio, even Audible books ... a single audio
@@ -295,8 +309,9 @@ can change it, or add to it, but they are not the players."* Bilby's music no lo
   is, how to talk to it (play_music / music / speakers / dj_mode / spotify / audiobook), the tools this voice really has and what it does not (his car,
   Mentat, code), and, last, `houseaudio.Audio.status()`: what plays and where, volume, queue, a loaded book, a running routine, and who started the
   music (`houseaudio.note_start`). A question about the house ("why is the Enclave playing metal?") answered with how things stand is no claim
-  (`musicguard.describing`). Tests: `tests/test_sat_stop_bilby.py`. Not yet one stream: an audiobook is still its own player (`audiobooks.py`) that
-  pauses the station; the next step is the book as a queue item of the station and each device opting in or out of the one stream.
+  (`musicguard.describing`). Tests: `tests/test_sat_stop_bilby.py`. Since 2026-11-05 it is one stream: the book is an item of the station's queue and each speaker
+  opts in or out with its switch (the three bullets above); `houseaudio.Audio.status()` says each speaker's state (playing, switched off, gone, silent), a held stream and
+  its reason, and a book as "the audiobook 'X', chapter n of m". Tests: `tests/test_sat_book_item.py`, `tests/test_sat_outputs.py`.
 * **The chat knows what it can reach, and is asked again when it denies it (the Captain, 2026-11-05: the house chat "still gets confused about what it has
   access to"):** the prompt's "What you are" paragraph lists the real tool names and, in his words, what they are (`brain.CAPS`: the house, Bilby, audiobooks,
   alarms, timers, lists, announcements, the news, a web search, the weather, his car, Mentat; a phrase only while its tool is here). A reply that says

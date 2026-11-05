@@ -6,10 +6,11 @@ chapter markers (ffprobe), else one chapter per file of a track-per-chapter fold
 
 * Library      scans the folder (ffprobe, cached by file size and time), finds a book by loose title or author ("the dragon one").
 * Store        per-book state in state/audiobooks.json: place, speed, last played, finished; written atomically, at most a few seconds old.
-* BookPlayer   one room's book: a clock that knows where in the book it is, and the outputs it plays on: the pod's speaker (a URL from the hub's
-               media server, like Bilby's tracks) and skippy-pc's own outputs (book_out.py: HDMI, the Bluetooth stereo), started with the same
-               delays as Skippy's voice. Pause, resume (a few seconds back after a long pause), chapters, +-30 s, speed, a sleep timer, ducking.
-* book_tools   the `audiobook` tool for Skippy's brain.
+* BookPlayer   the book engine: a clock that knows where in the book it is, and the outputs it plays on. Since 2026-11-05 there is ONE, in the house radio
+               (radio.py): its output is the station's (stereo.StationBookOut), and the book is an item of the station's queue ("book:<id>"), so pause, resume,
+               next, volume, what's playing and ducking are the station's; the engine keeps the place, the chapters, the speed and the sleep timer. (The pod and
+               PC outputs of the hub's old per-room player are still here until the radio has played books for a day.)
+* run_tool / run_command   the `audiobook` tool and the portal's `book:` commands; the radio runs them with the station as their transport (station.audiobook).
 
 The place is kept in book seconds, so it survives a restart however the book is cut into files.
 """
@@ -221,6 +222,7 @@ class Store:
         self.path, self.wall, self.mono = Path(path), wall, mono
         self.inbox = Path(inbox) if inbox is not None else None   # places saved from the browser (services/audiobook-gate): one small file per book
         self._inbox_at = -INBOX_EVERY_S
+        self.marks: dict[str, dict] = {}                       # book id -> {src, playing, seen} of the newest place saved from a browser (memory only: the file keeps its shape)
         self.data = {"version": 1, "current": None, "books": {}}
         self._saved = 0.0
         self._dirty = False
@@ -257,6 +259,7 @@ class Store:
             mine = self.data["books"].get(bid) or {}
             self.data["books"][bid] = {**mine, "pos": float(d.get("pos") or 0), "chapter": int(d.get("chapter") or 0), "speed": float(d.get("speed") or 1.0),
                                        "last_played": int(seen), "finished": d.get("finished") is True}
+            self.marks[bid] = {"src": str(d.get("src") or ""), "playing": d.get("playing") is True, "seen": float(seen)}
             cur = self.data.get("current")
             if not cur or seen > float((self.data["books"].get(cur) or {}).get("last_played") or 0):
                 self.data["current"] = bid
@@ -272,7 +275,15 @@ class Store:
         self.data["books"][bid] = p
         if current:
             self.data["current"] = bid
+        self.marks.pop(bid, None)                              # our own place is the newest now: the browser's "playing" no longer says anything
         self._dirty = True
+
+    def car_playing(self, bid: str, now: float | None = None, fresh_s: float = 15.0) -> bool:
+        """The car (the portal's Drive page) is playing this book right now: its newest place says so and was saved a moment ago."""
+        self.merge_inbox(force=True)
+        m = self.marks.get(bid or "")
+        now = self.wall() if now is None else now
+        return bool(m and m["src"] == "car" and m["playing"] and now - m["seen"] <= fresh_s)
 
     def last_unfinished(self, ids) -> str | None:
         ids = [i for i in ids if not self.progress(i).get("finished") and self.progress(i).get("last_played")]
@@ -297,9 +308,11 @@ class BookPlayer:
     """One room's audiobook. `pod` is the box's link (async play(url), stop()) or None; `media` makes the pod's URLs; `pc_outs` are book_out.PcBookOut."""
 
     def __init__(self, library: Library, store: Store, pod=None, media=None, towards: str = "", pc_outs=(), clock=time.monotonic, wall=time.time,
-                 yield_to=None, log=print, name: str = ""):
+                 yield_to=None, log=print, name: str = "", on_end=None, on_halt=None):
         self.library, self.store, self.pod, self.media, self.towards = library, store, pod, media, towards
         self.pc_outs, self.clock, self.wall, self.yield_to, self.log, self.name = list(pc_outs), clock, wall, yield_to, log, name
+        self.on_end = on_end                                   # async: the book's last file ended (the station goes on to the next queue item)
+        self.on_halt = on_halt                                 # async: the book stopped itself (the sleep timer): the station is paused too
         self.book: dict | None = None
         self.offset, self.started, self.playing, self.speed = 0.0, 0.0, False, 1.0
         self.paused_at = 0.0
@@ -491,10 +504,12 @@ class BookPlayer:
         if self.sleep_at is not None and now >= self.sleep_at:
             self.log(f"[{self.name}] book: sleep timer, stopping")
             await self.pause()
+            await self._hook(self.on_halt)
             return
         if self.sleep_chapter_end is not None and pos >= self.sleep_chapter_end - 0.6:
             self.sleep_chapter_end = None
             await self.pause()
+            await self._hook(self.on_halt)
             return
         f = self.book["files"][self._file_idx]
         if pos >= f["book_start"] + f["dur"] - 0.3:
@@ -505,6 +520,26 @@ class BookPlayer:
                 await self._stop_outputs()
                 self._remember(force=True, finished=True)
                 self.log(f"[{self.name}] book: finished {self.book['title']}")
+                await self._hook(self.on_end)
+
+    async def _hook(self, hook) -> None:
+        """The station's bookkeeping (queue, transport) after the book stopped by itself: its failure must never stop the clock."""
+        if hook is None:
+            return
+        try:
+            await hook()
+        except Exception as e:                                 # noqa: BLE001
+            self.log(f"[{self.name}] (book hook failed: {type(e).__name__}: {e})")
+
+    async def hand_over(self) -> None:
+        """Another player (the car) has the book: stop here WITHOUT writing our place over theirs, and take theirs as ours."""
+        if self.book is None:
+            return
+        self.playing, self.sleep_at, self.sleep_chapter_end = False, None, None
+        await self._stop_outputs()
+        prog = self.store.progress(self.book["id"])
+        self.offset = min(float(prog.get("pos") or 0.0), max(0.0, self.book["duration"] - 1))
+        self.log(f"[{self.name}] book: handed over at {say_time(self.offset)}")
 
     async def shutdown(self) -> None:
         if self._ticker is not None:
@@ -512,8 +547,40 @@ class BookPlayer:
         await self.pause()
 
 
+# ── a book as an item of the station's queue (the Captain, 2026-11-05: "Bilby plays all the audio, even Audible books") ──
+ITEM = "book:"                                                 # queue items are "book:<id>"; the portal's commands are "book:play:<id>" (COMMAND below): another channel
+
+
+def item(bid: str) -> str:
+    return ITEM + bid
+
+
+def is_item(x) -> bool:
+    return isinstance(x, str) and x.startswith(ITEM) and len(x) > len(ITEM)
+
+
+def item_id(x: str) -> str:
+    return x[len(ITEM):]
+
+
+class Direct:
+    """The default transport: the book's own player starts, pauses and resumes the book (the tests; a room with a book of its own)."""
+
+    def __init__(self, player: BookPlayer):
+        self.player = player
+
+    async def play(self, bid: str) -> dict:
+        return await self.player.play(bid)
+
+    async def pause(self) -> None:
+        await self.player.pause()
+
+    async def resume(self) -> dict:
+        return await self.player.resume()
+
+
 # ── the portal's Audiobooks app: what a box says it is doing, and what it is told (Connect, music.py) ──
-COMMAND = re.compile(r"book:(?:play:(?P<id>[a-z0-9-]{1,200})(?::(?P<pos>\d{1,6}(?:\.\d)?))?|(?P<verb>pause|resume)|skip:(?P<skip>-?\d{1,4})|chapter:(?P<chap>-?1)|speed:(?P<speed>\d(?:\.\d{1,2})?))")
+COMMAND =re.compile(r"book:(?:play:(?P<id>[a-z0-9-]{1,200})(?::(?P<pos>\d{1,6}(?:\.\d)?))?|(?P<verb>pause|resume)|skip:(?P<skip>-?\d{1,4})|chapter:(?P<chap>-?1)|speed:(?P<speed>\d(?:\.\d{1,2})?))")
 
 
 def book_state(player: BookPlayer | None) -> dict | None:
@@ -524,29 +591,51 @@ def book_state(player: BookPlayer | None) -> dict | None:
     return {"id": player.book["id"], "title": w["title"], "pos": w["pos"], "chapter": w["chapter"], "playing": w["playing"], "speed": w["speed"]}
 
 
-async def run_command(player: BookPlayer, action: str) -> bool:
-    """One of the portal's `book:` commands, on the hub's loop. False when it was not one (or not for a book we have)."""
+def book_view(player: BookPlayer | None) -> dict | None:
+    """The house radio's /state `book` (radio.py): what the hub's voice needs about the loaded book (book_voice.pre_route, houseaudio): book_state, plus the
+    author, the chapter's name, what is left, and whether a sleep timer is set. None when no book is loaded."""
+    if player is None or player.book is None:
+        return None
+    w = player.where()
+    return {**book_state(player), "author": w["author"], "chapters": w["chapters"], "chapter_title": w["chapter_title"], "into_chapter": round(w["into_chapter"], 1),
+            "left": round(w["left"], 1), "sleeping": bool(player.sleep_at or player.sleep_chapter_end)}
+
+
+def build_engine(env: dict, out, state: Path | None = None, log=print, on_end=None, on_halt=None) -> BookPlayer | None:
+    """The house radio's audiobook engine (radio.py): one shelf, one store (the radio is the only one that writes it; the car's places arrive by the inbox),
+    and one output, the station's (stereo.StationBookOut). None when SATELLITE_AUDIOBOOKS=off."""
+    raw = (env.get("SATELLITE_AUDIOBOOKS") or "").strip()
+    if raw.lower() in ("off", "0", "no"):
+        return None
+    state = Path(state) if state is not None else Path(__file__).resolve().parents[2] / "state"
+    lib = Library(Path(raw) if raw else default_dir(), state / "audiobooks-library.json", log=log)
+    store = Store(state / "audiobooks.json", inbox=state / "audiobooks-inbox")
+    return BookPlayer(lib, store, pc_outs=[out], log=log, name="stereo", on_end=on_end, on_halt=on_halt)
+
+
+async def run_command(player: BookPlayer, action: str, transport=None) -> bool:
+    """One of the portal's `book:` commands, on the loop of whoever owns the player. False when it was not one (or not for a book we have).
+    `transport` starts, pauses and resumes it (the radio's station: the book is an item of its queue); the default is the player itself."""
     m = COMMAND.fullmatch(action)
     if not m:
         return False
+    t = transport or Direct(player)
     if m["id"]:
         await asyncio.to_thread(player.library.refresh)
         if player.library.get(m["id"]) is None:
             return False
         if m["pos"] is not None:
             player.load(m["id"])
-            await player.seek(float(m["pos"]))                 # remembered at once, so play() starts from it
-            await player.play()
-        else:
-            await player.play(m["id"])
+            await player.seek(float(m["pos"]))                 # remembered at once, so the start picks it up
+        await t.play(m["id"])
     elif player.book is None:
         player.load(player.store.current) if player.store.current in player.library.books else None
         if player.book is None:
             return False
     if m["verb"] == "pause":
-        await player.pause()
+        await t.pause()
     elif m["verb"] == "resume":
-        await player.resume()
+        await t.resume()
     elif m["skip"]:
         await player.skip(float(m["skip"]))
     elif m["chap"]:
@@ -560,10 +649,11 @@ async def run_command(player: BookPlayer, action: str) -> bool:
 BOOK_TOOLS = [
     {"name": "audiobook",
      "description": ("ALWAYS call this for anything about his audiobook: you cannot see the book or know where he is, so never answer from memory or pretend. "
-                     "The Captain's audiobooks (DRM-free files in his library), read aloud by the hub in THIS room, on the pod's speaker and the PC's outputs. "
-                     "'read my book' / 'continue' / 'play <a few words of the title or author>' is play; with no title it continues the book he was on. "
-                     "While a book is playing, 'stop' and 'pause' mean pause. where is 'where was I' / 'what is this'. sleep is 'stop in 20 minutes' "
-                     "(or end_of_chapter). You never read the book yourself and never invent its text: the tool does the reading."),
+                     "The Captain's audiobooks (DRM-free files in his library), played by Bilby: an audiobook is an item of the same ONE stream as his music, on whichever "
+                     "speakers are on. 'read my book' / 'continue' / 'play <a few words of the title or author>' is play; with no title it continues the book he was on "
+                     "(it replaces what plays; the book keeps its place). While a book is playing, 'stop' and 'pause' mean pause (the music tool's pause does the same). "
+                     "where is 'where was I' / 'what is this'. sleep is 'stop in 20 minutes' (or end_of_chapter). You never read the book yourself and never invent "
+                     "its text: the tool does the reading."),
      "input_schema": {"type": "object", "properties": {
          "action": {"type": "string", "enum": ["play", "pause", "resume", "next_chapter", "previous_chapter", "back", "forward", "where", "sleep", "speed", "list"]},
          "title": {"type": "string", "description": "a few words of the title or author, as he said them (play)"},
@@ -581,9 +671,11 @@ def _titles(books: list[dict], n: int = 4) -> str:
     return "; ".join(f"{b['title']}" + (f" by {b['author']}" if b["author"] else "") for b in books[:n])
 
 
-async def run_tool(player: BookPlayer, args: dict) -> str:
-    """The audiobook tool, on the hub's loop. Returns what the brain should say, as a plain sentence with a hint at the style."""
+async def run_tool(player: BookPlayer, args: dict, transport=None) -> str:
+    """The audiobook tool, on the loop of whoever owns the player. Returns what the brain should say, as a plain sentence with a hint at the style.
+    `transport` starts, pauses and resumes the book (the radio's station); the default is the player itself."""
     lib = player.library
+    t = transport or Direct(player)
     action = str(args.get("action") or "")
     await asyncio.to_thread(lib.refresh)
     if not lib.books:
@@ -608,7 +700,7 @@ async def run_tool(player: BookPlayer, args: dict) -> str:
                 bid = bid or (next(iter(lib.books)) if len(lib.books) == 1 else None)       # one book on the shelf: that one
                 if not bid:
                     return f"He has not started a book yet. His books: {_titles(sorted(lib.books.values(), key=lambda b: b['title'].lower()))}. Ask which one."
-            w = await player.play(bid)
+            w = await t.play(bid)
             return (f"{BOOK_STYLE}Playing {w['title']}" + (f" by {w['author']}" if w["author"] else "") +
                     f", chapter {w['chapter']} of {w['chapters']}, {w['chapter_title']}, at {say_time(w['pos'])} in.")
         if player.book is None:
@@ -617,11 +709,11 @@ async def run_tool(player: BookPlayer, args: dict) -> str:
                 return "No book is chosen yet; ask which one he wants."
             player.load(bid)
         if action == "pause":
-            await player.pause()
+            await t.pause()
             w = player.where()
             return f"{BOOK_STYLE}Paused {w['title']} at chapter {w['chapter']}, {say_time(w['into_chapter'])} in; it keeps his place."
         if action == "resume":
-            w = await player.resume()
+            w = await t.resume()
             return f"{BOOK_STYLE}Continuing {w['title']}, chapter {w['chapter']}, {w['chapter_title']}."
         if action == "next_chapter":
             w = await player.next_chapter()
@@ -656,23 +748,6 @@ async def run_tool(player: BookPlayer, args: dict) -> str:
     return "I cannot do that with a book."
 
 
-def book_tools(room_of, loop):
-    """(tools, run) for Brain(extra=...), like hub.music_tools: the brain runs in a worker thread, the book on the hub's loop."""
-    def run(name: str, args: dict) -> str:
-        room = room_of()
-        player = getattr(room, "book", None)
-        if player is None:
-            return "This room has no way to play books."
-        try:
-            out = asyncio.run_coroutine_threadsafe(run_tool(player, args if isinstance(args, dict) else {}), loop).result(60)
-        except Exception as e:                                 # noqa: BLE001 — said aloud, not raised
-            return f"The book did not answer ({type(e).__name__})."
-        if (args or {}).get("action") in ("play", "resume"):
-            room.last_media = "book"
-        return out
-    return BOOK_TOOLS, run
-
-
 def combine(*pairs):
     """Merge several (tools, run) pairs (None allowed) into one for Brain(extra=...)."""
     pairs = [p for p in pairs if p]
@@ -686,28 +761,3 @@ def combine(*pairs):
                 return fn(name, args)
         return "I have no such tool."
     return tools, run
-
-
-def build_player(env: dict, room: str, link=None, log=print) -> BookPlayer | None:
-    """A room's BookPlayer from the vault settings, or None when the library folder setting is switched off (SATELLITE_AUDIOBOOKS=off)."""
-    import book_out                                           # noqa: PLC0415
-    raw = (env.get("SATELLITE_AUDIOBOOKS") or "").strip()
-    if raw.lower() in ("off", "0", "no"):
-        return None
-    state = Path(__file__).resolve().parents[2] / "state"
-    lib = _libraries.setdefault(raw, Library(Path(raw) if raw else default_dir(), state / "audiobooks-library.json", log=log))
-    store = _stores.setdefault(str(state), Store(state / "audiobooks.json", inbox=state / "audiobooks-inbox"))
-    import speaker_out                                        # noqa: PLC0415
-    pod_on = speaker_out.parse_outputs(env, room, log)[0]
-    has_pod = pod_on and link is not None and "player" in getattr(link, "keys", {})
-
-    async def yield_to() -> None:
-        m = getattr(link, "music", None)                       # Bilby's music on the same box (set once the box is connected)
-        if m is not None and getattr(m, "playing", False):
-            await m.pause()
-    return BookPlayer(lib, store, pod=link if has_pod else None, media=getattr(link, "media", None) if has_pod else None,
-                      towards=getattr(link, "box_host", ""), pc_outs=book_out.build_outputs(env, room, log), yield_to=yield_to, log=log, name=room)
-
-
-_libraries: dict = {}
-_stores: dict = {}

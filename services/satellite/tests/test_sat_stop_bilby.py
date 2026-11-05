@@ -72,14 +72,13 @@ class FakeRadio:
         return dict(self.last)
 
 
-def music_brain(*rounds, radio=None, book=None, routine=""):
+def music_brain(*rounds, radio=None, routine=""):
     ran = []
     tools = [{"name": n, "description": n, "input_schema": {"type": "object", "properties": {}}} for n in ("play_music", "music", "speakers", "dj_mode", "audiobook")]
     b, c, *_ = make(*rounds)
     b.extra_tools, b.run_extra = tools, lambda name, args: ran.append((name, args)) or f"({name} done)"
-    room = NS(book=book)
     routines = NS(busy=bool(routine), run=NS(name=routine))
-    b.audio = houseaudio.Audio(radio, lambda: room, routines)
+    b.audio = houseaudio.Audio(radio, routines)
     return b, c, ran
 
 
@@ -90,16 +89,17 @@ def test_stop_bilby_runs_the_music_tool_before_the_model_and_the_model_only_word
 
 
 def test_a_bare_stop_while_a_book_plays_reaches_the_tool_and_a_bare_stop_with_nothing_playing_does_not():
-    b, c, ran = music_brain([text("Quiet.")], radio=FakeRadio(playing=False), book=NS(playing=True, where=lambda: {}))
+    b, c, ran = music_brain([text("Quiet.")], radio=FakeRadio(playing=True, kind="book", title="Aces", book={"title": "Aces", "chapter": 3, "chapters": 9}))     # a book is the station's item
     assert b.reply("enough") == "Quiet." and ran == [("music", {"action": "pause"})]
     b, c, ran = music_brain([text("Enough of what, monkey?")], radio=FakeRadio(playing=False))
     assert b.reply("enough") == "Enough of what, monkey?" and ran == [] and "tools" in c.calls[0]
+    assert "the audiobook 'Aces' by A. Writer, chapter 3 of 9" in houseaudio.station_line(dict(playing=True, kind="book", title="Aces", book={"title": "Aces", "author": "A. Writer", "chapter": 3, "chapters": 9},
+                                                                                         open=["enclave"], level=0.5))
 
 
 def test_the_prompt_teaches_bilby_lists_the_real_tools_and_says_what_plays_right_now():
     state = dict(playing=True, title="Gasoline", artist="MDFMK", open=["enclave"], speakers=["enclave"], closed=[], level=0.7, queue_len=700, dj=True)
-    b, c, ran = music_brain([text("Done.")], radio=FakeRadio(**state), book=NS(playing=False, where=lambda: {"title": "Aces", "author": "A. Writer", "chapter": 3, "chapters": 9, "playing": False}),
-                            routine="homecoming")
+    b, c, ran = music_brain([text("Done.")], radio=FakeRadio(**state), routine="homecoming")
     b.reply("hello")
     system = c.calls[0]["system"]
     assert "Bilby: the house's audio" in system and "the ONE player" in system and "single stream" in system and "last-resort speaker" in system
@@ -107,7 +107,7 @@ def test_the_prompt_teaches_bilby_lists_the_real_tools_and_says_what_plays_right
     assert "Out of your reach from here: his car, physics calculations (Mentat)" in system and "Never claim you did what no tool did" in system
     live = system.split("## Right now in the house\n", 1)[1]
     assert "Bilby is playing Gasoline by MDFMK on the Enclave upstairs. Volume is 7 of 10. 700 tracks are queued, DJ mode is on." in live
-    assert "'Aces' by A. Writer is loaded but paused (chapter 3)" in live and "homecoming routine is running" in live
+    assert "homecoming routine is running" in live
     b2, c2, _ = music_brain([text("Done.")])
     b2.audio = None
     b2.reply("hello")
@@ -176,14 +176,10 @@ def test_the_house_log_feeds_the_recently_lines_so_the_chat_can_say_why_the_musi
     assert "not answering" in houseaudio.Audio(None, hlog=NS(recent=lambda: 1 / 0)).status()           # a broken log never breaks the prompt
 
 
-def test_audio_playing_means_the_station_or_a_book_and_never_raises():
-    book = NS(playing=False, where=lambda: None)
-    room = NS(book=book)
-    a = houseaudio.Audio(FakeRadio(playing=False), lambda: room)
-    assert not a.playing()
-    book.playing = True
-    assert a.playing() and houseaudio.Audio(FakeRadio(playing=True), lambda: NS(book=None)).playing()
-    broken = houseaudio.Audio(NS(), lambda: 1 / 0, NS(busy=True, run=None))
+def test_audio_playing_means_the_station_which_includes_a_book_and_never_raises():
+    assert not houseaudio.Audio(FakeRadio(playing=False)).playing()
+    assert houseaudio.Audio(FakeRadio(playing=True, kind="book")).playing()                     # a book is an item of the one stream: the station playing is the house playing
+    broken = houseaudio.Audio(NS(), NS(busy=True, run=None))
     assert broken.playing() is False and "not answering" in broken.status()
 
 
@@ -196,6 +192,11 @@ def test_radio_client_counts_his_stops_through_the_music_tool_only():
     c.tool("play_music", {"genre": "goth"})
     c.tool("music", {"action": "stop"})
     assert c.pauses == 2
+    c.tool("audiobook", {"action": "where"})
+    assert c.pauses == 2
+    c.tool("audiobook", {"action": "pause"})                                 # a book is the same stream: its pause is the one stop, and his
+    assert c.pauses == 3
+    c.pauses = 2
     asyncio.run(c.stop())                                                    # a routine's own stop is not his
     assert c.pauses == 2
 

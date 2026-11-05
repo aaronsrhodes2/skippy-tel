@@ -7,12 +7,14 @@ import asyncio
 import json
 import sys
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import outputs  # noqa: E402
 import radio  # noqa: E402
 import radio_client  # noqa: E402
 import router as rt  # noqa: E402
@@ -50,9 +52,14 @@ def world_router():
     return r, w
 
 
-def make_house(clock=None, spotify=None):
+def make_house(clock=None, spotify=None, switches=None, mono=None, wall=None, **kw):
+    """`switches`: where the speakers' switches are kept (a restart of the radio finds them there); `mono`: the clock of the hold and of a box covering;
+    `wall`: the radio's wall clock (when it was held, how fresh the car's place is)."""
     r, w = world_router()
-    h = radio.HouseRadio(r, ["hdmi"], Media(), log=lambda *a: None, popen=FakeProc, clock=clock or Clock(), spotify=spotify)
+    sw = outputs.Outputs(["hdmi", "enclave"], ["living"], {"hdmi": "downstairs", "enclave": "upstairs", "pod:living": "upstairs"}, path=switches,
+                         clock=mono or time.monotonic, seed=["hdmi"]) if (switches or mono) else None
+    h = radio.HouseRadio(r, ["hdmi"], Media(), outputs=sw, mono=mono or time.monotonic, wall=wall or time.time, log=lambda *a: None, popen=FakeProc, clock=clock or Clock(),
+                         spotify=spotify, **kw)
     return h, r
 
 
@@ -74,9 +81,9 @@ def stop_all(loop, h):
 # ── the radio's own restart resumes where it was ──
 def test_the_radio_restarting_resumes_the_same_track_at_the_same_place_on_the_same_speakers(tmp_path):
     loop, clock = on_loop(), Clock()
-    h, r = make_house(clock)
+    h, r = make_house(clock, switches=tmp_path / "outputs.json")
     call(loop, h.box.play_queue(list(CAT), 1))
-    h.move(["hdmi", "enclave"])
+    h.place(["hdmi", "enclave"])                                    # "now upstairs too": the switches are kept on disk
     h.set_level(0.6)
     clock.t += 73.0
     rad = radio.Radio(ENV, h, state=tmp_path, log=lambda *a: None)
@@ -86,7 +93,7 @@ def test_the_radio_restarting_resumes_the_same_track_at_the_same_place_on_the_sa
     stop_all(loop, h)
 
     loop2 = on_loop()
-    h2, r2 = make_house()                                           # a new process: nothing in memory
+    h2, r2 = make_house(switches=tmp_path / "outputs.json")         # a new process: nothing in memory but the files
     assert call(loop2, h2.restore(rad.load(), log=lambda *a: None))
     assert h2.box.idx == 1 and h2.box.playing and h2.speakers == {"enclave", "hdmi"} and h2.level == 0.6
     args = r2.plays[max(r2.plays)].source.proc.args
@@ -162,16 +169,18 @@ def test_the_grammar_goes_through_the_radios_api_and_the_hub_only_asks(tmp_path)
     client = radio_client.RadioClient(f"http://127.0.0.1:{port}", log=lambda *a: None, start=False)
 
     class Room:
-        name, book, last_media = "living", None, "music"
+        name = "living"
     hub_loop = on_loop()
     _, run = hub.music_tools(lambda: Room, hub_loop, stereo=lambda: client)
     said = run("play_music", brain.music_grammar("hey skippy, play goth songs downstairs on discovery mode"))
     assert said.startswith("Playing 1 track of goth on discovery downstairs"), said
-    assert h.box.queue == ["Bauhaus/Flat Field/Dark Entries.mp3"] and h.speakers == {"hdmi"} and Room.last_media == "stereo"
+    assert h.box.queue == ["Bauhaus/Flat Field/Dark Entries.mp3"] and h.speakers == {"hdmi"}
     assert run("play_music", {"what": "Pink Floyd", "queue": True}).startswith("Queued 2 tracks after this")
     assert len(h.box.queue) == 3
     assert run("music", {"action": "next"}) == "Done: next on the house radio." and h.box.idx == 1
-    assert run("play_music", {"what": "Pink Floyd"}).startswith("Playing 2 tracks upstairs")     # "here", asked from the living room
+    assert run("play_music", {"what": "Pink Floyd"}).startswith("Playing 2 tracks downstairs")     # no place said: the speakers stay as they are, asked from anywhere
+    assert h.speakers == {"hdmi"}
+    assert run("play_music", {"what": "Pink Floyd", "speaker": "here"}).startswith("Playing 2 tracks upstairs")     # "here", said, from the living room
     assert h.speakers == {"enclave"}
     assert client.call("GET", "/state")["title"] == "Dogs"
     call(loop, h.box.pause())
@@ -246,31 +255,70 @@ def test_local_first_a_spotify_song_he_owns_plays_from_bilbys_file():
     loop.call_soon_threadsafe(loop.stop)
 
 
-# ── ducking: only the room Skippy speaks in ──
-def test_skippy_speaking_in_a_room_ducks_only_that_rooms_speakers_and_they_come_back():
+# ── ducking: the whole stream, on every device (the Captain, 2026-11-05: Skippy's voice ducks it) ──
+def test_skippy_speaking_anywhere_ducks_the_whole_stream_on_every_speaker_and_it_comes_back():
     loop = on_loop()
     h, r = make_house()
     r.play(rt.ClipSource(np.full((rt.RATE * 30, 2), 0.8, dtype="float32")), layer="media", targets={"hdmi", "enclave"})
 
     async def go():
-        h.duck_kinds(["pod:living", "enclave"], True, hold_s=0.3)   # the living room's speakers (radio_client.room_kinds)
+        h.duck_stream("room:living", True, hold_s=0.3)
         for _ in range(12):
             r.mix_once()
-        assert r._kind_gain["enclave"] == 0.25 and r._kind_gain["hdmi"] == 1.0   # upstairs dips, the Sony downstairs plays on
-        assert r._kind_gain["pods"] == 0.25
+        assert r._kind_gain["enclave"] == 0.25 and r._kind_gain["hdmi"] == 0.25 and r._kind_gain["pods"] == 0.25      # the Sony and the boxes too, whatever the room
         await asyncio.sleep(0.45)                                   # the hold ran out: back up
         for _ in range(12):
             r.mix_once()
-        assert r._kind_gain["enclave"] == 1.0
+        assert r._kind_gain["enclave"] == 1.0 and r._kind_gain["hdmi"] == 1.0
     call(loop, go())
     loop.call_soon_threadsafe(loop.stop)
     assert radio_client.room_kinds(ENV, "living") == ["pod:living", "enclave"]
 
 
-def test_a_rooms_duck_is_posted_only_while_the_station_plays():
+def test_two_voices_at_once_are_holders_and_the_stream_stays_down_until_the_last_one_is_done():
+    loop = on_loop()
+    h, r = make_house()
+    r.play(rt.ClipSource(np.full((rt.RATE * 30, 2), 0.8, dtype="float32")), layer="media", targets={"hdmi", "enclave"})
+
+    async def go():
+        h.duck_stream("room:living", True, hold_s=5.0)
+        h.duck_stream("room:office", True, hold_s=0.2)              # a short one in another room ...
+        await asyncio.sleep(0.3)                                    # ... runs out while the living room still talks
+        for _ in range(12):
+            r.mix_once()
+        assert r._kind_gain["enclave"] == 0.25 and r._kind_gain["hdmi"] == 0.25      # it must not bring the stream back
+        h.duck_stream("room:living", False)                         # the last one is done
+        for _ in range(12):
+            r.mix_once()
+        assert r._kind_gain["enclave"] == 1.0 and r._kind_gain["hdmi"] == 1.0 and not h._duck_holders
+        h.duck_stream("router", True, hold_s=0.2)                   # a hub that dies mid-sentence cannot leave it ducked: the hold expires by itself
+        await asyncio.sleep(0.3)
+        for _ in range(12):
+            r.mix_once()
+        assert r._kind_gain["enclave"] == 1.0
+    call(loop, go())
+    loop.call_soon_threadsafe(loop.stop)
+
+
+def test_an_old_hub_naming_a_rooms_kinds_still_ducks_and_the_radio_endpoint_takes_a_holder():
+    loop = on_loop()
+    h, r = make_house()
+    r.play(rt.ClipSource(np.full((rt.RATE * 30, 2), 0.8, dtype="float32")), layer="media", targets={"hdmi", "enclave"})
+
+    async def go():
+        h.duck_kinds(["pod:living", "enclave"], True, hold_s=0.2)    # a hub that has not been restarted yet
+        for _ in range(12):
+            r.mix_once()
+        assert r._kind_gain["hdmi"] == 0.25
+        await asyncio.sleep(0.3)
+    call(loop, go())
+    loop.call_soon_threadsafe(loop.stop)
+
+
+def test_a_rooms_duck_is_posted_only_while_the_station_plays_and_names_the_room_as_the_holder():
     sent = []
     c = radio_client.RadioClient("http://x", log=lambda *a: None, start=False, request=lambda m, p, b=None, t=0: sent.append((p, b)) or {})
-    room = c.for_room(["pod:living", "enclave"])
+    room = c.for_room(["pod:living", "enclave"], "living")
     room.duck(True, 25)
     assert sent == []                                               # nothing plays: no call at all
     c.ok, c.last = True, {"playing": True}
@@ -279,4 +327,4 @@ def test_a_rooms_duck_is_posted_only_while_the_station_plays():
         if sent:
             break
         threading.Event().wait(0.01)
-    assert sent == [("/duck", {"kinds": ["enclave", "pod:living"], "on": True, "hold_s": 25.0})]
+    assert sent == [("/duck", {"holder": "room:living", "kinds": ["enclave", "pod:living"], "on": True, "hold_s": 25.0})]

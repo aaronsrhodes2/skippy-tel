@@ -270,6 +270,8 @@ class Router:
         self.lock = threading.RLock()
         self.layer_gain = {"voice": 1.0, "media": 1.0}
         self.outside_duck = 1.0                                   # set by duck(): the hub listening lowers media too
+        self.voice_hook = None                                    # (on: bool) -> None: Skippy's voice started (the first clip) / ended (the last one): the house radio ducks its whole stream
+        self._voice_on = False
         self.kind_duck: dict[str, float] = {}                     # set by duck_kinds(): only some outputs' media goes down (the house radio, radio.py)
         self._kind_gain: dict[str, float] = {}
         self._thread: threading.Thread | None = None
@@ -402,6 +404,13 @@ class Router:
         with self.lock:
             plays = list(self.plays.values())
         voice = any(p.layer == "voice" for p in plays)
+        if voice != self._voice_on:                               # an edge, once: a reply, an alarm, a timer or an announcement began, or the last of them ended
+            self._voice_on = voice
+            if self.voice_hook is not None:
+                try:
+                    self.voice_hook(voice)
+                except Exception:                                 # noqa: BLE001 — the hook must never stop the mixer
+                    pass
         want = {"voice": 1.0, "media": min(DUCK if voice else 1.0, self.outside_duck)}
         for layer, target in want.items():                        # ramp, never jump: no clicks
             g = self.layer_gain[layer]

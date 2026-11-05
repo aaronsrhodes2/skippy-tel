@@ -545,7 +545,7 @@ async def serve(hub, name: str, host: str, port: int, *, media, noise_psk: str, 
             from radio_client import PodTuner                      # noqa: PLC0415
             link.music = room.music = tuner = PodTuner(link, radio, name, towards=host, log=hub.log)
             if connect is not None:
-                connect.add(name, label or f"{name.replace('-', ' ').title()} (Skippy)", tuner, book=getattr(room, "book", None))
+                connect.add(name, label or f"{name.replace('-', ' ').title()} (Skippy)", tuner)     # a pod is a remote of the station; its books are the station's
         client.subscribe_states(link.on_state)
         link.start_stream(os.environ.get("SATELLITE_FACE_STREAM", "1") != "0")
         unsub = client.subscribe_voice_assistant(handle_start=link.handle_start, handle_stop=link.handle_stop, handle_audio=link.handle_audio,

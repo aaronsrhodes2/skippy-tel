@@ -356,7 +356,7 @@ def test_the_voice_tool_plays_an_artist_on_the_stereo_and_adds_the_song_to_a_pla
     runner, room = tool(s, pod)
     said = runner("spotify", {"action": "play", "what": "Daft Punk"})
     assert said.startswith("Playing 2 Spotify tracks from Daft Punk on the house radio, starting with One More Time")
-    assert s.box.queue == [A, B] and room.last_media == "stereo"
+    assert s.box.queue == [A, B]
     said = runner("spotify", {"action": "add", "playlist": "gym"})
     assert said == "Added One More Time by Daft Punk to his Spotify playlist Gym." and ("add", "gym", (A,)) in s.player.spotify.calls
     said = runner("spotify", {"action": "like"})

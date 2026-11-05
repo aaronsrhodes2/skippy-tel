@@ -377,7 +377,7 @@ def test_the_pod_tunes_in_when_the_station_plays_on_it_and_out_when_it_moves_awa
         tuner.on = False                                                     # (its first look done)
         await tuner.tick()
         url = client.media[-1][1]["media_url"]
-        assert url.endswith(":47851/live/abc.flac") and client.media[-1][1]["announcement"] is False
+        assert url.endswith(":47851/live/abc.flac?room=kitchen") and client.media[-1][1]["announcement"] is False      # the room says which box listens
         await tuner.tick()
         assert len(client.media) == 1                                        # tuned in once, not again every tick
         radio.last["speakers"] = ["enclave"]                                 # "move the music upstairs"
@@ -399,7 +399,7 @@ def test_a_hub_that_comes_back_leaves_a_pod_that_is_still_playing_the_station_al
         client.on_states(MediaPlayerEntityState(key=1, state=MediaPlayerState.IDLE))   # the radio itself restarted: the stream dropped
         await asyncio.sleep(0.02)
         await tuner.tick()
-        assert client.media[-1][1]["media_url"].endswith("/live/abc.flac")         # tuned in again
+        assert client.media[-1][1]["media_url"].endswith("/live/abc.flac?room=kitchen")         # tuned in again
         task.cancel()
     run(go())
 
@@ -434,11 +434,11 @@ def test_the_music_tools_are_the_radios_with_the_asking_room():
     async def go():
         client, media, made, hub, task, log = await boot()
         tools, run_tool = music_tools(lambda: made["room"], asyncio.get_running_loop(), stereo=lambda: made["radio"])
-        assert {t["name"] for t in tools} == {"music", "play_music", "spotify", "dj_mode", "speakers"}
+        assert {t["name"] for t in tools} == {"music", "play_music", "spotify", "dj_mode", "speakers", "audiobook"}      # his books are the radio's too
         assert await asyncio.to_thread(run_tool, "play_music", {"what": "Pink Floyd"}) == "radio: play_music"
         assert await asyncio.to_thread(run_tool, "music", {"action": "favorite"}) == "radio: music"
         assert made["radio"].calls == [("tool", "play_music", {"what": "Pink Floyd"}, "kitchen"), ("tool", "music", {"action": "favorite"}, "kitchen")]
-        assert made["room"].last_media == "stereo" and client.media == []
+        assert client.media == []
         task.cancel()
     run(go())
 

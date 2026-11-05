@@ -750,6 +750,9 @@ class DjPlayer(stereo.RouterPlayer):
                 chain.finish()
                 return
             nxt = queue[j]
+            if _is_book(nxt):                                      # an audiobook is no track to mix into: the chain ends and the queue starts the book
+                chain.finish()
+                return
             if _is_spotify(nxt):                                   # not Bilby's: no beat-matching (Spotify's sound is live), a fade on a phrase
                 await self._hand_to_spotify(gen, chain, piece, rel, start)
                 return
@@ -815,6 +818,12 @@ class DjPlayer(stereo.RouterPlayer):
         self.chain = None
         await super().stop()
 
+    async def play_book(self, bid: str, pos: float = 0.0) -> None:
+        """A book is not Bilby's tracks: the chain (and its feeder) ends, and RouterPlayer starts the book."""
+        self.gen += 1
+        self.chain = None
+        await super().play_book(bid, pos)
+
     async def play_spotify(self, uri: str, pos: float = 0.0, fade_s: float = 0.0) -> None:
         """RouterPlayer's (a plain cut from Bilby to Spotify); the chain's feeder stops with it. Without a Spotify client RouterPlayer sets this
         to None on the instance, and BoxMusic skips Spotify items, as before. A Spotify item that doesn't start within SPOT_START_S (or while
@@ -857,6 +866,11 @@ class DjPlayer(stereo.RouterPlayer):
 def _is_spotify(item) -> bool:
     import spotify                                                  # noqa: PLC0415
     return spotify.is_uri(str(item))
+
+
+def _is_book(item) -> bool:
+    import audiobooks                                               # noqa: PLC0415
+    return audiobooks.is_item(item)
 
 
 class _Clip:

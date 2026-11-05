@@ -333,3 +333,62 @@ def test_the_sony_stays_open_with_no_pod_downstairs():
     because the stereo and 'downstairs' play there."""
     env = {"SATELLITE_OUT": "living=pod+enclave", "SKIPPY_STEREO_OUT": "hdmi"}
     assert {"enclave", "hdmi"} <= rt.used_kinds(env)
+
+
+# ── Skippy's voice ducks the whole house radio, on every device (the Captain, 2026-11-05) ──
+def test_the_voice_hook_fires_once_when_a_voice_begins_and_once_when_the_last_one_ends():
+    r = make(World())
+    calls = []
+    r.voice_hook = calls.append
+    r.mix_once()
+    assert calls == []                                                          # music alone: the radio is not told
+    r.play(rt.ClipSource(tone(0.05)), layer="voice", targets={"hdmi"})
+    r.mix_once()
+    assert calls == [True]
+    r.play(rt.ClipSource(tone(0.2)), layer="voice", targets={"hdmi"})           # a second clip while the first runs: still the same voice, no second call
+    for _ in range(40):
+        r.mix_once()
+    assert calls == [True, False]                                               # told again only when the last one is done
+
+
+def test_a_broken_voice_hook_never_stops_the_mixer():
+    w = World()
+    r = make(w)
+    r.voice_hook = lambda on: 1 / 0
+    r.play(rt.ClipSource(tone(0.05)), layer="voice", targets={"hdmi"})
+    for _ in range(4):
+        r.mix_once()
+    assert w.streams[len("HDMI")].pull(rt.BLOCK).max() == np.float32(0.5)       # the clip still played
+
+
+def test_the_per_app_ducker_leaves_the_house_radios_process_alone(monkeypatch, tmp_path):
+    import sys
+    import types
+
+    class Vol:
+        def __init__(self, v):
+            self.v = v
+
+        def GetMasterVolume(self):
+            return self.v
+
+        def SetMasterVolume(self, v, _ctx):
+            self.v = v
+
+    def session(pid, vol):
+        return types.SimpleNamespace(Process=types.SimpleNamespace(pid=pid), SimpleAudioVolume=vol)
+    browser, radio_proc, hub = Vol(1.0), Vol(1.0), Vol(1.0)
+    fake = types.ModuleType("pycaw.pycaw")
+    fake.AudioUtilities = types.SimpleNamespace(GetAllSessions=lambda: [session(111, browser), session(222, radio_proc), session(__import__("os").getpid(), hub)])
+    monkeypatch.setitem(sys.modules, "pycaw", types.ModuleType("pycaw"))
+    monkeypatch.setitem(sys.modules, "pycaw.pycaw", fake)
+    pidfile = tmp_path / "radio.pid"
+    pidfile.write_text("222", encoding="utf-8")
+    monkeypatch.setattr(speaker_out, "RADIO_PID", pidfile)
+    d = speaker_out.Ducker(0.25)
+    d.duck()
+    assert browser.v == 0.25 and radio_proc.v == 1.0 and hub.v == 1.0           # the radio ducks its own stream (once); the hub's own sound is never touched
+    d.restore()
+    assert browser.v == 1.0
+    pidfile.unlink()
+    assert speaker_out.radio_pid() == 0                                         # no radio known: nothing special to skip

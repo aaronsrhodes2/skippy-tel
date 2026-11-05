@@ -15,7 +15,9 @@ import asyncio
 import re
 import time
 
-PORTAL = "https://skippy-portal-1015050363686.us-west1.run.app"
+import audiobooks
+
+PORTAL ="https://skippy-portal-1015050363686.us-west1.run.app"
 SETTLE_S = 2.5                       # after starting a track the box reports idle for a moment: that is not "the track ended"
 MAX_QUEUE = 2000
 POOL_S = 60.0                        # his favorites pool (and tired, played) is asked for again after this
@@ -101,33 +103,65 @@ class BoxMusic:
         self.idx, self.offset, self.started, self.playing = 0, 0.0, 0.0, False
         self.titles: dict = {}
         self.spotify_titles: dict = {}                       # spotify:track:... -> (title, artist): a queue may mix them with Bilby's paths (spotify.py)
+        self.book_titles: dict = {}                          # book:<id> -> (title, author): an audiobook is an item of the queue too (audiobooks.py)
         self._settle_until = 0.0
         self._queue_sent = False
-        self.mix = None                                      # the house stereo sets {"get": () -> {"on", "xfade"}, "set": (bool) -> None}: DJ mode, for the Bilby page
+        self.epoch = 0                                       # counts the transport commands (start, pause, resume): the radio's hold carries on only if none came since
+        self.switch = None                                   # the house stereo sets (action) -> bool: Connect's "out:<speaker>:on|off" (radio.HouseRadio)
+        self.extra = None                                    # the house stereo sets () -> dict: more for Connect's state (its speakers, the hold)
+        self.mix = None                                     # the house stereo sets {"get": () -> {"on", "xfade"}, "set": (bool) -> None}: DJ mode, for the Bilby page
 
     # ── where it is ──
     def pos(self) -> float:
+        if self.playing and audiobooks.is_item(self.track()):
+            at = getattr(self.player, "book_pos", lambda: None)()        # a book's clock is the engine's: book seconds, at its speed
+            if at is not None:
+                return round(at, 1)
         return round(self.offset + (self.clock() - self.started if self.playing else 0.0), 1)
 
     def track(self) -> str:
         return self.queue[self.idx] if 0 <= self.idx < len(self.queue) else ""
 
+    def kind(self) -> str:
+        """What the current item is: a song of Bilby's, a Spotify track, or an audiobook."""
+        import spotify                                       # noqa: PLC0415
+        tr = self.track()
+        return "book" if audiobooks.is_item(tr) else "spotify" if spotify.is_uri(tr) else "song"
+
+    def _book_meta(self, item: str) -> tuple[str, str] | None:
+        """(title, author) of a book item: what it told us when it started, else the shelf (the engine's library)."""
+        if item in self.book_titles:
+            return self.book_titles[item]
+        engine = getattr(self.player, "books", None)
+        book = engine.library.get(audiobooks.item_id(item)) if engine is not None else None
+        return (book["title"], book["author"]) if book else None
+
     def title(self) -> tuple[str, str]:
-        t = self.titles.get(self.track()) or self.spotify_titles.get(self.track()) or ()
-        name = t[0] if t else re.sub(r"\.\w+$", "", self.track().rsplit("/", 1)[-1])
+        tr = self.track()
+        t = self.titles.get(tr) or self.spotify_titles.get(tr) or (self._book_meta(tr) if audiobooks.is_item(tr) else None) or ()
+        name = t[0] if t else re.sub(r"\.\w+$", "", tr.rsplit("/", 1)[-1])
         return name, (t[1] if len(t) > 1 else "")
 
     def state(self) -> dict:
         """What the box is doing, as a Connect player says it (portal/player.py _state). The queue goes only when it changed."""
         title, artist = self.title()
-        out = {"track": self.track(), "title": title, "artist": artist, "pos": self.pos(), "playing": self.playing, "idx": self.idx,
-               "armed": True, "tap": False}
+        kind = self.kind()
+        # a book is never a `track`: the car's hand-over (portal/drive.py) reads the newest track as "Bilby", and book:<id> would be played as a song
+        out = {"track": "" if kind == "book" else self.track(), "title": title, "artist": artist, "pos": self.pos(), "playing": self.playing, "idx": self.idx,
+               "armed": True, "tap": False, "kind": kind}
         if self.mix:
             out["mix"] = self.mix["get"]()
+        if self.extra is not None:
+            try:
+                out.update(self.extra())
+            except Exception:                                # noqa: BLE001 — the track is what matters; the speakers' state is a nicety
+                pass
         if not self._queue_sent:
             out["queue"], self._queue_sent = list(self.queue), True
-            if self.spotify_titles:                          # names for the queue's Spotify items: the page has no catalog for them
-                out["titles"] = {q: list(self.spotify_titles[q]) for q in self.queue if q in self.spotify_titles}
+            names = {q: list(self.spotify_titles[q]) for q in self.queue if q in self.spotify_titles}   # names for the queue's Spotify items: the page has no catalog for them
+            names.update({q: list(m) for q in self.queue if audiobooks.is_item(q) and (m := self._book_meta(q))})
+            if names:
+                out["titles"] = names
         return out
 
     # ── what it is told ──
@@ -142,10 +176,11 @@ class BoxMusic:
         await self.play_queue(queue, idx, float(state.get("pos") or 0))
 
     async def play_queue(self, queue: list[str], idx: int = 0, pos: float = 0.0) -> None:
-        try:
-            self.titles = await self.media.catalog()
-        except Exception:                                    # noqa: BLE001 — titles are a nicety
-            pass
+        if not queue or not all(audiobooks.is_item(q) for q in queue):    # a book needs no catalog of songs
+            try:
+                self.titles = await self.media.catalog()
+            except Exception:                                # noqa: BLE001 — titles are a nicety
+                pass
         self.queue, self._queue_sent = self.local(list(queue)[:MAX_QUEUE]), False
         await self._start(idx, pos)
 
@@ -195,15 +230,30 @@ class BoxMusic:
 
     async def _start(self, idx: int, pos: float = 0.0) -> None:
         import spotify                                       # noqa: PLC0415
+        self.epoch += 1
         play_spotify = getattr(self.player, "play_spotify", None)
-        while 0 <= idx < len(self.queue) and spotify.is_uri(self.queue[idx]) and play_spotify is None:
-            idx, pos = idx + 1, 0.0                          # a pod's own speaker can't play Spotify (only the PC's outputs can): skip it
+        play_book = getattr(self.player, "play_book", None)
+        while 0 <= idx < len(self.queue) and ((spotify.is_uri(self.queue[idx]) and play_spotify is None)
+                                              or (audiobooks.is_item(self.queue[idx]) and (play_book is None or getattr(self.player, "books", None) is None))):
+            idx, pos = idx + 1, 0.0                          # a pod's own speaker can't play Spotify or a book (only the PC's outputs can): skip it
         if not 0 <= idx < len(self.queue):
             self.idx, self.offset, self.playing = max(0, len(self.queue) - 1), 0.0, False
             return
         self.idx, self.offset = idx, max(0.0, pos)
         self._settle_until = self.clock() + SETTLE_S
-        if spotify.is_uri(self.track()):
+        if audiobooks.is_item(self.track()):
+            try:
+                await play_book(audiobooks.item_id(self.track()), self.offset)
+            except (KeyError, LookupError, OSError) as e:    # the book or its file is gone: the next item at once, never silence
+                self.log(f"[{self.name}] (the audiobook {self.track()!r} would not play: {type(e).__name__}: {e})")
+                self.playing, self.started = True, self.clock()
+                asyncio.get_running_loop().create_task(self.advance())
+                return
+            engine = self.player.books
+            if engine.book is not None:
+                self.book_titles[self.track()] = (engine.book["title"], engine.book["author"])
+                self._queue_sent = False                     # the page learns the book's name
+        elif spotify.is_uri(self.track()):
             if await play_spotify(self.track(), self.offset) is False:   # refused (a 429, no device): his next song at once, never silence
                 asyncio.get_running_loop().create_task(self.next())
         else:
@@ -216,16 +266,27 @@ class BoxMusic:
             await show(f"{title}" + (f" — {artist}" if artist else ""))
 
     async def pause(self) -> None:
+        self.epoch += 1
         if self.playing:
             self.offset, self.playing = self.pos(), False
             self._settle_until = self.clock() + SETTLE_S
             await self.player.stop()
 
     async def resume(self) -> None:
+        self.epoch += 1
         if self.queue and not self.playing:
             await self._start(self.idx, self.offset)
 
     async def next(self) -> None:
+        """Skip: the next song, or, in a book, the next chapter (the last chapter goes on to the next item)."""
+        if audiobooks.is_item(self.track()) and self.playing:
+            move = getattr(self.player, "book_chapter", None)
+            if move is not None and await move(+1):
+                return
+        await self.advance()
+
+    async def advance(self) -> None:
+        """On to the next item of the queue (a track ended, a book ended, or a skip)."""
         if self.idx + 1 < len(self.queue):
             await self._start(self.idx + 1)
         else:
@@ -235,7 +296,31 @@ class BoxMusic:
     async def prev(self) -> None:
         if not self.queue:
             return
+        if audiobooks.is_item(self.track()) and self.playing:
+            move = getattr(self.player, "book_chapter", None)
+            if move is not None and await move(-1):
+                return
         await self._start(self.idx if self.pos() > 3 else max(0, self.idx - 1))
+
+    async def rewind(self, pos: float) -> None:
+        """Back to a place (the sound was lost there: nobody was listening): the item's offset, and a book's own place."""
+        pos = max(0.0, float(pos))
+        if audiobooks.is_item(self.track()):
+            seek = getattr(self.player, "book_seek", None)
+            if seek is not None:
+                await seek(pos)
+        self.offset = pos
+
+    # ── a book as the queue's item ──
+    def book_transport(self) -> "BookTransport":
+        return BookTransport(self)
+
+    async def book_command(self, action: str) -> bool:
+        """The portal's `book:` commands (the Audiobooks app's "Play on" this station): the engine, with this queue's transport."""
+        engine = getattr(self.player, "books", None)
+        if engine is None:
+            return False
+        return await audiobooks.run_command(engine, action, transport=self.book_transport())
 
     async def volume(self, step: float) -> None:
         await self.player.volume(step)
@@ -244,7 +329,7 @@ class BoxMusic:
         """The box says it stopped playing. Ours (a pause or a track change) is expected; otherwise the track ended: on to the next."""
         if not self.playing or self.clock() < self._settle_until:
             return
-        await self.next()
+        await self.advance()
 
     async def command(self, action: str, devices: list[dict]) -> None:
         if action == "play":
@@ -257,10 +342,45 @@ class BoxMusic:
             await self.prev()
         elif action in ("mix:on", "mix:off") and self.mix:
             self.mix["set"](action == "mix:on")
+        elif action.startswith("out:") and self.switch is not None:
+            self.switch(action)                              # a speaker's switch (the portal's toggles): the house stereo's own
         elif action.startswith("take:"):
             src = next((d for d in devices if d.get("id") == action[5:]), None)
             if src and src.get("state"):
                 await self.take(src["state"])
+
+
+class BookTransport:
+    """The audiobook tool's and the portal's start / pause / resume, as the station's transport (audiobooks.run_tool / run_command): the book is the
+    queue's item, so "pause" is the station's one pause and a start replaces what was queued (each keeps its own place: a song's offset, a book's store)."""
+
+    def __init__(self, box: BoxMusic):
+        self.box = box
+
+    @property
+    def engine(self):
+        return self.box.player.books
+
+    async def play(self, bid: str) -> dict:
+        box = self.box
+        if box.track() == audiobooks.item(bid) and box.playing:
+            return self.engine.where()
+        await box.play_queue([audiobooks.item(bid)])
+        return self.engine.where()
+
+    async def pause(self) -> None:
+        await self.box.pause()
+
+    async def resume(self) -> dict:
+        box = self.box
+        if audiobooks.is_item(box.track()) and box.queue:
+            if not box.playing:
+                await box.resume()
+        elif self.engine.book is not None:                   # music is the current item: "read my book" goes back to the loaded one
+            await self.play(self.engine.book["id"])
+        else:
+            raise LookupError("no book chosen")
+        return self.engine.where()
 
 
 def search(catalog: dict, query: str, limit: int = 200) -> list[str]:
@@ -310,7 +430,6 @@ class Connect:
             book = self.books.get(room)
             state = music.state()
             if book is not None:
-                import audiobooks                                # noqa: PLC0415
                 state["book"] = audiobooks.book_state(book)
             body = {"device": device_id(room), "name": label, "room": room_key(room), "state": state}
             try:
@@ -325,8 +444,13 @@ class Connect:
             for action in (reply or {}).get("commands") or []:
                 try:
                     if str(action).startswith("book:"):
-                        import audiobooks                        # noqa: PLC0415
-                        if book is None or not await audiobooks.run_command(book, str(action)):
+                        own = getattr(music, "book_command", None)           # the station (BoxMusic with an engine) and a pod's tuner run it themselves
+                        ok = False
+                        if own is not None and (getattr(getattr(music, "player", None), "books", None) is not None or not hasattr(music, "player")):
+                            ok = await own(str(action))
+                        elif book is not None:
+                            ok = await audiobooks.run_command(book, str(action))
+                        if not ok:
                             self.log(f"[{room}] (book command refused)")
                         continue
                     await music.command(str(action), (reply or {}).get("devices") or [])

@@ -172,9 +172,9 @@ def test_never_over_music_or_a_book_or_a_conversation(tmp_path):
     present(room, 300)
     room.music = type("M", (), {"playing": True})()
     asyncio.run(room.maybe_start())
-    room.music, room.book, room._starter_check = None, type("Bk", (), {"playing": True})(), 0
+    room.music, room._starter_check = type("Bk", (), {"playing": True})(), 0                  # a book is an item of the house radio's stream: the pod's tuner says the station plays
     asyncio.run(room.maybe_start())
-    room.book, room._starter_check, room.mode = None, 0, FOLLOWUP
+    room.music, room._starter_check, room.mode = None, 0, FOLLOWUP
     asyncio.run(room.maybe_start())
     room.mode, room._starter_check, room._turn_at = IDLE, 0, time.monotonic() - 30
     asyncio.run(room.maybe_start())

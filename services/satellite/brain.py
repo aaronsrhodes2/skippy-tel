@@ -61,16 +61,20 @@ SPOKEN = (
 # ... "needs to know how to talk to Bilby for audio"). Bilby is the ONE player: his music, Spotify and his audiobooks as one stream; the Enclave and the Sony each play it or not.
 BILBY = (
     "\n\n## Bilby: the house's audio\n"
-    "Bilby is the ONE player for everything the house plays: his music library (about twenty thousand tracks), Spotify and his audiobooks. It is a single stream, the same everywhere "
-    "unless he narrows it (he is the only listener): the Enclave upstairs and the Sony downstairs each play it or do not. The box in the room is a microphone, a face and a "
-    "last-resort speaker; it never plays Bilby while a stereo is on. Your own voice ducks the stream while you speak. You talk to Bilby with tools, and only a tool changes anything:\n"
+    "Bilby is the ONE player for everything the house plays: his music library (about twenty thousand tracks), Spotify and his audiobooks. They are items of one queue and come out as a single stream, "
+    "the same on every speaker that is switched on (he is the only listener), so there is never a second stream to start for a room. Each speaker has its own switch that stays as he set it: the Enclave "
+    "upstairs and the Sony downstairs, and the box in a room, which is a microphone, a face and a last-resort speaker (it plays Bilby only when its floor's stereo is on but gone). With no speaker "
+    "listening the stream waits where it was and carries on by itself when one comes back. Your own voice ducks all of the stream, on every speaker, while you speak. You talk to Bilby with tools, "
+    "and only a tool changes anything:\n"
     "- play_music starts something: what / genre / artist / album / song / playlist / mode (discovery, favorites) / shuffle. Leave speaker out unless he named a place.\n"
-    "- music steers it: pause (that is also 'stop', 'enough', 'be quiet', 'turn it off'), resume, next, previous, louder, quieter, volume (1 to 10), what (what is playing), favorite, tired.\n"
-    "- speakers moves it: everywhere, upstairs (the Enclave), downstairs (the Sony). To silence only one floor, move it to the other.\n"
-    "- dj_mode turns the beat-matched mixing on or off; spotify plays his Spotify; audiobook plays and steers a book (play, pause, skip, where, sleep timer).\n"
-    "'Stop', 'pause', 'enough' or 'turn it off' with nothing else named mean the house audio: call music with pause (and audiobook with pause if a book is playing). A routine "
-    "(morning, homecoming) may start the library; if he says stop, it stays off. Asked what is playing, or where, read the 'Right now' lines at the end of this prompt or call music with what. "
-    "Never say you played, stopped, moved or changed anything unless a tool just did it.\n"
+    "- audiobook plays his book as that same stream (play, resume, next_chapter, back, forward, where, sleep, speed, list); it replaces what plays and keeps its place.\n"
+    "- music steers whatever plays, a book too: pause (that is also 'stop', 'enough', 'be quiet', 'turn it off'), resume, next (a chapter, in a book), previous, louder, quieter, volume (1 to 10), what, favorite, tired.\n"
+    "- speakers: device + on turns ONE speaker on or off ('turn the Sony off', 'play it on the Sony too', 'switch the Enclave on'); place sets them as a group (upstairs = the Enclave on and the Sony off, "
+    "downstairs the other way round, everywhere = all on).\n"
+    "- dj_mode turns the beat-matched mixing on or off; spotify plays his Spotify.\n"
+    "'Stop', 'pause', 'enough' or 'turn it off' with nothing else named mean the house audio, a book included: call music with pause. A routine (morning, homecoming) may start the library; if he says "
+    "stop, it stays off. Asked what is playing, or on which speakers, read the 'Right now' lines at the end of this prompt or call music with what. "
+    "Never say you played, stopped, moved, switched or changed anything unless a tool just did it.\n"
 )
 ABILITIES = (
     "\n\n## What you are, and what you can reach from here\n"
@@ -82,8 +86,8 @@ ABILITIES = (
 # is said only while one of its tools is really here, so the list is never longer than the truth
 CAPS = (
     ("the house: lights, plugs, the thermostat, covers, speakers and scenes", ("home_control", "home_state", "home_devices")),
-    ("Bilby: his music library, Spotify and the DJ mixing, on the Enclave, the Sony or both", ("play_music", "music", "speakers", "dj_mode", "spotify")),
-    ("his audiobooks", ("audiobook",)),
+    ("Bilby: his music library, Spotify and the DJ mixing as one stream, with a switch for each speaker (the Enclave, the Sony)", ("play_music", "music", "speakers", "dj_mode", "spotify")),
+    ("his audiobooks, on the same stream", ("audiobook",)),
     ("alarms and reminders", ("set_alarm", "set_reminder", "cancel_alarm", "list_alarms")),
     ("timers", ("set_timer", "cancel_timers", "list_timers")),
     ("his lists", ("list",)),
@@ -378,6 +382,44 @@ def speakers_route(heard: str) -> dict | None:
     return {"what": "music", "place": _speaker(said), **({"play": True} if m.group("start") or m.group("put") else {})}
 
 
+# One speaker's switch (the Captain, 2026-11-05: "a single audio stream going out and the devices decide if they are outputting that stream or not"): "turn the Sony off", "play it on the
+# Sony too", "switch the Enclave on". Additive or subtractive, never a move: a place ("upstairs") is the group shortcut above. The Sony is also a TV, so "turn off the Sony" is a speaker
+# only while the house is playing or when sound is named; the Enclave and a room's box are always speakers.
+_DEV = (r"(?P<dev>(?:the |my |our )?(?:sony|enclave|(?:(?:living room|living|office|kitchen|bedroom|theater|theatre|downstairs|upstairs) )?(?:box|pod)))"
+        r"(?P<snd>\s+(?:speakers?|sound|audio|stereo))?")
+_DEV_OFF = [re.compile(p) for p in (
+    rf"^(?:turn|switch|shut|power|cut|kill)\s+(?:off|out)\s+{_DEV}$",
+    rf"^(?:turn|switch|shut|power|cut|kill)\s+{_DEV}\s+(?:off|out)$",
+    rf"^mute\s+{_DEV}$",
+    rf"^(?:stop|quit)\s+playing\s+(?:on|in|through|over|via)\s+{_DEV}$",
+    rf"^(?:no|stop)\s+(?:more\s+)?(?:music|sound|audio)\s+(?:on|in|through|from)\s+{_DEV}$",
+    rf"^(?:take|remove|drop)\s+{_DEV}\s+(?:off|out)(?:\s+of\s+(?:it|the music|the mix))?$",
+    rf"^(?:don'?t|do not|never)\s+play\s+(?:it\s+|the music\s+)?(?:on|in|through)\s+{_DEV}$",
+)]
+_DEV_ON = [re.compile(p) for p in (
+    rf"^(?:turn|switch|power)\s+on\s+{_DEV}$",
+    rf"^(?:turn|switch|power)\s+{_DEV}\s+on$",
+    rf"^(?:play|put|have)\s+(?:it|this|that|the music|the songs?)\s+(?:on|in|through|over|via)\s+{_DEV}\s+(?:too|as well|also)$",
+    rf"^(?:also|and)\s+(?:play\s+)?(?:on|in|through)\s+{_DEV}$",
+    rf"^(?:add|bring in|include)\s+{_DEV}(?:\s+(?:too|as well|also))?$",
+)]
+
+
+def device_route(heard: str, playing: bool | None = None) -> dict | None:
+    """The speakers tool's arguments for one speaker's switch, or None. {"what": "music", "device": "the sony", "on": False}."""
+    w = _words(_clause(heard))
+    w = re.sub(r"\s+(?:please|now|for me)$", "", w).strip()
+    for rxs, on in ((_DEV_OFF, False), (_DEV_ON, True)):
+        for rx in rxs:
+            m = rx.match(w)
+            if m:
+                dev = m.group("dev").strip()
+                if re.search(r"\bsony\b", dev) and not (playing or m.group("snd") or re.search(r"\b(?:music|speakers?|sound|audio|stereo)\b", w)):
+                    return None                                         # the Sony is a TV too: "turn off the Sony" with nothing playing is not about the music
+                return {"what": "music", "device": dev, "on": on}
+    return None
+
+
 # The music tool's plain commands: his own reading first ("never play this again" needs its "again"), then the same words without a place or a "bit".
 _MORE = [("louder", re.compile(r"^(?:make (?:it|the music) louder|turn up (?:it|the music|that|the volume|the stereo)|(?:a )?(?:bit |little )?louder|(?:it'?s )?too (?:quiet|soft))$")),
          ("quieter", re.compile(r"^(?:make (?:it|the music) (?:quieter|softer)|turn down (?:it|the music|that|the volume|the stereo)|(?:a )?(?:bit |little )?(?:quieter|softer))$")),
@@ -638,7 +680,7 @@ class Brain:
         if not routed and any(t["name"] == "announce" for t in self.extra_tools):
             tool, routed = "announce", announce_route(heard)
         if not routed and any(t["name"] == "speakers" for t in self.extra_tools):
-            tool, routed = "speakers", speakers_route(heard)         # "play it on the upstairs stereo": the music moves, it is not searched for (2026-11-04)
+            tool, routed = "speakers", device_route(heard, self._house_playing()) or speakers_route(heard)   # "turn the Sony off" is one switch; "play it on the upstairs stereo": the music moves, it is not searched for (2026-11-04)
         if not routed and any(t["name"] == "music" for t in self.extra_tools):
             tool, routed = "music", music_route(heard, self._house_playing())   # "make it louder", "play the music again" (resume): before the grammar, which would search for "again"; "stop Bilby", "enough" (2026-11-04)
         if not routed and any(t["name"] == "play_music" for t in self.extra_tools):

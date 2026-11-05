@@ -20,6 +20,12 @@ POLL_S = 1.0
 DOWN = "The house radio is not answering right now."
 
 
+def _is_his_stop(name: str, args) -> bool:
+    """He told the house to stop: the music tool's pause or stop, or the audiobook's pause (a book is the same stream, and one stop)."""
+    action = str((args or {}).get("action") or "")
+    return (name == "music" and action in ("pause", "stop")) or (name == "audiobook" and action == "pause")
+
+
 class RadioClient:
     def __init__(self, url: str = URL, log=print, poll_s: float = POLL_S, request=None, start: bool = True):
         self.url, self.log, self.poll_s = url.rstrip("/"), log, poll_s
@@ -77,7 +83,7 @@ class RadioClient:
     # ── what the hub asks ──
     def tool(self, name: str, args: dict, room: str = "") -> str:
         """One music tool, run by the radio (station.run). Blocking: the brain calls it from its worker thread."""
-        if name == "music" and str((args or {}).get("action") or "") in ("pause", "stop"):
+        if _is_his_stop(name, args):
             self.pauses += 1                                              # his stop, counted even when the radio is away or already paused: it is what he asked for
         got = self.call("POST", "/tool", {"name": name, "args": args or {}, "room": room}, timeout=40.0)
         return (got or {}).get("said") or DOWN
@@ -96,13 +102,24 @@ class RadioClient:
     async def take(self, state: dict, room: str) -> None:
         await asyncio.to_thread(self.call, "POST", "/take", {"state": state, "room": room})
 
-    def duck(self, kinds, on: bool, hold_s: float = 30.0) -> None:
-        """Never waits: a thread posts it (Skippy's voice must not wait on the radio)."""
-        body = {"kinds": sorted(kinds), "on": bool(on), "hold_s": float(hold_s)}
+    def duck(self, holder: str, on: bool, hold_s: float = 30.0, kinds=()) -> None:
+        """Skippy speaks (somewhere): the WHOLE stream ducks, on every speaker, while any holder ("room:<name>", the hub's "router") is speaking. Never waits: a
+        thread posts it (Skippy's voice must not wait on the radio). `kinds`: for a radio not restarted yet, which still ducks only a room's speakers."""
+        body = {"holder": holder, "kinds": sorted(kinds), "on": bool(on), "hold_s": float(hold_s)}
         threading.Thread(target=self.call, args=("POST", "/duck", body, 2.0), daemon=True, name="radio-duck").start()
 
-    def for_room(self, kinds) -> "RoomRadio":
-        return RoomRadio(self, kinds)
+    def duck_voice(self, on: bool) -> None:
+        """The hub's router heard Skippy's voice begin (any clip: a reply, an alarm, a timer, an announcement) or end: the whole stream ducks while it does. If the
+        hub dies mid-sentence the radio lets go by itself after the hold."""
+        self.duck("router", on, 90.0)
+
+    async def book_command(self, action: str, room: str = "") -> bool:
+        """One of the portal's `book:` commands, for this station (a pod forwards its own: then `room`'s speakers play it)."""
+        got = await asyncio.to_thread(self.call, "POST", "/book/command", {"action": action, "room": room})
+        return bool(got and got.get("ok"))
+
+    def for_room(self, kinds, name: str = "") -> "RoomRadio":
+        return RoomRadio(self, kinds, name)
 
 
 class LocalRadio:
@@ -118,7 +135,7 @@ class LocalRadio:
 
     def tool(self, name: str, args: dict, room: str = "") -> str:
         import station                                                    # noqa: PLC0415
-        if name == "music" and str((args or {}).get("action") or "") in ("pause", "stop"):
+        if _is_his_stop(name, args):
             self.pauses += 1
         return asyncio.run_coroutine_threadsafe(station.run(self.house, name, args, room, self.favorites), self.loop).result(40)
 
@@ -144,10 +161,11 @@ class _RemoteBox:
 
 
 class RoomRadio:
-    """room.stereo: the station as one room sees it. duck(True, s) lowers this room's speakers for `s` seconds (hub.Room's hooks)."""
+    """room.stereo: the station as one room sees it. duck(True, s) lowers the whole stream for `s` seconds, on every speaker (hub.Room's hooks): this room is
+    one of the holders, so another room finishing never brings it back while this one still talks."""
 
-    def __init__(self, radio: RadioClient, kinds):
-        self.radio, self.kinds = radio, sorted(set(kinds))
+    def __init__(self, radio: RadioClient, kinds, name: str = ""):
+        self.radio, self.kinds, self.name = radio, sorted(set(kinds)), name
 
     @property
     def playing(self) -> bool:
@@ -155,7 +173,50 @@ class RoomRadio:
 
     def duck(self, on: bool, hold_s: float = 30.0) -> None:
         if self.radio.playing:                                            # nothing plays: no call at all
-            self.radio.duck(self.kinds, on, hold_s)
+            self.radio.duck(f"room:{self.name or ','.join(self.kinds)}", on, hold_s, self.kinds)
+
+
+class BookView:
+    """The radio's audiobook as the plain spoken commands read it (book_voice.pre_route): from the radio's /state (kind, book), and the shelf through
+    POST /book/find. The hub owns no book any more; it asks."""
+
+    def __init__(self, radio: RadioClient):
+        self.radio = radio
+        self.library = self                                               # pre_route calls library.refresh() and library.find(...)
+
+    @property
+    def book(self) -> dict | None:
+        return self.radio.state().get("book") or None
+
+    @property
+    def loaded(self) -> bool:
+        return self.book is not None
+
+    @property
+    def current(self) -> bool:
+        """The station's current item is a book (playing or paused): "resume" and "stop" mean it."""
+        return self.radio.state().get("kind") == "book"
+
+    @property
+    def playing(self) -> bool:
+        st = self.radio.state()
+        return bool(self.radio.ok and st.get("playing") and st.get("kind") == "book")
+
+    @property
+    def sleeping(self) -> bool:
+        return bool((self.book or {}).get("sleeping"))
+
+    @property
+    def speed(self) -> float:
+        return float((self.book or {}).get("speed") or 1.0)
+
+    def refresh(self) -> None:
+        return None                                                       # the radio rescans the shelf itself
+
+    def find(self, query: str):
+        """(the one book that clearly matches, or None; every book that matches): the shape of audiobooks.Library.find, as small dicts."""
+        got = self.radio.call("POST", "/book/find", {"query": query}, timeout=10.0) or {}
+        return got.get("best"), got.get("many") or []
 
 
 def room_kinds(env: dict, room: str) -> list[str]:
@@ -191,7 +252,7 @@ class PodTuner:
         live = self.radio.state().get("live") or {}
         if not live.get("path"):
             return ""
-        return f"http://{local_address(self.towards or '8.8.8.8')}:{live.get('port')}{live['path']}"
+        return f"http://{local_address(self.towards or '8.8.8.8')}:{live.get('port')}{live['path']}?room={self.room}"       # the room says which box listens (outputs.Outputs.listening)
 
     async def tick(self) -> None:
         want = self.wanted()
@@ -235,6 +296,10 @@ class PodTuner:
         if not self._queue_sent:
             out["queue"], self._queue_sent = [], True
         return out
+
+    async def book_command(self, action: str) -> bool:
+        """The portal's Audiobooks app "Play on" this box: the radio plays the book, on this room's speakers (the box is one of them)."""
+        return await self.radio.book_command(action, self.room)
 
     async def command(self, action: str, devices: list[dict]) -> None:
         if action.startswith("take:"):                                    # "Play on" this pod: the station, on this room's speakers

@@ -219,7 +219,7 @@ class House:
 
 class Room:
     def __init__(self):
-        self.music, self.book, self.name, self.last_media = Box(), None, "theater", "music"
+        self.music, self.name = Box(), "theater"
 
 
 def test_the_hub_plays_the_grammar_on_the_place_named_without_asking():
@@ -230,7 +230,7 @@ def test_the_hub_plays_the_grammar_on_the_place_named_without_asking():
     said = run("play_music", brain.music_grammar("hey skippy, play goth songs downstairs on discovery mode"))
     tracks, mixed, premixed = house.played
     assert set(tracks) == {p for p in CATALOG if not p.startswith(("Pink", "Front"))} and mixed and premixed
-    assert house.moved and room.last_media == "stereo"
+    assert house.moved
     assert said.startswith("Playing 5 tracks of goth on discovery ") and "?" not in said
     said = run("play_music", {"genre": "polka", "speaker": "upstairs", "shuffle": True})
     assert said.startswith("Nothing polka in his library, so here is the closest. Playing 7 tracks")

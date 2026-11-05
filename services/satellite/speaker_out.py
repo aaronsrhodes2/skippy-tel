@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from pathlib import Path
 
 RATE = 48000
 ECHO_TAIL_S = 0.6                                                  # a stereo's own buffering and the room's echo, after the clip's last sample
@@ -92,8 +93,20 @@ def decode(mp3: bytes, gain: float = 1.0):
     return (np.frombuffer(raw, dtype="<f4").reshape(-1, 2) * gain).astype("float32")
 
 
+RADIO_PID = Path(__file__).resolve().parents[2] / "state" / "radio" / "radio.pid"      # the house radio writes its process id here when it starts
+
+
+def radio_pid() -> int:
+    """The house radio's process (0: none known). Its Sony output is ducked by the radio's own router together with the rest of the stream (Skippy's voice ducks
+    all of it), so the per-app volume below leaves it alone, or the Sony would be ducked twice."""
+    try:
+        return int(RADIO_PID.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return 0
+
+
 class Ducker:
-    """Lowers the other programs' volume while Skippy talks, then puts it back (Windows per-app volumes through pycaw)."""
+    """Lowers the other programs' volume while Skippy talks, then puts it back (Windows per-app volumes through pycaw). Not the house radio's: it ducks itself."""
     def __init__(self, factor: float = 0.25):
         self.factor, self.saved = factor, []
 
@@ -101,8 +114,9 @@ class Ducker:
         try:
             from pycaw.pycaw import AudioUtilities                # noqa: PLC0415
             import os                                              # noqa: PLC0415
+            skip = {os.getpid(), radio_pid()}
             for s in AudioUtilities.GetAllSessions():
-                if s.Process is not None and s.Process.pid != os.getpid() and s.SimpleAudioVolume is not None:
+                if s.Process is not None and s.Process.pid not in skip and s.SimpleAudioVolume is not None:
                     v = s.SimpleAudioVolume.GetMasterVolume()
                     self.saved.append((s, v))
                     s.SimpleAudioVolume.SetMasterVolume(v * self.factor, None)

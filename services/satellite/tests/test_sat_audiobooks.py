@@ -255,17 +255,10 @@ def test_an_empty_library_says_what_to_do(tmp_path):
     asyncio.run(go())
 
 
-def test_book_tools_and_the_combined_set(tmp_path):
-    async def go():
-        loop = asyncio.get_running_loop()
-        room = SimpleNamespace(book=None, last_media="music")
-        tools, run = A.book_tools(lambda: room, loop)
-        both = A.combine(([{"name": "music"}], lambda n, a: "music!"), (tools, run))
-        assert {t["name"] for t in both[0]} == {"music", "audiobook"}
-        assert both[1]("music", {}) == "music!"
-        assert await asyncio.to_thread(both[1], "audiobook", {"action": "list"}) == "This room has no way to play books."
-        assert both[1]("nope", {}) == "I have no such tool."
-    asyncio.run(go())
+def test_the_combined_tool_set_keeps_each_tools_runner():
+    both = A.combine(([{"name": "music"}], lambda n, a: "music!"), (A.BOOK_TOOLS, lambda n, a: "book!"))
+    assert {t["name"] for t in both[0]} == {"music", "audiobook"}
+    assert both[1]("music", {}) == "music!" and both[1]("audiobook", {"action": "list"}) == "book!" and both[1]("nope", {}) == "I have no such tool."
 
 
 def test_the_pod_url_and_the_ffmpeg_lines_carry_the_speed_and_the_place():
@@ -321,9 +314,10 @@ def test_the_pc_output_streams_chunks_with_the_ducking_gain():
 # ── the plain spoken commands ──
 def routed(heard, playing=True, paused_book=False, sleep=False, lib=None, last="book"):
     import book_voice
-    player = SimpleNamespace(playing=playing, book={"id": "b"} if (playing or paused_book) else None, speed=1.0, sleep_at=1 if sleep else None,
-                             library=lib or SimpleNamespace(refresh=lambda: 0, find=lambda q: (None, [])))
-    return book_voice.pre_route(heard, SimpleNamespace(book=player, last_media=last))
+    loaded = playing or paused_book                                # `last`: "book" when the station's current item is the book (the radio's `kind`)
+    view = SimpleNamespace(playing=playing, loaded=loaded, current=bool(loaded and last == "book"), sleeping=sleep, speed=1.0,
+                           library=lib or SimpleNamespace(refresh=lambda: 0, find=lambda q: (None, [])))
+    return book_voice.pre_route(heard, view)
 
 
 def test_plain_spoken_commands_reach_the_tool_without_the_model():

@@ -45,6 +45,36 @@ def blend(bilby: list[str], spotify: list[str], every: int = 3, take: int = 2) -
     return out
 
 
+class StationBookOut:
+    """The audiobook engine's output (audiobooks.BookPlayer.pc_outs): its file, from a second, at its speed, as one play on the router's `media` layer, on
+    the station's speakers and at the station's gain. So Skippy's voice ducks a book as it ducks a song, the volume is the station's, a switched-off
+    speaker stays silent, and the pods hear it through the same live tap."""
+
+    kind = "station"
+    gain = 1.0                                                     # the engine's own ducking lands here and is ignored: the station's gain rules
+
+    def __init__(self, player: "RouterPlayer"):
+        self.player = player
+        self.play = None
+
+    def available(self):
+        return self.player.available() or None
+
+    def start(self, source: str, start_s: float, speed: float = 1.0) -> bool:
+        import book_out                                             # noqa: PLC0415
+        import router as router_mod                                 # noqa: PLC0415
+        self.stop()
+        kw = {"popen": self.player.popen} if self.player.popen is not None else {}
+        self.play = self.player.router.play(router_mod.PipeSource(book_out.pcm_args(source, start_s, speed), **kw), layer="media",
+                                            targets=set(self.player.kinds), gain=self.player.gain)
+        return True
+
+    def stop(self) -> None:
+        p, self.play = self.play, None
+        if p is not None:
+            self.player.router.stop(p)
+
+
 class RouterPlayer:
     """BoxMusic's `player` (async play(url), stop(), volume(step)) on the router's outputs."""
 
@@ -54,6 +84,8 @@ class RouterPlayer:
         self.popen = popen
         self.music = None                                          # the BoxMusic driving this player (set by StereoMusic)
         self.play_obj = None
+        self.books = None                                          # audiobooks.BookPlayer: the station's audiobook engine; a book is the queue item "book:<id>" (set by radio.py)
+        self.book_out = StationBookOut(self)
         self.gain = 1.0
         self.spotify, self.clock = spotify, clock                  # spotify.Client, or None (then BoxMusic skips Spotify items here too)
         self.spot_play = None                                      # the router's play of the Spotify sound (the cable, or go-librespot's stream)
@@ -93,10 +125,52 @@ class RouterPlayer:
         loop.create_task(watch())
 
     async def stop(self) -> None:
+        """The one stop: a song, Spotify and a book all end here (a book keeps its place: BookPlayer.pause remembers it)."""
+        await self._release()
+        b = self.books
+        if b is not None and b.playing:
+            await b.pause()
+
+    async def _release(self) -> None:
+        """End what is not the book: a song's play and Spotify."""
         p, self.play_obj = self.play_obj, None
         if p is not None:
             self.router.stop(p)
         await self._stop_spotify()
+
+    # ── an audiobook as the queue's item "book:<id>" (audiobooks.py is the engine: place, chapters, speed, sleep timer) ──
+    async def play_book(self, bid: str, pos: float = 0.0) -> None:
+        """The queue came to the book `bid`: where it was left (the store's place; the car or the browser may have moved it), or resumed if it is the loaded one.
+        Raises KeyError / FileNotFoundError when the book or its file is gone: BoxMusic goes on to the next item."""
+        b = self.books
+        if b is None:
+            raise LookupError("no audiobook engine here")
+        await self._release()
+        await asyncio.to_thread(b.library.refresh)                  # cached for minutes: the first call after a start scans the shelf
+        loaded = b.book is not None and b.book["id"] == bid
+        if loaded and b.playing:
+            return
+        if loaded:
+            await b.resume()
+            return
+        if b.playing:
+            await b.pause()                                         # another book was playing: its place is kept
+        await b.play(bid)
+
+    def book_pos(self) -> float | None:
+        b = self.books
+        return None if b is None or b.book is None else b.pos()
+
+    async def book_chapter(self, step: int) -> bool:
+        """Next (+1) or previous (-1) chapter of the playing book. False when there is none (the last chapter): the queue goes on."""
+        b = self.books
+        if b is None or b.book is None:
+            return False
+        return (await b.next_chapter() if step > 0 else await b.previous_chapter()) is not None
+
+    async def book_seek(self, pos: float) -> None:
+        if self.books is not None and self.books.book is not None:
+            await self.books.seek(pos)
 
     # ── crossfades: router gains, nothing else is done to the sound ──
     def _ramp(self, p, up: bool, seconds: float, then=None) -> None:
@@ -158,6 +232,8 @@ class RouterPlayer:
     async def play_spotify(self, uri: str, pos: float = 0.0, fade_s: float = 0.0) -> None:
         """Play a Spotify track (and the Spotify run after it). From Bilby: a plain cut, or with `fade_s` Bilby fades out as Spotify comes in
         (handoff_to_spotify)."""
+        if self.books is not None and self.books.playing:
+            await self.books.pause()                                # a book never plays under Spotify: its place is kept
         p, self.play_obj = self.play_obj, None
         if p is not None:
             if fade_s > 0:
@@ -308,6 +384,8 @@ class RouterPlayer:
         p, self.play_obj = self.play_obj, None
         if p is not None:
             self.router.stop(p)
+        if self.books is not None and self.books.playing:
+            (self.loop or asyncio.get_running_loop()).create_task(self.books.pause())
         self._ensure_stream()
         self.spot_uri, self.spot_seen, self.spot_ours, self.spot_run = st["uri"], True, False, [st["uri"]]
         self._road(st["uri"])
@@ -352,7 +430,7 @@ class RouterPlayer:
 
     def set_gain(self, g: float) -> None:
         self.gain = g
-        for p in (self.play_obj, self.spot_play):
+        for p in (self.play_obj, self.spot_play, self.book_out.play):
             if p is not None:
                 p.gain = g
 
