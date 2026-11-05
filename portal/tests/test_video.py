@@ -349,3 +349,26 @@ def test_the_video_page_waits_out_a_dead_zone_instead_of_giving_up():
     assert js.count("recoverStart(") >= 6                                                    # every way the line can die ends in the wait, not in an error box
     css = (STATIC / "bridge.css").read_text(encoding="utf-8")
     assert '.lamp[data-s="warn"]' in css and '.lamp[data-s="off"]' in css                   # the lamp says so by shape as well as colour
+
+
+# ── the direct door (edge.py; test_edge.py has the rest): the pass also says where to reach the gate without the Funnel ──
+class _Door:
+    """Stands in for edge.Edge: gate() only asks direct(prefix)."""
+
+    def __init__(self, up=True):
+        self.up = up
+
+    def direct(self, prefix):
+        return f"https://home.makerportal.live/{prefix}" if self.up else None
+
+
+def test_the_pass_names_the_direct_door_while_it_is_up_for_the_captain_and_a_friend_alike():
+    clock = Clock()
+    assert video_mod.Video(paired_home(clock), clock=clock).gate()["direct"] is None                    # no door configured: the field is there, null
+    for read_only in (False, True):
+        up = video_mod.Video(paired_home(clock), clock=clock, edge=_Door(True)).gate(read_only=read_only)
+        assert up["direct"] == "https://home.makerportal.live/video" and up["url"] == GATE              # "url" is still the Funnel's
+    assert video_mod.Video(paired_home(clock), clock=clock, edge=_Door(False)).gate()["direct"] is None
+    caps = {"video_gate": {"ready": True, "url": "https://home.makerportal.live/video"}}                # the door's own address is no gate address
+    refused = video_mod.Video(paired_home(clock, caps), clock=clock, edge=_Door(True)).gate()
+    assert not refused["ok"] and "direct" not in refused and "pass" not in refused

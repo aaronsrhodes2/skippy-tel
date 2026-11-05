@@ -21,6 +21,11 @@ What it tells the Captain (2026-11-02: eighteen "still failing after 3 tries" DM
 it gives up on something, a reminder only every REMIND_S while that is still true (a day for the desktop apps he may have closed on
 purpose), and ONE "working again" when it has been fine for BACK_AFTER_S. The memory of who was told what is kept in the bucket
 (STATE_KEY), because this portal is redeployed every few minutes and used to forget, and then told him again.
+
+The direct door (edge.py: https://home.makerportal.live straight to skippy-pc's gates, the Funnel being the fallback) is watched too, but only as a
+row and one DM: it is optional, nothing here can fix a router or an ISP, and the Funnel carries everything while it is down. So a door that has not
+been up once since this portal started is silent, one that was up and has stayed down for EDGE_DOWN_S is told once (reminders and "working again" as
+above), and it is never healed.
 """
 from __future__ import annotations
 
@@ -44,8 +49,11 @@ UNREACHABLE_DM_S = 600      # skippy-pc and its starter both silent this long: t
 # No "ollama": since 2026-10-25 it is skippy-core's shim, which skippy-core's own doctor and deployer keep up.
 HEALABLE = ("flask-api", "whisper", "music-studio", "image-studio", "music-gate", "video-gate",
             "audiobook-gate", "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core", "openaudible", "spotify")
-REPORT_ONLY = ("vbcable",)   # shown as a row, never healed
-LABELS = {"flask-api": "Skippy's API", "ollama": "Ollama (local models)", "whisper": "Whisper (hearing)", "music-studio": "Music studio",
+EDGE_CHECK = "direct-door"  # the direct door (edge.py): a row once it has been up, a DM if it stays down
+EDGE_DOWN_S = 600           # it was up since this portal started and has been failing this long: tell the Captain once
+EDGE_GAP_S = 180            # not looked at for this long (the PC was off, the stack stopped on purpose, Docker down): its failing clock starts over
+REPORT_ONLY = ("vbcable", EDGE_CHECK)   # shown as a row, never healed
+LABELS = {"flask-api": "Skippy's API", "direct-door": "Direct door", "ollama": "Ollama (local models)", "whisper": "Whisper (hearing)", "music-studio": "Music studio",
           "image-studio": "Picture studio", "mentat-home": "Mentat", "music-gate": "Audio service", "video-gate": "Video service", "audiobook-gate": "Audiobooks",
           "voice-gate": "Voice", "tts-studio": "Local voices", "home-reporter": "Home reporter", "bridge": "Private Skippy's bridge",
           "docker": "Docker", "openaudible": "OpenAudible (web server)", "spotify": "Spotify (desktop)",
@@ -62,9 +70,10 @@ def _span(seconds: float) -> str:
 
 
 class Doctor:
-    def __init__(self, home, starter, notify=None, clock=time.time, store=None, log=None):
+    def __init__(self, home, starter, notify=None, clock=time.time, store=None, log=None, edge=None):
         self.home, self.starter, self.notify, self.clock = home, starter, notify or (lambda text: False), clock
         self.store, self.log = store, log or (lambda line: print(line, flush=True))
+        self.edge = edge                           # the direct door (edge.py), or None: only its alive() and status() are used
         self._lock = threading.Lock()
         self.checks: dict[str, dict] = {}          # name -> {ok, why, ms, since, at}
         self.tries: dict[str, list[float]] = {}    # name -> heal times this hour                          (kept in the bucket)
@@ -243,6 +252,8 @@ class Doctor:
                 if isinstance(status.get(app), bool):
                     self._set(app, status[app], "" if status[app] else ("not installed or disabled" if app == "vbcable" else "the app is not running"),
                               down_s=(status.get("down_s") or {}).get(app))
+            if status.get("docker") is not False:            # (Docker down is that one problem, handled below: not the direct door's as well)
+                self._look_at_edge(now)
             age = self.home.age() if self.home else None
             self._note_recoveries(status, age, now)          # what he was told is broken and now looks fine: one "working again"
             if status.get("docker") is False:                # Docker itself: the starter restarts it clean
@@ -271,6 +282,35 @@ class Doctor:
                     healed.append(name)
         return healed
 
+    def _look_at_edge(self, now: float) -> None:
+        """The direct door (edge.py), looked at with every tick: a row once it has been up, and ONE DM when it has stayed down EDGE_DOWN_S (the Funnel
+        carries everything meanwhile, so it is news but never urgent). A door that has not been up once since this portal started says nothing at
+        all (it is optional). It is never healed: a router or an ISP is not the starter's to fix. Called with the lock held."""
+        if self.edge is None:
+            return
+        try:
+            self.edge.alive()                         # (starts a fresh probe in the background when the last one is old; never waits for it)
+            door = self.edge.status()
+        except Exception:  # noqa: BLE001 — an optional door never stops the doctor
+            return
+        old = self.checks.get(EDGE_CHECK)
+        if old is not None and now - old["at"] > EDGE_GAP_S:
+            self.checks.pop(EDGE_CHECK)               # nobody looked for a while: how long it has been down is not known, so the clock starts over
+        if not door.get("host") or door.get("ever_alive") is not True:
+            self.checks.pop(EDGE_CHECK, None)
+            return
+        up = door.get("alive") is True
+        self._set(EDGE_CHECK, up, door.get("error") or "no answer")
+        check = self.checks[EDGE_CHECK]
+        down_for = now - check["since"]
+        if up or down_for < EDGE_DOWN_S:
+            return
+        self._tell(EDGE_CHECK,
+                   f"Skippy's doctor: the direct door ({door['host']}) has been down for {_span(down_for)} ({check['why']}). Nothing is lost: the music, "
+                   "films, books and voice still go through the Funnel, only slower on a poor link. I'll tell you once when it's back.",
+                   f"Skippy's doctor: the direct door ({door['host']}) is still down after <SPAN> ({check['why']}); the Funnel is carrying everything meanwhile.",
+                   since=check["since"])
+
     def _unreachable(self) -> None:
         """skippy-pc and its starter both silent: nothing here can reach it (off, asleep, no internet). Tell the Captain once."""
         if self.starter is None or self.starter.online():
@@ -290,7 +330,7 @@ class Doctor:
         (never discarding anything), every container up from it (rebuilt where it changed), whatever is failing recreated, the bridge
         restarted when it isn't mid-run, Skippy Core repaired. The portal's own part (a redeploy when it is behind main or its last
         deploy failed, stuck agent records cleared) is done by the caller (recovery_web.py)."""
-        failing = sorted(n for n, c in self.checks.items() if not c["ok"] and n not in ("docker", "core", "bridge", "openaudible", "spotify", "vbcable"))
+        failing = sorted(n for n, c in self.checks.items() if not c["ok"] and n not in ("docker", "core", "bridge", "openaudible", "spotify", *REPORT_ONLY))
         cid = self.starter.request("repair", by, arg=",".join(failing))
         with self._lock:
             self.repairing = {"at": self.clock(), "by": by, "id": cid, "done": False, "ok": None, "summary": ""}

@@ -1,8 +1,8 @@
 # Home → portal bridge. Docker Compose merges this file into docker-compose.yml
 # automatically, so a plain `docker compose up -d --build` on skippy-pc runs
 # these alongside flask-api (same network: they reach each other by
-# service name). Nothing here publishes a port to the network: everything goes OUT to
-# the portal, except music-gate and video-gate, which listen on 127.0.0.1 for Tailscale Funnel.
+# service name). Only `edge` (the direct front door, off until turned on) publishes a port to the network: everything goes OUT to
+# the portal, except the gates (music, video, voice, popup, audiobook), which listen on 127.0.0.1 for Tailscale Funnel and for the edge.
 services:
   # Bilby's Audio Service's library: MP3/AAC files under a pass only the portal can sign
   # (services/music-gate/gate.py). On the internet through Tailscale Funnel on
@@ -10,6 +10,7 @@ services:
   music-gate:
     build: ./services/music-gate
     container_name: skippytel-music-gate
+    networks: [default, edge-net]              # edge-net: the one network the direct door (edge) shares with the gates
     restart: unless-stopped
     env_file: G:/My Drive/vault/.env           # SKIPPY_HOME_TOKEN: the pass key is derived from it
     environment:
@@ -19,7 +20,7 @@ services:
       # LYRICS_MATCH: song (default; a line fits every file of the song) | path (only the per-file entries)
       # ART_CACHE_MB: 600 (the thumbnail cache's limit, in /state/art-cache)
     ports:
-      - "127.0.0.1:3005:8080"                  # localhost only; Funnel is the one way in from outside
+      - "127.0.0.1:3005:8080"                  # localhost only; Funnel and the edge (the direct door) are the ways in from outside
     volumes:
       - D:/Aaron/Music/corrected_music:/music:ro
       - ./state/music-gate:/state               # tag cache (a restart doesn't re-read 21k files), lyric lines, thumbnails
@@ -33,6 +34,7 @@ services:
   video-gate:
     build: ./services/video-gate
     container_name: skippytel-video-gate
+    networks: [default, edge-net]              # edge-net: the one network the direct door (edge) shares with the gates
     restart: unless-stopped
     env_file: G:/My Drive/vault/.env           # SKIPPY_HOME_TOKEN (the pass key is derived from it) and JELLYFIN_API_KEY
     environment:
@@ -42,7 +44,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "127.0.0.1:3006:8080"                  # localhost only; Funnel is the one way in from outside
+      - "127.0.0.1:3006:8080"                  # localhost only; Funnel and the edge (the direct door) are the ways in from outside
     volumes:
       - ./state/video-gate:/state               # poster cache (/state/img, bounded)
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
@@ -58,34 +60,36 @@ services:
     environment:
       WHISPER_URL: http://whisper:8000
       TTS_STUDIO_URL: http://tts-studio:8003   # the local voices (stock = Kokoro, skippy = F5 clone); which one is the pass's call
-    networks: [default, tts-net]               # tts-net: the only way to reach the offline tts-studio
+    networks: [default, tts-net, edge-net]     # tts-net: the only way to reach the offline tts-studio; edge-net: the direct door's (edge) own network
     volumes:
       - ./state/voice-gate:/state                # cache of what was already said
       - ./state/wakeword:/wake:ro                # the trained "Skippy" wake word (skippy.onnx), for the Drive page's in-browser ear
       - ./services/satellite/.venv/Lib/site-packages/openwakeword/resources/models:/wake-features:ro   # openWakeWord's two shared feature models
     ports:
-      - "127.0.0.1:3007:8080"                  # localhost only; Funnel is the one way in from outside
+      - "127.0.0.1:3007:8080"                  # localhost only; Funnel and the edge (the direct door) are the ways in from outside
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
   # popup-gate: a file a pop-up should work on (a whole track to split into stems), too big for a chat message, comes home straight
-  # from the browser on a pass the portal signs (docs/popups.md "Big files"). Funnel's :10000/in mount is its one way in.
+  # from the browser on a pass the portal signs (docs/popups.md "Big files"). Funnel's :10000/in mount (and the edge's /in) is its way in.
   popup-gate:
     build: ./services/popup-gate
     container_name: skippytel-popup-gate
+    networks: [default, edge-net]              # edge-net: the one network the direct door (edge) shares with the gates
     restart: unless-stopped
     env_file: G:/My Drive/vault/.env           # SKIPPY_HOME_TOKEN (the pass key is derived from it)
     volumes:
       - ./state/popup-inputs:/inputs           # the files, kept a day; the home reporter reads them (read-only)
     ports:
-      - "127.0.0.1:3008:8080"                  # localhost only; Funnel (:10000 /in) is the one way in from outside
+      - "127.0.0.1:3008:8080"                  # localhost only; Funnel (:10000 /in) and the edge (/in) are the ways in from outside
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
   # audiobook-gate: the Captain's converted audiobooks (OpenAudible's folder: books/, art/, books.json) for the Audiobooks app, under a pass only
-  # the portal can sign (services/audiobook-gate/gate.py). Funnel's :10000/books mount is its one way in. It reads the hub's places (state/, read-only)
+  # the portal can sign (services/audiobook-gate/gate.py). Funnel's :10000/books mount (and the edge's /books) is its way in. It reads the hub's places (state/, read-only)
   # and writes the ones saved from the browser into the inbox the hub reads (state/audiobooks-inbox): never anywhere else.
   audiobook-gate:
     build: ./services/audiobook-gate
     container_name: skippytel-audiobook-gate
+    networks: [default, edge-net]              # edge-net: the one network the direct door (edge) shares with the gates
     restart: unless-stopped
     env_file: G:/My Drive/vault/.env           # SKIPPY_HOME_TOKEN: the pass key is derived from it
     volumes:
@@ -93,7 +97,7 @@ services:
       - ./state:/state:ro                      # the hub's state/audiobooks.json (the voice player's places)
       - ./state/audiobooks-inbox:/inbox        # the places saved from the browser: the one thing this gate writes
     ports:
-      - "127.0.0.1:3009:8080"                  # localhost only; Funnel (:10000 /books) is the one way in from outside
+      - "127.0.0.1:3009:8080"                  # localhost only; Funnel (:10000 /books) and the edge (/books) are the ways in from outside
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
   # The Captain's Spotify (services/spotify/README.md): go-librespot makes skippy-pc a Spotify Connect speaker ("Skippy"), its sound goes over TCP
@@ -237,9 +241,50 @@ services:
               capabilities: [gpu]
     logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
 
+  # edge: the direct front door (edge/Caddyfile, edge/README.md, docs/direct-door.md). Caddy answers on https://home.makerportal.live, the home's
+  # public address: the router forwards external TCP 443 to this PC's 47443 (UPnP: tools/upnp_port.py, kept by the starter), which is this
+  # container's :443, and Caddy hands /music /video /books /voice /in to the gates above by their service names. The pages try it first and fall
+  # back to the Tailscale Funnel. The ONE service in this file published on all interfaces (the note at the top of the file predates it), and it
+  # holds no secret: no env_file, no vault, no docker.sock; every gate wants a pass only the portal can sign. The certificates and the ACME
+  # account live in edge-data: keep that volume. Prove a change to the Caddyfile with `bash edge/selftest.sh`; apply it with `docker compose restart edge`.
+  edge:
+    image: caddy:2.11.8@sha256:4fcafa98afd1c2e642e353e3c5cf9ddbe892fcee14bc990e7ba2c5b78e51f9cf   # 2.11.8 (never lower: docs/direct-door.md), by digest so a re-pushed tag changes nothing
+    container_name: skippytel-edge
+    profiles: ["edge"]                         # OFF until it is turned on: `docker compose up -d edge` (after the DNS name and the router's forward exist, docs/direct-door.md); a bare `up -d` leaves it alone, so Let's Encrypt is never asked before the door can answer
+    networks: [edge-net]                       # its own network, shared only with the five gates: if the one container the internet reaches is ever taken over it still cannot see flask-api, whisper or the home reporter
+    restart: unless-stopped
+    environment:
+      EDGE_HOST: ${EDGE_HOST:-home.makerportal.live}
+      EDGE_ACME_DIR: ${EDGE_ACME_DIR:-https://acme-v02.api.letsencrypt.org/directory}   # Let's Encrypt; the staging CA is for a rehearsal (docs/direct-door.md)
+    ports:
+      - "0.0.0.0:47443:443"                    # the router's 443 lands here (HTTP/3 off: TCP only)
+    volumes:
+      - ./edge/Caddyfile:/etc/caddy/Caddyfile:ro
+      - edge-data:/data                        # certificates, the ACME account, and the traffic log (access.log, 10 MiB x 3)
+      - edge-config:/config
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 256
+    healthcheck:                               # Caddy is up and serving (its own loopback listener); the door being open end to end is /ping from outside
+      test: ["CMD", "curl", "-fsS", "--max-time", "3", "-o", "/dev/null", "http://127.0.0.1:8081/ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
+
 networks:
   tts-net:
     internal: true
+  edge-net: {}                                 # the direct door (edge) and the five gates; not internal (the edge is reached from outside and asks Let's Encrypt)
 
 volumes:
   image-studio-weights:
+  edge-data:
+  edge-config:

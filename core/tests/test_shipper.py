@@ -58,6 +58,14 @@ def test_error_looking_lines_of_a_running_container_are_picked_a_few_at_a_time(t
     assert rows[-1]["msg"] == "ERROR thing 11"                                                         # the newest ones
 
 
+def test_a_scanners_acme_alpn_hello_at_the_direct_door_is_not_an_error_but_a_real_caddy_error_still_is(tmp_path):
+    noise = '{"level":"error","ts":1.0,"logger":"tls","msg":"tls-alpn challenge","remote_addr":"203.0.113.9:5","server_name":"home.makerportal.live","error":"no active ACME challenge"}'
+    real = '{"level":"error","ts":2.0,"logger":"tls.obtain","msg":"could not get certificate from issuer","error":"HTTP 429 urn:ietf:params:acme:error:rateLimited"}'
+    s, _, _ = shipper(tmp_path, Docker(since={"skippytel-edge": "\n".join([noise] * 8 + [real] + [noise] * 4)}))
+    rows = s.collect([{"name": "skippytel-edge", "state": "running"}])
+    assert [r["msg"] for r in rows] == [real]                                                          # eight scanners before and four after: only the real one is shipped
+
+
 def test_nothing_is_lost_while_the_portal_is_away_and_it_all_goes_when_it_returns(tmp_path):
     s, sent, state = shipper(tmp_path, Docker())
     state["up"] = False

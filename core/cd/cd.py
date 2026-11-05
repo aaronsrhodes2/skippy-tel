@@ -25,6 +25,7 @@ serving_at: when all traffic moved to the new revision); each run's log in runs/
     cd.py ops <command> ...  scripts/remote.py on this box's identity: status, logs, start, stop, restart, tail, search, stats,
                              restart-game, backups, restore-game, discord-setup, home, configure (what the `ops` workflow did)
     cd.py domains            tools/domains.py: the portal's domains (what the `domains` workflow did)
+    cd.py home-dns           keep home's public names (deploy.json home_dns) on home's IP now: prints the IP, then what each name got
     cd.py status             state.json
 
 Settings (/etc/skippy-core/core.env, the environment overrides): CD_STATE, CI_LOCAL, CI_NAME, CD_VAULT (/etc/skippy-core/vault.env:
@@ -681,7 +682,7 @@ class CD:
             self.home_dns()
             self.report()
 
-    # ── home's public name: the router forwards the car's telemetry door here, and home's IP changes ──────────────
+    # ── home's public names: the router forwards the car's telemetry door and the direct front door here, and home's IP changes ──
     HOME_IP_EVERY_S = 300
     IP_SOURCES = ("https://api.ipify.org", "https://ipv4.icanhazip.com")
 
@@ -698,33 +699,72 @@ class CD:
         parts = ip.split(".")
         return ip if len(parts) == 4 and all(p.isdigit() and int(p) < 256 for p in parts) else None
 
+    @staticmethod
+    def home_names(spec: dict) -> list[str]:
+        """The names deploy.json's home_dns keeps on home's IP: "host" (the one name, the original form) then "hosts" (more), each once,
+        spelled the way Cloud DNS does (lower case, a trailing dot). Whatever is not a name is skipped: a tick never fails over the config."""
+        more = spec.get("hosts")
+        names: list[str] = []
+        for h in [spec.get("host"), *(more if isinstance(more, (list, tuple)) else [more])]:
+            bare = h.strip().strip(".").lower() if isinstance(h, str) else ""
+            if bare and bare + "." not in names:
+                names.append(bare + ".")
+        return names
+
+    def home_dns_point(self, name: str, zone: str, ip: str) -> str:
+        """One name's A record onto `ip`: Cloud DNS is asked what it holds and touched only when that is something else. What happened."""
+        oidc.token()
+        have = self.gcloud("dns", "record-sets", "list", f"--zone={zone}", f"--name={name}", "--type=A",
+                           "--format=value(rrdatas)", quiet=True).strip()
+        if have == ip:
+            return f"already {ip}"
+        verb = "update" if have else "create"
+        self.gcloud("dns", "record-sets", verb, name, f"--zone={zone}", "--type=A", "--ttl=60", f"--rrdatas={ip}")
+        self.say(f"cd: {name} -> {ip} (was {have or 'unset'})")
+        return f"{verb}d (was {have or 'unset'})"
+
     def home_dns(self, force: bool = False) -> str | None:
-        """Keep deploy.json's home_dns host's A record on home's public IP: checked every 5 minutes, Cloud DNS touched only when
-        the IP moved. Never raises (a tick must not fail over it)."""
+        """What run() does each tick: home_dns_sync()'s IP alone (None: not due yet, or home's IP isn't known)."""
+        return self.home_dns_sync(force)[0]
+
+    def home_dns_sync(self, force: bool = False) -> tuple[str | None, dict[str, str]]:
+        """Keep every name of deploy.json's home_dns ("host", "hosts") on home's public IP: ONE IP check for all of them, every 5 minutes
+        (`force`: now, and every name is asked about); a name's record is created or updated only when Cloud DNS holds something else,
+        and a name already known to be at this IP is not even asked about (so a name added to deploy.json is made without the IP moving).
+        One name failing never stops the others and is asked about again next tick. Never raises (a tick must not fail over it).
+        Returns (home's IP: None when not due or not known, what each name got: {} when nothing was due)."""
+        did: dict[str, str] = {}
         if not getattr(self, "cfg", None):
             self.cfg = json.loads((HERE / "deploy.json").read_text(encoding="utf-8"))
         spec = self.cfg.get("home_dns") or {}
-        if not spec.get("host") or (not force and time.time() - self.state.get("home_ip_at", 0) < self.HOME_IP_EVERY_S):
-            return None
+        names = self.home_names(spec)
+        if not names or (not force and time.time() - self.state.get("home_ip_at", 0) < self.HOME_IP_EVERY_S):
+            return None, did
         self.state["home_ip_at"] = time.time()
         ip = self.public_ip()
-        if not ip or (ip == self.state.get("home_ip") and not force):
+        if not ip:
             self.save()
-            return ip
-        name, zone = spec["host"].rstrip(".") + ".", spec["zone"]
-        try:
-            oidc.token()
-            have = self.gcloud("dns", "record-sets", "list", f"--zone={zone}", f"--name={name}", "--type=A",
-                               "--format=value(rrdatas)", quiet=True).strip()
-            if have != ip:
-                verb = "update" if have else "create"
-                self.gcloud("dns", "record-sets", verb, name, f"--zone={zone}", "--type=A", "--ttl=60", f"--rrdatas={ip}")
-                self.say(f"cd: {name} -> {ip} (was {have or 'unset'})")
-            self.state["home_ip"] = ip
-        except Exception as e:                            # noqa: BLE001
-            self.say(f"cd: couldn't point {name} at {ip}: {e}")
+            return None, {n: "left as it is" for n in names}
+        held = self.state.get("home_dns")                 # {name: the IP Cloud DNS was last seen to hold for it}
+        held = {n: v for n, v in (held if isinstance(held, dict) else {}).items() if n in names}
+        for name in names:
+            if held.get(name) == ip and not force:
+                did[name] = f"unchanged since the last check ({ip})"
+                continue
+            try:
+                if not spec.get("zone"):
+                    raise Failed("deploy.json's home_dns has no zone")
+                did[name] = self.home_dns_point(name, spec["zone"], ip)
+                held[name] = ip
+            except Exception as e:                        # noqa: BLE001
+                self.say(f"cd: couldn't point {name} at {ip}: {e}")
+                did[name] = "failed: " + " ".join(str(e).split())[:300]
+                held.pop(name, None)                      # unknown now (an error can come after Cloud DNS acted): asked again next tick
+        self.state["home_dns"] = held
+        if all(held.get(n) == ip for n in names):
+            self.state["home_ip"] = ip                    # (what `cd.py status` shows: every name is on it)
         self.save()
-        return ip
+        return ip, did
 
     # ── publish: what skippy-core puts in buckets besides the portal ────────────────────────────────────────────
     PUBLISH_RETRY_S = 600
@@ -883,9 +923,16 @@ def main(argv: list[str]) -> int:
         return cd.ops(argv[1:])
     if cmd == "domains":
         return cd.domains()
-    if cmd == "home-dns":
-        print(cd.home_dns(force=True) or "home's public IP isn't known (the two IP services disagree or don't answer)")
-        return 0
+    if cmd == "home-dns":                                 # now, whatever the 5-minute clock says: the IP, then what each name got
+        cd.say = lambda _m: None                          # (the table below says it all)
+        ip, did = cd.home_dns_sync(force=True)
+        if not did:
+            print("deploy.json's home_dns names no host: nothing to keep on home's IP")
+            return 0
+        print(ip or "home's public IP isn't known (the two IP services disagree or don't answer)")
+        for name, what in did.items():
+            print(f"  {name:<30} {what}")
+        return 1 if any(what.startswith("failed") for what in did.values()) else 0
     if cmd == "bootstrap":                                # plan only, unless "apply" is typed
         return cd.bootstrap(apply=argv[1:2] == ["apply"])
     if cmd == "vendor":                                   # the Core deployer's Mentat build: <dest>/.vendor/sigma-ground

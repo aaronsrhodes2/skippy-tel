@@ -410,3 +410,34 @@ def test_end_to_end_a_big_track_goes_home_through_the_gate_and_the_real_reporter
             srv.shutdown()
         for d in ("services/home-reporter", "services/popup-gate"):
             sys.path.remove(str(ROOT / d))
+
+
+# ── the direct door (edge.py; test_edge.py has the rest): the pass also says where to reach the gate without the Funnel ──
+class _Door:
+    """Stands in for edge.Edge: grant() only asks direct(prefix)."""
+
+    def __init__(self, up=True):
+        self.up = up
+
+    def direct(self, prefix):
+        return f"https://home.makerportal.live/{prefix}" if self.up else None
+
+
+def test_a_big_files_pass_names_the_direct_door_while_it_is_up_and_the_funnel_address_is_untouched():
+    clock = lambda: 1_000_000.0                                                                        # noqa: E731
+    assert popup_in.PopupIn(FakeHome(), clock=clock).grant(ADMIN, True, 10)["direct"] is None          # no door configured: the field is there, null
+    up = popup_in.PopupIn(FakeHome(), clock=clock, edge=_Door(True)).grant(ADMIN, True, 10)
+    assert up["ok"] and up["direct"] == "https://home.makerportal.live/in" and up["url"] == GATE        # "url" is still the Funnel's
+    assert popup_in.PopupIn(FakeHome(), clock=clock, edge=_Door(False)).grant(ADMIN, True, 10)["direct"] is None
+    refused = popup_in.PopupIn(FakeHome(can=False), clock=clock, edge=_Door(True)).grant(ADMIN, True, 10)
+    assert not refused["ok"] and "direct" not in refused and "pass" not in refused
+
+
+def test_the_pass_route_has_the_direct_field_and_reads_it_from_the_door(world, registered):
+    world["client"].post("/home/report", headers=world["H"], json={"status": {}, "capabilities": {
+        "remove_bg": {"ready": True}, "popup_gate": {"ready": True, "url": GATE}}})
+    login(world["client"], FRIEND)
+    got = world["client"].post("/chat/popup-in", json={"bytes": 10}).get_json()
+    assert got["ok"] is True and "direct" in got and got["direct"] is None                              # (the test app has no EDGE_HOST: the door is off)
+    world["app"].extensions["popup_in"].edge = _Door(True)
+    assert world["client"].post("/chat/popup-in", json={"bytes": 10}).get_json()["direct"] == "https://home.makerportal.live/in"

@@ -87,6 +87,7 @@
           let g = null;
           try { g = await r.json(); } catch (e) { /* not JSON */ }
           if (!g || !g.ok) throw Object.assign(new Error((g && g.why) || "The film library is out of reach."), { kind: "home" });
+          if (window.SkippyDirect) g = await SkippyDirect.pick(g, { fresh: !!force });      // skippy-pc's own front door when it answers, else the Funnel (static/direct.js); a forced renewal looks again
           this.info = g;
           this.schedule();
           return g;
@@ -107,20 +108,23 @@
   }
 
   // ═══ the catalog ═════════════════════════════════════════════════════════════════════════════════════════════════
-  async function loadCatalog() {
+  async function loadCatalog(again) {      // (a Retry key calls it again: that asks the portal for the pass again, so the direct door is looked at afresh, static/direct.js)
     hideNotice("gate");
     root.dataset.state = "loading";
     setLoading("Opening the library…");
     let g;
-    try { g = await gate.ensure(); } catch (e) { root.dataset.state = "error"; gateProblem(e, loadCatalog); setLoading("The library is out of reach."); return; }
+    try { g = await gate.ensure(!!again); } catch (e) { root.dataset.state = "error"; gateProblem(e, () => loadCatalog(true)); setLoading("The library is out of reach."); return; }
     for (let attempt = 0; attempt < 4; attempt++) {
       let r;
       try { r = await fetch(C.catalogUrl(g), { cache: "no-cache" }); }      // the gate's ETag makes an unchanged catalog a 304
-      catch (e) { root.dataset.state = "error"; gateProblem(null, loadCatalog); setLoading("The library is out of reach."); return; }
-      if (r.status === 403 && attempt < 1) { try { g = await gate.ensure(true); } catch (e) { gateProblem(e, loadCatalog); return; } continue; }
+      catch (e) {
+        if (attempt < 1 && window.SkippyDirect && SkippyDirect.demote(g)) continue;      // the direct door gave no answer: once more by the Funnel
+        root.dataset.state = "error"; gateProblem(null, () => loadCatalog(true)); setLoading("The library is out of reach."); return;
+      }
+      if (r.status === 403 && attempt < 1) { try { g = await gate.ensure(true); } catch (e) { gateProblem(e, () => loadCatalog(true)); return; } continue; }
       if (r.status === 503 && attempt < 3) { setLoading("skippy-pc is still reading the library…"); await wait(5000); continue; }
-      if (!r.ok) { root.dataset.state = "error"; gateProblem({ kind: "home", message: C.playProblem(r.status) }, loadCatalog); return; }
-      try { S.lib = C.parseCatalog(await r.json()); } catch (e) { gateProblem({ kind: "home", message: "The library came back in a shape this page doesn't know." }, loadCatalog); return; }
+      if (!r.ok) { root.dataset.state = "error"; gateProblem({ kind: "home", message: C.playProblem(r.status) }, () => loadCatalog(true)); return; }
+      try { S.lib = C.parseCatalog(await r.json()); } catch (e) { gateProblem({ kind: "home", message: "The library came back in a shape this page doesn't know." }, () => loadCatalog(true)); return; }
       S.catalogAt = Date.now();
       hideNotice("load");
       root.dataset.state = "ready";
@@ -128,7 +132,7 @@
       route();
       return;
     }
-    gateProblem(null, loadCatalog);
+    gateProblem(null, () => loadCatalog(true));
   }
   const wait = ms => new Promise(r => setTimeout(r, ms));
   function setLoading(text) { if (!S.lib) showNotice(text, { key: "load" }); }

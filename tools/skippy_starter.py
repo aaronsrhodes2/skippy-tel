@@ -14,7 +14,8 @@ the portal (POST /home/starter, the home token from the vault) and gets back the
   repair   the one Recovery button: everything back to baseline (repair() says what that is)
 
 It also heals Docker by itself: hung or down for over two minutes (and not stopped on purpose), it gets the clean restart even with the
-portal out of reach. Nothing else can be asked of it: an operation not in OPS, or a name not in its lists, is refused, and no text from the
+portal out of reach. With SKIPPY_EDGE_UPNP=1 (default off) it also keeps the router's port forward for the direct front door in place, by
+itself, every 5 minutes (watch_edge; tools/upnp_port.py; docs/direct-door.md). Nothing else can be asked of it: an operation not in OPS, or a name not in its lists, is refused, and no text from the
 portal is ever run. Processes are stopped by PID only (the one listening on the bridge's port, the supervisor's own pid file). It listens on no port except a loopback lock
 so a second copy cannot run. The portal side is portal/starter.py; docs/portal/remote-recovery.md says what it cannot do (wake a PC that is off).
 """
@@ -43,6 +44,7 @@ BRIDGE_PORT = 9337
 RESUMES = ("7am", "4h", "manual")
 POLL_S = 10
 LOGS_EVERY_S = 30                                  # how often the container crashes and error lines go to the portal's log intake
+EDGE_UPNP_EVERY_S = 300                            # how often the direct front door's router forward is looked after (only when SKIPPY_EDGE_UPNP=1)
 PORTAL = os.environ.get("PORTAL_URL", "https://skippy-portal-1015050363686.us-west1.run.app").rstrip("/")
 BRIDGE_URL = os.environ.get("CLAUDE_BRIDGE_URL", "http://127.0.0.1:9337").rstrip("/")
 DOCKER_EXE = os.environ.get("DOCKER_DESKTOP_EXE", r"C:\Program Files\Docker\Docker\Docker Desktop.exe")
@@ -90,6 +92,22 @@ def load_token(env=os.environ, vaults=VAULTS) -> str:
                 if line.startswith("SKIPPY_HOME_TOKEN="):
                     return line.split("=", 1)[1].strip().strip("\"'")
     return ""
+
+
+def edge_upnp_wanted(env=os.environ, vaults=VAULTS) -> bool:
+    """Is the direct front door's router forward switched on (docs/direct-door.md)? SKIPPY_EDGE_UPNP=1 (or true/yes/on) in the environment, else in
+    a vault .env. Read afresh each round, so adding the line to the vault turns the keeper on, and removing it off, with no restart. Anything else: off."""
+    raw = env.get("SKIPPY_EDGE_UPNP")
+    if raw is None:
+        for v in (env.get("SKIPPY_VAULT"), *vaults):
+            if v and Path(v).is_file():
+                for line in Path(v).read_text(encoding="utf-8", errors="replace").splitlines():
+                    if line.startswith("SKIPPY_EDGE_UPNP="):
+                        raw = line.split("=", 1)[1].strip().strip("\"'")
+                        break
+            if raw is not None:
+                break
+    return str(raw or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def run(cmd: list[str], timeout: float = 120, cwd: str | None = None, env: dict | None = None) -> tuple[int, str]:
@@ -228,6 +246,8 @@ class Starter:
         self.resume_at: datetime | None = self._load_resume()
         self._logs_at = -1e9                      # monotonic time of the last log round
         self._shipper = None
+        self._edge_at, self._edge_keeper, self._edge_thread, self._edge_error = -1e9, None, None, ""     # the router forward (watch_edge)
+        self.edge_inline = False                  # tests: run the round in the calling thread
         self.on_battery_since: float | None = None
         self.power_down = False                   # the UPS shutdown has started: nothing else runs
         self._ups: dict = {}
@@ -317,6 +337,42 @@ class Starter:
             self._shipper.flush(self._shipper.collect(rows))
         except Exception as e:  # noqa: BLE001
             self.say(f"logs: {type(e).__name__}: {e}")
+
+    def watch_edge(self) -> bool:
+        """The direct front door's router forward (docs/direct-door.md, tools/upnp_port.py). Only when SKIPPY_EDGE_UPNP=1, and then every EDGE_UPNP_EVERY_S:
+        make sure the router forwards its external TCP 443 to this PC's 47443 (UPnP). The round runs on its own thread, so a slow or silent router never
+        stalls this loop, and at most one runs at a time. The keeper says one line when it changes the router and one when a failure begins (and ends),
+        never one per round. Off (the default) it touches no network. Never raises. Returns whether a round was started."""
+        if self.power_down or self.clock() - self._edge_at < EDGE_UPNP_EVERY_S:
+            return False
+        self._edge_at = self.clock()
+        try:
+            if not edge_upnp_wanted(os.environ, VAULTS):
+                self._edge_keeper = None          # switched on again later: it starts fresh, with its one "in place" line
+                return False
+            if self._edge_thread is not None and self._edge_thread.is_alive():
+                return False
+            if self._edge_keeper is None:
+                import upnp_port                  # tools/upnp_port.py, beside this file
+                self._edge_keeper = upnp_port.Keeper(say=self.say)
+            if self.edge_inline:
+                self._edge_round(self._edge_keeper)
+            else:
+                self._edge_thread = threading.Thread(target=self._edge_round, args=(self._edge_keeper,), daemon=True)
+                self._edge_thread.start()
+            return True
+        except Exception as e:  # noqa: BLE001 — a broken keeper must never reach the loop
+            why = f"{type(e).__name__}: {e}"
+            if why != self._edge_error:           # one line per kind of trouble, not one per round
+                self._edge_error = why
+                self.say(f"edge upnp: could not run ({why})")
+            return False
+
+    def _edge_round(self, keeper) -> None:
+        try:
+            keeper.round()
+        except Exception as e:  # noqa: BLE001 — Keeper.round never raises; this is the belt to its braces
+            self.say(f"edge upnp: crashed ({type(e).__name__}: {e})")
 
     def _post_logs(self, rows: list[dict]) -> bool:
         try:
@@ -819,6 +875,7 @@ class Starter:
                 self.check_resume()
                 self.watch_docker()
                 self.watch_logs()
+                self.watch_edge()
             except Exception as e:                                                  # noqa: BLE001 — the loop must never die
                 self.say(f"auto-start crashed ({type(e).__name__})")
             self.poll_once()

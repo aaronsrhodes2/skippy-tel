@@ -223,6 +223,16 @@ and jobs; while someone chats, the reporter also polls `GET /home/jobs` every
   reporter still sends for it (the Mac's decks and setlist, the album art, the queued `music` commands) is read by
   `/me`'s widget and the chat tool only.
 
+## The direct front door (`home.makerportal.live`, 2026-11-05: "Funnels and bridges seem like common failure points")
+
+The media and voice gates also answer straight on the home's public address, with no Tailscale Funnel in the middle: a Caddy reverse proxy (`edge/Caddyfile`, compose service `edge`
+in the profile `edge`: **off until `docker compose up -d edge`**, on its own network with the five gates, pinned by digest) behind the router's UPnP forward 443 → skippy-pc :47443
+(`tools/upnp_port.py`, kept in place by the starter when `SKIPPY_EDGE_UPNP=1`), Let's Encrypt by TLS-ALPN-01, the name kept on the home's IP by skippy-core's deployer
+(`core/cd/deploy.json` → `home_dns.hosts`). `/music /video /books /voice /in` reach the five gates with the prefix cut off; `/ping` is Caddy's own `ok`. The portal (`portal/edge.py`,
+`EDGE_HOST` in `deploy.json`) probes `/ping` from Cloud Run and adds `"direct"` to every gate pass while it answers (the doctor's "Direct door" row, one DM if a door that was up
+stays down 10 minutes); the page's half (`portal/static/direct.js`: every player, the chat's upload and Drive's page) uses `direct` only when `GET <direct>/health` answers within 2.5 s
+and goes on through the Funnel, which stays, on any trouble. Order of turning on, checks and failure modes: `docs/direct-door.md`.
+
 ## Bilby's Audio Service (the browser music player, `/music`)
 
 The Captain's collection in any browser (the Captain, and friends granted "audio" in Admin > Friends), a tile on the launcher: `portal/templates/music.html` +

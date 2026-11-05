@@ -40,17 +40,24 @@
   // ── the gate ────────────────────────────────────────────────────────────────────
   const gu = path => `${S.url}/t/${S.pass}/${path}`;
 
-  async function getGate() {
+  async function getGate(again) {
     const r = await fetch(root.dataset.gateUrl, { headers: { Accept: "application/json" } });
-    const g = await r.json();
+    let g = await r.json();
     if (!g.ok) throw new Error(g.why || "The audiobook gate is out of reach.");
-    S.url = g.url; S.pass = g.pass; S.exp = g.exp;
+    if (window.SkippyDirect) g = await SkippyDirect.pick(g, { fresh: !!again });      // skippy-pc's own front door when it answers, else the Funnel (static/direct.js); a retry looks again
+    S.g = g; S.url = g.url; S.pass = g.pass; S.exp = g.exp;
     return g;
   }
+  // The door gave no answer (a fetch that never connected): the Funnel from now on, for five minutes the door rests. True when the same call is worth making again.
+  function leaveDoor() {
+    if (!(window.SkippyDirect && S.g && SkippyDirect.demote(S.g))) return false;
+    S.url = S.g.url;
+    return true;
+  }
 
-  async function boot() {
+  async function boot(again) {
     try {
-      await getGate();
+      await getGate(again);
       const [cat, pl] = await Promise.all([fetch(gu("catalog.json")).then(r => { if (!r.ok) throw new Error("The library isn't ready yet."); return r.json(); }),
                                            fetch(gu("places.json"), { cache: "no-store" }).then(r => r.json())]);
       S.books = cat.books; S.byId = Object.fromEntries(cat.books.map(b => [b.id, b]));
@@ -65,8 +72,9 @@
       setInterval(pollRooms, 3000);
       setInterval(renewPass, 60000);
     } catch (e) {
+      const left = e instanceof TypeError && leaveDoor();      // the door was picked and did not answer: straight on by the Funnel (a fresh look would pick the same door again)
       root.dataset.state = "down"; notice(String(e.message || e));
-      setTimeout(boot, 10000);
+      setTimeout(() => boot(!left), left ? 1500 : 10000);
     }
   }
 
@@ -344,7 +352,19 @@
   const duck = window.SkippyDuck ? SkippyDuck.follow({ level: f => { au.volume = Math.max(0, Math.min(1, f)); }, paused: () => au.paused, resume: () => au.play().catch(() => {}) }) : null;
   au.addEventListener("play", () => { root.dataset.playing = "1"; paintAll(); });
   au.addEventListener("ended", () => { const b = S.cur; if (!b) return; S.places[b.id] = Object.assign({}, S.places[b.id], { finished: true }); savePlace(true); paintAll(); });
-  au.addEventListener("error", () => { if (au.src) { notice("This book won't play right now."); setTimeout(() => notice(""), 4000); } });
+  au.addEventListener("error", () => {
+    if (!au.src) return;
+    // A book that was coming from skippy-pc's direct door and stopped: the same book goes on from the Funnel, from where it stopped (static/direct.js).
+    const b = S.cur, was = au.src;
+    if (b && S.g && was.startsWith(S.g.url + "/") && leaveDoor()) {
+      const at = au.currentTime || 0;
+      au.src = gu(`a/${b.id}`);
+      au.addEventListener("loadedmetadata", () => { au.currentTime = at; au.playbackRate = S.speed; au.preservesPitch = true; }, { once: true });
+      au.play().catch(() => {});
+      return;
+    }
+    notice("This book won't play right now."); setTimeout(() => notice(""), 4000);
+  });
   document.addEventListener("visibilitychange", () => { if (document.hidden) savePlace(true); else { refreshPlaces(); pollRooms(); } });
   window.addEventListener("pagehide", () => savePlace(true));
 

@@ -82,6 +82,7 @@ import favorites as favorites_mod
 import patient as patient_mod
 import popup_in as popup_in_mod
 import tool_policy
+import edge as edge_mod
 import popups
 import chat_names
 import tasks
@@ -221,7 +222,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             print(json.dumps({"event": "patient_requeue_failed", "why": str(exc)[:200]}), flush=True)
     workshop = workshop_mod.Workshop(home, store=tabletop_mod.store_from_env())     # the Captain's private Skippy (admin only); its line of waiting messages survives a deploy in the bucket
     app.extensions["workshop"] = workshop
-    player = player_mod.Player(home)                # Bilby's Audio Service: the pass and Connect (admin only)
+    edge = edge_mod.Edge(app.config.get("EDGE_HOST"))   # the direct door (edge.py; EDGE_HOST, empty = off): each gate's pass says "direct" while it is up, the Funnel stays the fallback
+    app.extensions["edge"] = edge                   # (the doctor watches it; tests and tools can look at it)
+    player = player_mod.Player(home, edge=edge)     # Bilby's Audio Service: the pass and Connect (admin only)
     favs = favorites_mod.from_env()                 # Bilby favorites: the Captain's songs marked for DJing (favorites.py)
     app.extensions["favorites"] = favs              # (the Drive page reads when Bilby last played: drive.py /drive/last)
     heard_last: dict[str, str] = {}                 # device -> the track last put on the played list (one write per song, not per check-in)
@@ -242,11 +245,11 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
             except Exception:                       # noqa: BLE001 — a bucket hiccup never costs the check-in
                 heard_last.pop(device, None)
     app.extensions["player"] = player               # (so tests/dev_music.py can point it at a gate on this machine)
-    books = audiobooks_mod.Books(home, player)      # Audiobooks: the pass for the audiobook gate, and "Play on" a room box (admin only, never a grant)
+    books = audiobooks_mod.Books(home, player, edge=edge)      # Audiobooks: the pass for the audiobook gate, and "Play on" a room box (admin only, never a grant)
     app.extensions["books"] = books                 # (so tests/dev_books.py can point it at a gate on this machine)
-    video = video_mod.Video(home)                   # Nagatha's Video Service: the pass for the video gate (admin only)
-    voice = voice_mod.Voice(home)                   # Skippy's ears and mouth: the pass for the voice gate (every chat)
-    big_files = popup_in_mod.PopupIn(home)          # big files for pop-ups: the pass for skippy-pc's popup-gate (docs/popups.md)
+    video = video_mod.Video(home, edge=edge)        # Nagatha's Video Service: the pass for the video gate (admin only)
+    voice = voice_mod.Voice(home, edge=edge)        # Skippy's ears and mouth: the pass for the voice gate (every chat)
+    big_files = popup_in_mod.PopupIn(home, edge=edge)   # big files for pop-ups: the pass for skippy-pc's popup-gate (docs/popups.md)
     app.extensions["popup_in"] = big_files
     app.extensions["voice"] = voice
     app.extensions["video"] = video                 # (so tests/dev_video.py can point it at the gate on this machine)
@@ -851,7 +854,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     app.extensions["starter"] = starter
     # The doctor (doctor.py): keeps skippy-pc and Skippy Core at their baseline by itself, through the starter; DMs the Captain when it can't.
     doctor = doctor_mod.Doctor(home, starter, notify=lambda text: notifier.alert(text),
-                               store=tabletop_mod.store_from_env())      # (its memory of who was told what survives a deploy: doctor.STATE_KEY)
+                               store=tabletop_mod.store_from_env(),      # (its memory of who was told what survives a deploy: doctor.STATE_KEY)
+                               edge=edge)                                # (it also watches the direct door: one DM if one that was up stays down 10 min)
     app.extensions["doctor"] = doctor
     recovery_web.init_app(app, workshop, limiter, github, home=home, starter=starter, doctor=doctor)   # Recovery: one button (/admin/recovery/repair)
     status_web.init_app(app, status_mod.Status(), home, starter, doctor, workshop, limiter, vm_status)   # the Status map (docs/status-design.md)
@@ -2951,7 +2955,10 @@ def _num(info: dict, key: str):
 def _lazy_app():
     """gunicorn imports `app:app`; tests import create_app without env vars."""
     import os
-    return create_app() if os.environ.get("FLASK_SECRET_KEY") else None
+    made = create_app() if os.environ.get("FLASK_SECRET_KEY") else None
+    if made is not None:
+        made.extensions["edge"].alive()   # the first probe of the direct door starts now, in the background, so the first pass handed out after a deploy already knows (edge.py: alive() never waits)
+    return made
 
 
 app = _lazy_app()

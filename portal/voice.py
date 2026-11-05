@@ -41,9 +41,10 @@ def voice_for(is_captain: bool, mode: str | None = None) -> str:
 
 
 class Voice:
-    def __init__(self, home, clock=time.time, gate_url_re=None):
+    def __init__(self, home, clock=time.time, gate_url_re=None, edge=None):
         self.home, self.clock = home, clock
         self.gate_url_re = gate_url_re or GATE_URL          # tests/dev harnesses may point it at a gate on this machine
+        self.edge = edge        # the direct door (edge.py): the pass also says where to reach the gate without the Funnel, when that works
 
     def gate_url(self) -> str | None:
         info = ((self.home.report or {}).get("capabilities") or {}).get("voice_gate")
@@ -69,7 +70,8 @@ class Voice:
         if not url or not self.home.can("voice_gate"):
             return {"ok": False, "why": "skippy-pc is up, but its voice gate (or Whisper behind it) isn't answering."}
         exp = (int(self.clock()) // PASS_BUCKET_S + 1) * PASS_BUCKET_S + PASS_S
+        direct = self.edge.direct("voice") if self.edge else None
         if voice:
-            return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp, voice), "exp": exp, "speak": True, "voice": voice}
+            return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp, voice), "exp": exp, "speak": True, "voice": voice, "direct": direct}
         return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp, "listen"),
-                "exp": exp, "speak": speak, "voice": voice}
+                "exp": exp, "speak": speak, "voice": voice, "direct": direct}

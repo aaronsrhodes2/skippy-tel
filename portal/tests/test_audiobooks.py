@@ -294,3 +294,27 @@ def test_the_scripts_gate_calls_are_the_gates_routes():
     for path in set(re.findall(r"gu\(`?\"?([a-z]+\.?[a-z]*)[/`\"?]", script)):
         assert f"/{path}" in gate_text, path
     assert "keepalive: true" in script and 'method: "PUT"' in script
+
+
+# ── the direct door (edge.py; test_edge.py has the rest): the pass also says where to reach the gate without the Funnel ──
+class _Door:
+    """Stands in for edge.Edge: gate() only asks direct(prefix)."""
+
+    def __init__(self, up=True):
+        self.up = up
+
+    def direct(self, prefix):
+        return f"https://home.makerportal.live/{prefix}" if self.up else None
+
+
+def test_the_pass_names_the_direct_door_while_it_is_up_and_the_funnel_address_is_untouched():
+    clock = Clock()
+    home = paired_home(clock)
+    mine = lambda edge=None: books_mod.Books(home, player_mod.Player(home, clock=clock), clock=clock, edge=edge).gate()   # noqa: E731
+    assert mine()["direct"] is None                                                                     # no door configured: the field is there, null
+    up = mine(_Door(True))
+    assert up["direct"] == "https://home.makerportal.live/books" and up["url"] == GATE                   # "url" is still the Funnel's
+    assert mine(_Door(False))["direct"] is None
+    bad = paired_home(clock, {"book_gate": {"ready": True, "url": "https://home.makerportal.live/books"}})   # the door's own address is no gate address
+    refused = books_mod.Books(bad, player_mod.Player(bad, clock=clock), clock=clock, edge=_Door(True)).gate()
+    assert not refused["ok"] and "direct" not in refused and "pass" not in refused

@@ -186,22 +186,33 @@
     // The pass names the voice it speaks in, and the portal picks that voice from the chat mode (opts.mode()), so a new mode is a new pass.
     async function gate() {
       const mode = opts.mode ? (opts.mode() || "") : "";
-      if (pass && pass.mode_ === mode && pass.exp * 1000 - Date.now() > 300000) return pass;
+      if (pass && pass.mode_ === mode && pass.exp * 1000 - Date.now() > 300000) {
+        if (root.SkippyDirect) root.SkippyDirect.pick(pass);       // the pass lasts hours: its door is looked at again, in the background, once the last answer is old
+        return pass;
+      }
       const r = await fetch(opts.gate + (mode ? "?mode=" + encodeURIComponent(mode) : ""), { cache: "no-store", credentials: "same-origin" });
-      const d = await r.json();
+      let d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.why || "voice is out of reach");
+      if (root.SkippyDirect) d = await root.SkippyDirect.pick(d);      // skippy-pc's own front door when it answers, else the Funnel (static/direct.js)
       d.mode_ = mode;
       pass = d;
       return d;
     }
     const base = function (g) { return g.url.replace(/\/$/, "") + "/t/" + g.pass; };
+    // A call to the voice gate. The pass lasts hours, so if the direct door drops while it is held (no answer at all, not an HTTP error),
+    // the pass goes on through the Funnel and the call is made once more (SkippyDirect.demote says whether that is worth doing).
+    async function gated(g, path, init) {
+      const went = g.url;
+      try { return await fetch(base(g) + path, init); }
+      catch (e) { if (root.SkippyDirect && root.SkippyDirect.demote(g, went)) return fetch(base(g) + path, init); throw e; }
+    }
 
     async function transcribe(blob, type) {
       let g = await gate();
       // opts.wantOriginal: the page shows other people's speech in its own words first (the glasses' captions), so Whisper is asked for them
       const q = (lang() ? "?lang=" + encodeURIComponent(lang()) : "") + (opts.wantOriginal ? (lang() ? "&" : "?") + "raw=1" : "");
-      let r = await fetch(base(g) + "/stt" + q, { method: "POST", headers: { "Content-Type": type }, body: blob });
-      if (r.status === 403) { pass = null; g = await gate(); r = await fetch(base(g) + "/stt" + q, { method: "POST", headers: { "Content-Type": type }, body: blob }); }
+      let r = await gated(g, "/stt" + q, { method: "POST", headers: { "Content-Type": type }, body: blob });
+      if (r.status === 403) { pass = null; g = await gate(); r = await gated(g, "/stt" + q, { method: "POST", headers: { "Content-Type": type }, body: blob }); }
       if (!r.ok) throw new Error("not understood");
       const d = await r.json();
       return { text: d.text || "", lang: d.lang || "", sure: typeof d.sure === "number" ? d.sure : 0, raw: typeof d.raw === "string" ? d.raw : "" };
@@ -211,7 +222,7 @@
     // person would say about it.
     async function summarize(full) {
       let g = await gate();
-      const send = function () { return fetch(base(g) + "/summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: full.slice(0, 8000) }) }); };
+      const send = function () { return gated(g, "/summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: full.slice(0, 8000) }) }); };
       let r = await send();
       if (r.status === 403) { pass = null; g = await gate(); r = await send(); }
       if (!r.ok) throw new Error("no summary");
@@ -615,7 +626,7 @@
         const token = playing = {};
         paintSpeaker("on");
         try {
-          const r = await fetch(base(g) + "/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t }) });
+          const r = await gated(g, "/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: t }) });
           if (!r.ok) throw new Error("no voice");
           const blob = await r.blob();
           if (!blob.size) throw new Error("no voice");

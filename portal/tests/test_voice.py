@@ -227,3 +227,27 @@ def test_the_one_chat_takes_the_agents_reply_into_its_own_voice():
     # the quick spoken line (/chat/quick) goes out before the agent's send, and one that lands after the answer is dropped
     assert "quickLine(text);" in chat and "mine === quickSeq" in chat and "voice.brief(d.say)" in chat
     assert 'addEventListener("skippy-agent-ready", hearAgent)' in chat
+
+
+# ── the direct door (edge.py; test_edge.py has the rest): the pass also says where to reach the gate without the Funnel ──
+class _Door:
+    """Stands in for edge.Edge: gate() only asks direct(prefix)."""
+
+    def __init__(self, up=True):
+        self.up = up
+
+    def direct(self, prefix):
+        return f"https://home.makerportal.live/{prefix}" if self.up else None
+
+
+def test_every_kind_of_voice_pass_names_the_direct_door_while_it_is_up():
+    clock = Clock()
+    ask = lambda edge=None: [voice_mod.Voice(paired_home(clock), clock=clock, edge=edge).gate(**kw)    # noqa: E731
+                             for kw in ({}, {"speak": True}, {"voice": "stock"}, {"voice": "skippy"})]
+    assert [g["direct"] for g in ask()] == [None] * 4                                                   # no door configured: the field is there, null
+    for g in ask(_Door(True)):
+        assert g["ok"] and g["direct"] == "https://home.makerportal.live/voice" and g["url"] == GATE    # "url" is still the Funnel's
+    assert [g["direct"] for g in ask(_Door(False))] == [None] * 4
+    caps = {"voice_gate": {"ready": True, "url": "https://home.makerportal.live/voice"}}                # the door's own address is no gate address
+    refused = voice_mod.Voice(paired_home(clock, caps), clock=clock, edge=_Door(True)).gate()
+    assert not refused["ok"] and "direct" not in refused and "pass" not in refused

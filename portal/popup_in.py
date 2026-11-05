@@ -38,9 +38,10 @@ def sign(key: bytes, exp: int, file_id: str, max_bytes: int, owner: str) -> str:
 
 
 class PopupIn:
-    def __init__(self, home, clock=time.time, gate_url_re=None):
+    def __init__(self, home, clock=time.time, gate_url_re=None, edge=None):
         self.home, self.clock = home, clock
         self.gate_url_re = gate_url_re or GATE_URL
+        self.edge = edge        # the direct door (edge.py): the pass also says where to reach the gate without the Funnel, when that works
         self._lock = threading.Lock()
         self._spent: dict[str, tuple[int, int]] = {}     # owner id -> (day, bytes passed that day)
 
@@ -80,4 +81,5 @@ class PopupIn:
                 self._spent[owner] = (day, spent + size)
         file_id, exp = secrets.token_hex(16), int(self.clock()) + PASS_S
         return {"ok": True, "url": url, "id": file_id, "max": size,
-                "pass": sign(gate_key(stored), exp, file_id, size, owner)}
+                "pass": sign(gate_key(stored), exp, file_id, size, owner),
+                "direct": self.edge.direct("in") if self.edge else None}

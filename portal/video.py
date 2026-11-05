@@ -40,11 +40,12 @@ def sign(key: bytes, exp: int, scope: str = "rw") -> str:
 
 
 class Video:
-    def __init__(self, home, clock=time.time, gate_url_re=None):
+    def __init__(self, home, clock=time.time, gate_url_re=None, edge=None):
         self.home, self.clock = home, clock
         # tests/dev_video.py hands in a pattern for the gate on this machine (http://127.0.0.1:3006). Production never does:
         # create_app builds this with the default, so a gate off the tailnet is never signed for.
         self.gate_url_re = gate_url_re or GATE_URL
+        self.edge = edge        # the direct door (edge.py): the pass also says where to reach the gate without the Funnel, when that works
 
     def gate_url(self) -> str | None:
         info = ((self.home.report or {}).get("capabilities") or {}).get("video_gate")
@@ -65,4 +66,5 @@ class Video:
         if not url or not self.home.can("video_gate"):
             return {"ok": False, "why": "skippy-pc is up, but its video gate (or Jellyfin behind it) isn't answering."}
         exp = (int(self.clock()) // PASS_BUCKET_S + 1) * PASS_BUCKET_S + PASS_S      # 8 to 14 hours from now: see PASS_BUCKET_S
-        return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp, "ro" if read_only else "rw"), "exp": exp}
+        return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp, "ro" if read_only else "rw"), "exp": exp,
+                "direct": self.edge.direct("video") if self.edge else None}

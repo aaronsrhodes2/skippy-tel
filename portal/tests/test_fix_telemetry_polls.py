@@ -82,7 +82,10 @@ STATIC_SCRIPTS = {"keys.js": "base.html",   # the Captain's theme pick: POST to 
                   # Skippy-vision's flash (portal/vision.py): the page's data-vision-* URLs; Drive polls the moments' list
                   "vision.js": "drive.html",
                   # the code chip on /hud and /drive (portal/texts.py): it polls the data-texts address, a JSON endpoint
-                  "texts-chip.js": "drive.html"}
+                  "texts-chip.js": "drive.html",
+                  # the direct front door's probe (every page's head): it asks ONE address, the `direct` the portal's gate pass carries (built from
+                  # EDGE_HOST, never a page URL), for <direct>/health, and has no portal URL of its own for the scan to add
+                  "direct.js": "base.html"}
 
 
 def template_text(template: Path) -> str:

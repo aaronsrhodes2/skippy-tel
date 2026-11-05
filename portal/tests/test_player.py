@@ -818,3 +818,30 @@ def test_the_toggle_commands_the_page_builds_are_the_ones_the_portal_accepts():
     assert js_id == player_mod.OUT_ID.pattern, (js_id, player_mod.OUT_ID.pattern)
     assert re.search(r"out:\$\{id\}:\$\{on \? \"on\" : \"off\"\}", core)
 
+
+# ── the direct door (edge.py; test_edge.py has the rest): the pass also says where to reach the gate without the Funnel ──
+class _Door:
+    """Stands in for edge.Edge: gate() only asks direct(prefix)."""
+
+    def __init__(self, up=True):
+        self.up = up
+
+    def direct(self, prefix):
+        return f"https://home.makerportal.live/{prefix}" if self.up else None
+
+
+def test_the_pass_names_the_direct_door_while_it_is_up_and_the_funnel_address_is_untouched():
+    clock = Clock()
+    assert player_mod.Player(paired_home(clock), clock=clock).gate()["direct"] is None                  # no door configured: the field is there, null
+    up = player_mod.Player(paired_home(clock), clock=clock, edge=_Door(True)).gate()
+    assert up["direct"] == "https://home.makerportal.live/music" and up["url"] == GATE                   # "url" is still the Funnel's
+    assert player_mod.Player(paired_home(clock), clock=clock, edge=_Door(False)).gate()["direct"] is None
+    caps = {"music_gate": {"ready": True, "url": "https://home.makerportal.live/music"}}                # the door's own address is no gate address
+    refused = player_mod.Player(paired_home(clock, caps), clock=clock, edge=_Door(True)).gate()
+    assert not refused["ok"] and "direct" not in refused and "pass" not in refused
+
+
+def test_the_pass_route_always_has_the_direct_field(client):
+    login(client, ADMIN)
+    got = client.get("/music/gate").get_json()
+    assert got["ok"] and "direct" in got and got["direct"] is None                                       # (the test app has no EDGE_HOST: the door is off)

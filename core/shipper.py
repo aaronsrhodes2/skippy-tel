@@ -13,6 +13,9 @@ import time
 from pathlib import Path
 
 ERRORISH = re.compile(r"\b(error|errors|traceback|exception|critical|fatal|panic|segfault|out of memory|oom|killed)\b", re.I)
+# Lines that say "error" and are not one: the direct front door's Caddy (edge/Caddyfile) logs every ClientHello that offers the ACME ALPN "acme-tls/1" when it has no
+# challenge open, and anyone on the internet can send one; shipped, a single scanner would fill the portal's log ring with five junk errors per round.
+NOT_AN_ERROR = re.compile(r'"msg"\s*:\s*"tls-alpn challenge"')
 EXIT_CODE = re.compile(r"Exited \((\d+)\)")
 MAX_PER_CONTAINER = 5            # error lines per container per round
 MAX_SPOOL_BYTES = 5_000_000      # a long outage drops the oldest, never fills the disk
@@ -76,7 +79,7 @@ class Shipper:
 
     def _error_lines(self, name: str, since: int) -> list[dict]:
         text = self.run(["docker", "logs", "--since", str(since), name], 20)
-        hits = [l.rstrip() for l in text.splitlines() if ERRORISH.search(l)]
+        hits = [l.rstrip() for l in text.splitlines() if ERRORISH.search(l) and not NOT_AN_ERROR.search(l)]
         return [{"source": self.prefix + name, "level": "error", "kind": "error", "msg": l[:600], "fields": {}, "trace": ""}
                 for l in hits[-MAX_PER_CONTAINER:]]
 

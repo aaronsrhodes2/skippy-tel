@@ -310,6 +310,12 @@ good for 8 to 14 hours and is the same string for everyone asking inside one six
 week, songs for a day) still works across page loads. The gate's address is only ever signed for when it is on the tailnet
 (`*.ts.net`); `Player(gate_url_re=...)` exists for the dev script alone.
 
+**The direct door** (2026-11-05, `docs/direct-door.md`): every gate pass (music, video, books, voice, and the pop-ups' one-file pass) also carries `"direct": "https://home.makerportal.live/<prefix>"`
+(`null` when `EDGE_HOST` is empty or the portal's own probe of `https://EDGE_HOST/ping` says the door is shut right now; `portal/edge.py`, built from `EDGE_HOST` alone, never from a reporter's
+word). `url` stays the Funnel address, behind the same strict `*.ts.net` check. A page's `SkippyDirect.pick(g)` (`static/direct.js`, loaded by `base.html` in the head) swaps `g.url` for `g.direct` only when
+`GET <direct>/health` answers JSON within 2.5 s (remembered 120 s, or 300 s for a silence) and keeps `g.funnel`; a call that gets no answer from the door is made once more through the Funnel (`demote`). Both
+doors take the same pass, so only the address differs. Drive's page (the Tesla's, the glasses') picks it for its book, music and wake-word gates too.
+
 **Files:** `portal/templates/music.html` (the shell), `portal/static/bilby-player.js` (the logic that needs no browser: the catalog,
 search, the queue, Bilby DJ's pick, the autoplay state, paging (`paginate`/`pageOf`), the way back after a dead zone; run under Node by the tests),
 `bilby-app.js` (the browser side: audio, views, Connect, media keys), `bilby-player.css` (portal colour variables only),

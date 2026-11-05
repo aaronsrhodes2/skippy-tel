@@ -342,3 +342,261 @@ def test_the_pc_coming_back_after_a_silence_is_told_once():
     alive(starter)
     d.tick()
     assert len(told) == 2
+
+
+# ── the direct door (edge.py): a row once it has been up, one DM when it stays down, never healed ──
+class Door:
+    """Stands in for edge.Edge: the doctor only asks it alive() and status()."""
+
+    def __init__(self, host="home.makerportal.live"):
+        self.host, self.up, self.ever, self.error, self.looks = host, False, False, "", 0
+
+    def alive(self):
+        self.looks += 1
+        return self.up
+
+    def status(self):
+        return {"host": self.host, "alive": self.up, "checked_s_ago": 1.0, "error": self.error, "ever_alive": self.ever}
+
+    def set(self, up, error=""):
+        self.up, self.error = up, error
+        self.ever = self.ever or up
+
+
+def door_world(**kw):
+    d, starter, clock, told = world(**kw)
+    d.edge = door = Door()
+    return d, starter, clock, told, door
+
+
+def watch_door(d, starter, clock, seconds, step=30, **status):
+    """Time passes with the stack up (the starter calls every `step` seconds and the doctor looks each time)."""
+    end = clock.t + seconds
+    while clock.t < end:
+        clock.t += step
+        alive(starter, **status)
+        d.tick()
+
+
+def door_row(d):
+    return next((r for r in d.view()["rows"] if r["name"] == doc.EDGE_CHECK), None)
+
+
+def test_a_door_that_was_never_up_is_silent_and_not_even_a_row():
+    d, starter, clock, told, door = door_world()
+    door.set(False, "the name does not resolve")                       # configured, but the router/DNS were never set up: it is optional
+    watch_door(d, starter, clock, 6 * 3600)
+    assert told == [] and door_row(d) is None and door.looks > 100     # (it was looked at all along, and said nothing)
+    assert handed(starter) == []
+
+
+def test_no_door_at_all_changes_nothing():
+    d, starter, clock, told = world()
+    assert d.edge is None
+    watch_door(d, starter, clock, 3600)
+    assert told == [] and door_row(d) is None and d.view()["ok"] is True
+
+
+def test_a_door_that_was_up_and_stays_down_ten_minutes_is_told_once_then_every_six_hours():
+    d, starter, clock, told, door = door_world()
+    door.set(True)
+    watch_door(d, starter, clock, 120)
+    row = door_row(d)
+    assert row["ok"] and row["label"] == "Direct door" and told == []
+    door.set(False, "connection refused")
+    watch_door(d, starter, clock, doc.EDGE_DOWN_S - 90)
+    row = door_row(d)
+    assert not row["ok"] and row["why"] == "connection refused" and told == []              # a row at once, a DM only after ten minutes
+    watch_door(d, starter, clock, 120)
+    assert len(told) == 1
+    assert "direct door (home.makerportal.live)" in told[0] and "connection refused" in told[0] and "Funnel" in told[0]
+    assert told[0].startswith("Skippy's doctor:") and "10 min" in told[0]
+    watch_door(d, starter, clock, 5 * 3600)
+    assert len(told) == 1                                                                   # said once
+    watch_door(d, starter, clock, 3600)
+    assert len(told) == 2 and "still down after 6 h" in told[1]                             # and again only after six hours
+
+
+def test_when_the_door_is_back_he_is_told_once_after_it_has_been_up_a_while():
+    d, starter, clock, told, door = door_world()
+    door.set(True)
+    watch_door(d, starter, clock, 60)
+    door.set(False, "no answer in time")
+    watch_door(d, starter, clock, 1500)
+    assert len(told) == 1
+    door.set(True)
+    watch_door(d, starter, clock, doc.BACK_AFTER_S - 60)
+    assert len(told) == 1                                                                   # up for a moment: not yet a recovery
+    watch_door(d, starter, clock, 120)
+    assert len(told) == 2 and "Direct door is working again after" in told[1]
+    assert door_row(d)["ok"] is True
+    watch_door(d, starter, clock, 3600)
+    assert len(told) == 2
+
+
+def test_a_blip_shorter_than_ten_minutes_says_nothing_and_the_count_starts_over_each_time():
+    d, starter, clock, told, door = door_world()
+    door.set(True)
+    watch_door(d, starter, clock, 60)
+    for _ in range(4):                                                  # down nine minutes, up for a minute, down again...
+        door.set(False, "no answer in time")
+        watch_door(d, starter, clock, doc.EDGE_DOWN_S - 60)
+        door.set(True)
+        watch_door(d, starter, clock, 60)
+    assert told == [] and door_row(d)["ok"] is True
+
+
+def test_the_door_is_never_healed_and_the_repair_button_does_not_trip_over_it():
+    d, starter, clock, told, door = door_world()
+    door.set(True)
+    watch_door(d, starter, clock, 60)
+    door.set(False, "connection refused")
+    watch_door(d, starter, clock, 3 * 3600)
+    assert len(told) == 1 and handed(starter) == []                     # no heal for it, however long: a router is not the starter's
+    assert "direct-door" not in doc.HEALABLE and doc.EDGE_CHECK in doc.REPORT_ONLY
+    run = d.repair("captain@example.com")                               # the starter would refuse a name it does not heal: the button must not name it
+    sent = handed(starter)
+    assert run["done"] is False and [op for op, _ in sent] == ["repair"] and not sent[0][1]       # (a repair that names nothing: the door is not one of its services)
+    assert "starter" in {r["name"] for r in d.view()["rows"]} and door_row(d)["ok"] is False
+
+
+def test_the_home_reporter_cannot_make_up_a_door():
+    d, starter, clock, told = world()
+    d.observe_home({"direct-door": {"ok": False, "ms": 1, "why": "forged"}})
+    assert door_row(d) is None
+
+
+def test_a_door_nobody_has_looked_at_for_a_while_starts_its_clock_over():
+    """The PC was off, the stack was stopped on purpose, or Docker was down: how long the door has been down is not known, so no DM comes at once."""
+    d, starter, clock, told, door = door_world()
+    door.set(True)
+    watch_door(d, starter, clock, 60)
+    door.set(False, "connection refused")
+    watch_door(d, starter, clock, 300)                                  # down five minutes...
+    for _ in range(360):                                                # ...then the Captain stops the stack for three hours (the starter still calls)
+        clock.t += 30
+        starter.poll({"status": {"docker": True, "bridge": False, "resume_at": "2026-11-05T21:00"}})
+        d.tick()
+    looks = door.looks
+    assert told == []
+    watch_door(d, starter, clock, doc.EDGE_DOWN_S - 90)                 # the stack is back: the door is still down, but nobody knows for how long
+    assert told == [] and door.looks > looks
+    watch_door(d, starter, clock, 150)
+    assert len(told) == 1                                               # ten minutes of looking later, it is news
+
+
+def test_docker_down_is_that_one_problem_not_the_doors_as_well():
+    d, starter, clock, told, door = door_world()
+    door.set(True)
+    watch_door(d, starter, clock, 60)
+    door.set(False, "connection refused")                               # Docker dying takes the door's container with it...
+    watch_door(d, starter, clock, 20)
+    looks = door.looks
+    watch_door(d, starter, clock, 2 * 3600, docker=False)
+    assert door.looks == looks                                          # ...and the door is not looked at, or told, while Docker is the thing down
+    assert [t for t in told if "direct door" in t] == [] and any("Docker is failing" in t for t in told)      # (Docker has its own word)
+    door_words = lambda: [t for t in told if "direct door" in t]        # noqa: E731
+    watch_door(d, starter, clock, doc.EDGE_DOWN_S - 90)                 # Docker is back (and said so), the door still isn't
+    assert door_words() == [] and any("Docker is working again" in t for t in told)
+    watch_door(d, starter, clock, 150)
+    assert len(door_words()) == 1
+
+
+def test_a_door_that_cannot_be_asked_never_stops_the_doctor():
+    class Broken(Door):
+        def status(self):
+            raise RuntimeError("no door")
+    d, starter, clock, told = world()
+    d.edge = Broken()
+    d.observe_home(failing("voice-gate"))
+    clock.t += doc.HEAL_AFTER_S + 1
+    alive(starter)
+    d.observe_home(failing("voice-gate"))
+    assert d.tick() == ["voice-gate"] and told == [] and door_row(d) is None       # (everything else is looked after as before)
+
+
+def test_a_redeploy_remembers_the_door_was_told_and_still_says_when_it_is_back():
+    from tabletop import MemoryStore
+    store = MemoryStore()
+    d, starter, clock, told, door = door_world(store=store)
+    door.set(True)
+    watch_door(d, starter, clock, 60)
+    door.set(False, "connection refused")
+    watch_door(d, starter, clock, 1500)
+    assert len(told) == 1 and "direct-door" in json.loads(store.get(doc.STATE_KEY))["open"]
+    # the portal is deployed again (the Edge is new: it has to see the door up once before the doctor says anything about it)
+    told2 = []
+    d2 = doc.Doctor(Home(5), starter, notify=lambda text: told2.append(text) or True, clock=clock, store=store, log=lambda line: None)
+    d2.edge = door2 = Door()
+    door2.set(False, "connection refused")
+    watch_door(d2, starter, clock, 3600)
+    assert told2 == [] and door_row(d2) is None                          # never up in this process: silent
+    door2.set(True)
+    watch_door(d2, starter, clock, 60)
+    assert told2 == []
+    watch_door(d2, starter, clock, doc.BACK_AFTER_S)
+    assert len(told2) == 1 and "Direct door is working again after" in told2[0]
+    door2.set(False, "connection refused")
+    watch_door(d2, starter, clock, doc.FLAP_S - 600)
+    assert len(told2) == 1                                               # it broke again within the hour of the last word: not news yet
+    watch_door(d2, starter, clock, 1200)
+    assert len(told2) == 2 and "has been down for" in told2[1]           # an hour on it is
+
+
+def test_the_real_edge_is_read_through_its_status_without_any_waiting():
+    """edge.Edge itself, a scripted probe and the doctor's own clock: the keys the doctor reads are the keys the Edge gives."""
+    import edge as edge_mod
+    d, starter, clock, told = world()
+    answers = [(True, "")]
+    d.edge = real = edge_mod.Edge("home.makerportal.live", probe=lambda url, timeout: answers[-1], clock=clock, ttl_ok=10 ** 9, ttl_bad=10 ** 9)
+    real.refresh()
+    watch_door(d, starter, clock, 60)
+    assert door_row(d)["ok"] is True and told == []
+    answers.append((False, "its certificate is not accepted"))
+    real.refresh()
+    watch_door(d, starter, clock, doc.EDGE_DOWN_S + 60)
+    assert len(told) == 1 and "its certificate is not accepted" in told[0] and "home.makerportal.live" in told[0]
+    answers.append((True, ""))
+    real.refresh()
+    watch_door(d, starter, clock, doc.BACK_AFTER_S + 60)
+    assert len(told) == 2 and "working again" in told[1]
+
+
+def test_a_probe_that_hangs_never_holds_up_the_doctor():
+    """The doctor's tick runs inside the home reporter's and the starter's requests: asking about the door must be an answer from memory."""
+    import threading
+    import time
+    import edge as edge_mod
+    d, starter, clock, told = world()
+    release, asked = threading.Event(), []
+
+    def probe(url, timeout):
+        asked.append(url)
+        if len(asked) > 1:
+            assert release.wait(10), "the test never let the probe go"
+        return True, ""
+    d.edge = real = edge_mod.Edge("home.makerportal.live", probe=probe, clock=clock)
+    real.refresh()
+    clock.t += edge_mod.TTL_OK_S + 1                                    # its answer is a minute old: the next look starts a refresh, which hangs
+    alive(starter)
+    began = time.monotonic()
+    d.tick()
+    d.tick()
+    assert time.monotonic() - began < 1.0 and door_row(d)["ok"] is True
+    deadline = time.monotonic() + 5
+    while len(asked) < 2 and time.monotonic() < deadline:
+        time.sleep(0.002)
+    assert len(asked) == 2                                              # (one refresh, however many looks)
+    release.set()
+    assert real.wait()
+
+
+def test_an_edge_that_was_never_switched_on_is_not_a_row_either():
+    import edge as edge_mod
+
+    def no_probe(url, timeout):
+        raise AssertionError("no probe for a door that is off")
+    d, starter, clock, told = world()
+    d.edge = edge_mod.Edge("", probe=no_probe, clock=clock)
+    watch_door(d, starter, clock, 3600)
+    assert told == [] and door_row(d) is None

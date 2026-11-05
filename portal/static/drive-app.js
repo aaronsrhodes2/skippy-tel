@@ -13,6 +13,12 @@
   const S = { mode: null, q: [], qi: -1, music: null, book: null, books: null, places: null, cur: null, savedAt: 0, pauseAt: 0, lib: null, favs: null };
 
   const getJSON = async (url, opt) => { const r = await fetch(url, Object.assign({ credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } }, opt)); const d = await r.json(); if (!r.ok && !d.ok) throw new Error(d.why || d.error || r.status); return d; };
+  // skippy-pc's own front door (static/direct.js): a gate pass names it as `direct`, and this page goes through it when it answers /health and through the Funnel when it does not.
+  // A call that got no answer from the door is made once more through the Funnel (the door then rests five minutes); an HTTP error from the gate itself is not the door's fault.
+  const door = (g, fresh) => (window.SkippyDirect ? SkippyDirect.pick(g, fresh ? { fresh: true } : undefined) : g);
+  const noAnswer = e => e instanceof TypeError || e instanceof SyntaxError;
+  const leaveDoor = g => !!(window.SkippyDirect && g && SkippyDirect.demote(g));
+  async function onceMore(g, call) { try { return await call(); } catch (e) { if (!noAnswer(e) || !leaveDoor(g)) throw e; return call(); } }
   const now = (glyph, text) => { $("#now-g").setAttribute("href", "#g-" + glyph); $("#now-t").textContent = S.nowText = text || ""; };
   const lit = (id, on) => { $(id).dataset.on = on ? "1" : "0"; };
   function paint() {
@@ -38,11 +44,13 @@
 
   // ── the book: his current one, from its last place (kept at home, the same place the pods read) ──
   const bu = p => `${S.book.url}/t/${S.book.pass}/${p}`;
-  async function bookGate() { if (!S.book || S.book.exp - Date.now() / 1000 < 1800) S.book = await getJSON(cfg.bookGate); return S.book; }
+  async function bookGate() { if (!S.book || S.book.exp - Date.now() / 1000 < 1800) S.book = await door(await getJSON(cfg.bookGate)); return S.book; }
   async function loadBooks() {
     await bookGate();
-    if (!S.books) S.books = (await getJSON(bu("catalog.json"))).books;
-    S.places = await getJSON(bu("places.json"));
+    await onceMore(S.book, async () => {
+      if (!S.books) S.books = (await getJSON(bu("catalog.json"))).books;
+      S.places = await getJSON(bu("places.json"));
+    });
     const id = S.places.current, b = S.books.find(x => x.id === id);
     $("#k-book-t").textContent = b ? b.t : "";
     return b;
@@ -75,7 +83,7 @@
     S.savedAt = Date.now(); S.savedPos = pos; S.savedPlaying = playing;
     const body = { pos, chapter: P.chapterAt(b.ch, pos), speed: 1, finished: !!(au.ended && b.d && b.d - pos < P.DONE_LEFT_S), src: "car", playing };
     try { await bookGate(); await fetch(bu(`place/${b.id}`), { method: "PUT", body: JSON.stringify(body), keepalive: true, headers: { "Content-Type": "application/json" } }); }
-    catch (e) { S.savedAt = 0; }
+    catch (e) { S.savedAt = 0; if (!document.hidden && noAnswer(e)) leaveDoor(S.book); }      // (a page going away fails its last save for its own reasons: that is not the door's)
   }
 
   async function pauseHouseBook() {                       // a pod reading this book aloud at home stops: the book is in the car now
@@ -86,7 +94,7 @@
   }
 
   // ── Bilby Shuffle: discovery (what he has not heard) or library (his one favorites pool) ──
-  async function musicGate() { if (!S.music || S.music.exp - Date.now() / 1000 < 1800) S.music = await getJSON(cfg.musicGate); return S.music; }
+  async function musicGate() { if (!S.music || S.music.exp - Date.now() / 1000 < 1800) S.music = await door(await getJSON(cfg.musicGate)); return S.music; }
   const mu = (kind, path) => `${S.music.url}/t/${S.music.pass}/${kind}/${path.split("/").map(encodeURIComponent).join("/")}`;
   function idbCatalog(put) {                              // the music app's own saved copy of the catalog (bilby-app.js), same origin
     return new Promise(res => {
@@ -108,7 +116,7 @@
     if (S.lib) return S.lib;
     await musicGate();
     const cached = await idbCatalog();
-    const r = await fetch(`${S.music.url}/t/${S.music.pass}/catalog.json`, cached && cached.etag ? { headers: { "If-None-Match": cached.etag } } : {});
+    const r = await onceMore(S.music, () => fetch(`${S.music.url}/t/${S.music.pass}/catalog.json`, cached && cached.etag ? { headers: { "If-None-Match": cached.etag } } : {}));
     let text;
     if (r.status === 304 && cached) text = cached.text;
     else if (r.ok) { text = await r.text(); idbCatalog({ text, etag: r.headers.get("ETag") || "", at: Date.now() }); }
@@ -249,7 +257,20 @@
     await play();
   }
   au.addEventListener("ended", () => { if (S.mode === "discovery" || S.mode === "library") nextSong(); else if (S.mode === "book") saveBook(true); });
-  au.addEventListener("error", () => { if (S.mode === "discovery" || S.mode === "library") setTimeout(nextSong, 800); });
+  // The door gave out under a song or a book: the same one goes on from the Funnel, from where it stopped (static/direct.js). False when it was not on the door.
+  function resumeOnFunnel() {
+    const music = S.mode === "discovery" || S.mode === "library";
+    if (!music && S.mode !== "book") return false;
+    const it = S.q[S.qi];
+    if (music ? !(it && it.path) : !S.cur) return false;
+    if (!leaveDoor(music ? S.music : S.book)) return false;
+    const at = au.currentTime || 0;
+    warmStop(); ours = true; au.src = music ? mu("a", it.path) : bu(`a/${S.cur.id}`);
+    if (at > 0) au.addEventListener("loadedmetadata", () => { au.currentTime = at; }, { once: true });
+    play();
+    return true;
+  }
+  au.addEventListener("error", () => { if (resumeOnFunnel()) return; if (S.mode === "discovery" || S.mode === "library") setTimeout(nextSong, 800); });
   au.addEventListener("timeupdate", () => {
     $("#now-bar i").style.width = au.duration ? (100 * au.currentTime / au.duration).toFixed(2) + "%" : "0";
     if (S.mode === "book") saveBook(false);
@@ -489,8 +510,9 @@
   let ear = null;
   async function startEar() {
     if (ear || earOn) return; earOn = true;
+    let g = null;
     try {
-      const g = await getJSON(cfg.voiceGate);
+      g = await door(await getJSON(cfg.voiceGate));
       const base = `${g.url.replace(/\/$/, "")}/t/${g.pass}`;
       const info = await getJSON(base + "/wake.json");
       if (!info.ok) throw new Error("no model");
@@ -503,6 +525,7 @@
       setInterval(() => mine.pause(voice.chatting()), 200);  // deaf while a conversation is on (his own voice must not wake him)
     } catch (e) {
       earOn = false; ear = null;
+      if (noAnswer(e) && leaveDoor(g)) { startEar(); return; }      // the door gave no answer: once more through the Funnel before the voice's own listening takes over
       fallback();
     }
   }

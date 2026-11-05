@@ -127,6 +127,7 @@
           let g = null;
           try { g = await r.json(); } catch (e) { /* not JSON */ }
           if (!g || !g.ok) throw Object.assign(new Error((g && g.why) || "The library is out of reach."), { kind: "home" });
+          if (window.SkippyDirect) g = await SkippyDirect.pick(g, { fresh: !!force });      // skippy-pc's own front door when it answers, else the Funnel (static/direct.js); a forced renewal looks again
           const changed = !this.info || this.info.pass !== g.pass || this.info.url !== g.url;
           this.info = g;
           if (changed && S.lib) setTimeout(() => { showTrack(); list.refresh(); qList.refresh(); }, 0);   // covers can load now (the catalog may have come from the saved copy first)
@@ -520,7 +521,8 @@
     if (!S.want || !S.q.cur || S.q.cur.t !== rec.t) { recoverStop(); return; }       // the person moved on, or paused: nothing to resume
     rec.timer = setTimeout(recoverTick, C.recoverDelay(++rec.n));                    // if this try hangs without an error, the next one still comes
     rec.at = slot.el.currentTime > 1 ? slot.el.currentTime : rec.at;
-    if (!blobs.has(rec.t) && !gate.fresh()) { try { await gate.ensure(true); } catch (err) { return; } }      // no line yet: wait for the next try
+    const onDoor = !!(gate.info && gate.info.funnel && gate.info.url !== gate.info.funnel);      // the song came from skippy-pc's direct door (static/direct.js): look at the door again, the Funnel may be the way now
+    if (!blobs.has(rec.t) && (!gate.fresh() || onDoor)) { try { await gate.ensure(true); } catch (err) { return; } }      // no line yet: wait for the next try
     if (!rec.on || slot !== act()) return;
     load(slot, rec.t, rec.at, true);
     applyVolume();

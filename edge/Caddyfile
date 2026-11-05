@@ -1,0 +1,154 @@
+# Skippy's direct front door (docs/direct-door.md). This Caddy answers on skippy-pc as https://home.makerportal.live, the home's own
+# public address (router: external TCP 443 -> 192.168.0.164:47443 -> this container's :443), and hands each path prefix to its gate
+# over the compose network. The Tailscale Funnel stays as the fallback the pages use whenever this door is shut.
+#
+#   /ping    "ok" from Caddy itself: is the door open end to end?
+#   /music   music-gate:8080       /video  video-gate:8080       /books  audiobook-gate:8080
+#   /voice   voice-gate:8080       /in     popup-gate:8080
+#   anything else, and any other Host name: 404.  The prefix is cut off first (/music/t/<pass>/x reaches the gate as /t/<pass>/x).
+#
+# No secrets live here and none are needed: every gate wants a pass only the portal can sign (the credential, never a cookie), and that pass
+# rides in the URL path (/t/<pass>/...), so it is cut out of every log line below. The gates already answer CORS "*" themselves.
+# Apply a change:  docker compose restart edge      (the admin API is off on purpose: nothing can reconfigure this over HTTP)
+# Prove a change:  bash edge/selftest.sh            (this very file in throwaway containers; touches no running service)
+
+# the pass never reaches a log: /music/t/<pass>/x is written as /music/t/-/x, wherever a request or an error is printed
+(redact) {
+	request>uri regexp /t/[^/?]+ /t/-
+	error regexp /t/[^/?]+ /t/-
+	uri regexp /t/[^/?]+ /t/-
+}
+
+# no "Server: Caddy", no "Via: 1.1 Caddy", also on the answers Caddy writes itself (a 502 when a gate is down)
+(plain) {
+	header -Server
+	header -Via
+	handle_errors {
+		header -Server
+		header -Via
+		log_append error "{err.message}"
+		respond "{err.status_code} {err.status_text}" {err.status_code}
+	}
+}
+
+# music, films and books are played, not downloaded: a paused player stops reading and the stream waits (Caddy's default would cut it after
+# a minute of that); after 15 minutes it is dropped and the player asks again where it stopped. Everything else keeps the default.
+(media) {
+	timeouts {
+		write_timeout 15m
+	}
+}
+
+{
+	admin off
+
+	# port 80 is not forwarded and not needed (the certificate comes by TLS-ALPN-01 on 443): no redirect listener, no trust-store install
+	auto_https disable_redirects
+	skip_install_trust
+
+	servers :443 {
+		# HTTP/1.1 and HTTP/2 only: the router forwards TCP, not UDP, so HTTP/3 would be offered and never work
+		protocols h1 h2
+		timeouts {
+			read_header 20s
+		}
+	}
+	servers 127.0.0.1:8081 {
+		protocols h1
+	}
+
+	# what Caddy itself says (start, certificate, real trouble) goes to docker logs; the traffic goes to the file below, so a scanner's
+	# 404s are never mistaken for errors by the starter's log shipper
+	log {
+		output stdout
+		format filter {
+			wrap json {
+				time_format rfc3339
+			}
+			import redact
+		}
+		level INFO
+	}
+
+	# Let's Encrypt, TLS-ALPN-01 only: nobody can answer on port 80 from outside, so the HTTP challenge could only fail (and count against
+	# the rate limit). EDGE_ACME_DIR points at the staging CA to rehearse a first issuance without risking the real limits.
+	cert_issuer acme {
+		dir {$EDGE_ACME_DIR:https://acme-v02.api.letsencrypt.org/directory}
+		disable_http_challenge
+	}
+}
+
+{$EDGE_HOST:localhost} {
+	import plain
+
+	# the traffic: one JSON line per request in the edge-data volume, 10 MiB x 3 files at most.  docker exec skippytel-edge tail -f /data/access.log
+	log {
+		output file /data/access.log {
+			roll_size 10MiB
+			roll_keep 3
+			roll_keep_for 168h
+		}
+		format filter {
+			wrap json {
+				time_format rfc3339
+			}
+			import redact
+		}
+	}
+
+	handle /ping {
+		header Cache-Control no-store
+		header Access-Control-Allow-Origin *
+		respond "ok" 200
+	}
+
+	handle_path /music/* {
+		import media
+		reverse_proxy music-gate:8080 {
+			flush_interval -1
+		}
+	}
+
+	handle_path /video/* {
+		import media
+		reverse_proxy video-gate:8080 {
+			flush_interval -1
+		}
+	}
+
+	handle_path /books/* {
+		import media
+		reverse_proxy audiobook-gate:8080 {
+			flush_interval -1
+		}
+	}
+
+	handle_path /voice/* {
+		reverse_proxy voice-gate:8080 {
+			flush_interval -1
+		}
+	}
+
+	# a whole track comes in here (PUT, up to popup-gate's own 64 MB): no body limit at the edge, the gate enforces the pass's size
+	handle_path /in/* {
+		reverse_proxy popup-gate:8080 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		respond "not found" 404
+	}
+}
+
+# any other name on this port (a wrong Host header behind a right SNI) gets the same plain 404, not Caddy's empty 200
+:443 {
+	import plain
+	respond "not found" 404
+}
+
+# the container's own health check (compose: curl 127.0.0.1:8081/ping): bound to the container's loopback, so nothing outside can reach it
+http://127.0.0.1:8081 {
+	bind 127.0.0.1
+	respond /ping "ok" 200
+}

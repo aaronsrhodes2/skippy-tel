@@ -152,11 +152,12 @@ def _state(body: dict, previous: dict | None = None) -> dict:
 
 
 class Player:
-    def __init__(self, home, clock=time.time, gate_url_re=None):
+    def __init__(self, home, clock=time.time, gate_url_re=None, edge=None):
         self.home, self.clock = home, clock
         # Tests and tools/dev_music.py hand in a pattern for a gate on this machine. Production never does: a gate address
         # off the tailnet is never signed for.
         self.gate_url_re = gate_url_re or GATE_URL
+        self.edge = edge        # the direct door (edge.py): the pass also says where to reach the gate without the Funnel, when that works
         self._lock = threading.Lock()
         self._devices: dict[str, dict[str, dict]] = {}     # user → device id → {name, state, seen, updated}
         self._commands: dict[str, dict[str, list]] = {}    # user → device id → queued actions
@@ -178,7 +179,8 @@ class Player:
         if not url or not self.home.can("music_gate"):
             return {"ok": False, "why": "skippy-pc is up, but its music gate isn't answering."}
         exp = (int(self.clock()) // PASS_BUCKET_S + 1) * PASS_BUCKET_S + PASS_S      # 8 to 14 hours from now: see PASS_BUCKET_S
-        return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp), "exp": exp}
+        return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp), "exp": exp,
+                "direct": self.edge.direct("music") if self.edge else None}
 
     # ── Connect: devices, handoff, remote ────────────────────────────────
     def checkin(self, user: str, device: str, name: str, body: dict | None, room: str = "", box: bool = False) -> dict:

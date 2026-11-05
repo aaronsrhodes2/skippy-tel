@@ -120,7 +120,10 @@ def test_no_other_service_publishes_a_port_on_the_network():
     _, services = compose_entry()
     for name, svc in services.items():
         for port in svc.get("ports", []):
-            assert str(port).startswith("127.0.0.1:"), (name, port)
+            if name == "edge":                      # the direct front door (edge/Caddyfile, docs/direct-door.md): the ONE service meant to be reached from outside
+                assert svc["ports"] == ["0.0.0.0:47443:443"], svc["ports"]
+            else:
+                assert str(port).startswith("127.0.0.1:"), (name, port)
 
 
 def test_the_comment_in_compose_has_the_funnel_command_the_readme_has():

@@ -35,10 +35,11 @@ def sign(key: bytes, exp: int) -> str:
 
 
 class Books:
-    def __init__(self, home, player, clock=None, gate_url_re=None):
+    def __init__(self, home, player, clock=None, gate_url_re=None, edge=None):
         import time
         self.home, self.player, self.clock = home, player, clock or time.time
         self.gate_url_re = gate_url_re or GATE_URL      # tests and the dev harness hand in a pattern for a gate on this machine; production never does
+        self.edge = edge        # the direct door (edge.py): the pass also says where to reach the gate without the Funnel, when that works
 
     def gate_url(self) -> str | None:
         info = ((self.home.report or {}).get("capabilities") or {}).get("book_gate")
@@ -56,7 +57,8 @@ class Books:
         if not url or not self.home.can("book_gate"):
             return {"ok": False, "why": "skippy-pc is up, but its audiobook gate isn't answering."}
         exp = (int(self.clock()) // PASS_BUCKET_S + 1) * PASS_BUCKET_S + PASS_S
-        return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp), "exp": exp}
+        return {"ok": True, "url": url, "pass": sign(gate_key(stored), exp), "exp": exp,
+                "direct": self.edge.direct("books") if self.edge else None}
 
     def rooms(self, user: str) -> list[dict]:
         """The room boxes that can play a book now (the hub checked them in), with what each one's book is doing."""

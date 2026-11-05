@@ -338,6 +338,17 @@
    "answer": "{\"ready\": true, \"service\": \"popup-gate\", \"files\": 2, \"max_bytes\": 67108864}"
   }
  },
+ "edge": {
+  "for": "The direct front door: Caddy answers on https://home.makerportal.live, the home's own public address (the router forwards its 443 here), and hands /music, /video, /books, /voice and /in to the gates above, so a browser off the tailnet (the Tesla on cellular, a friend's phone) reaches them in one hop instead of through Tailscale's Funnel relay. It holds no secret and logs no pass; the Funnel stays as the automatic fallback.",
+  "used_by": [
+   "the pages of Bilby's Audio Service, Nagatha's Video Service, Audiobooks, the chats' voice key and the chat's attach key (they try it first, then the Funnel)",
+   "the portal's own reachability probe (GET /ping from the cloud)"
+  ],
+  "example": {
+   "ask": "GET https://home.makerportal.live/ping",
+   "answer": "ok"
+  }
+ },
  "tts-studio": {
   "for": "Skippy's local voices on skippy-pc's card: 'stock' (Kokoro, for everyone) and 'skippy' (an F5-TTS clone of his Skippy voice, the Captain only). Both stay loaded; no route out, no published port.",
   "used_by": [

@@ -599,11 +599,15 @@
       if (file.size > BIG_MAX) { flash(file.name + " is over 64 MB, the most one file can be."); return; }
       const r = await fetch("{{ url_for('chat.popup_in_pass') }}", {method: "POST", headers: {"Content-Type": "application/json"},
                                                                   body: JSON.stringify({bytes: file.size})});
-      const g = r.ok ? await r.json() : {ok: false, why: "The portal didn't answer."};
+      let g = r.ok ? await r.json() : {ok: false, why: "The portal didn't answer."};
       if (!g.ok) { flash(g.why || "That file can't go home right now."); return; }
       const chip = {name: file.name, data: "", sending: true}; pending_files.push(chip); paintFiles();
       try {
-        const up = await fetch(g.url + "/t/" + g.pass + "/file", {method: "PUT", body: file, headers: {"X-File-Name": file.name}});
+        if (window.SkippyDirect) g = await SkippyDirect.pick(g, {fresh: true});      // straight to skippy-pc when its own front door answers right now, else the Funnel (static/direct.js)
+        const put = () => fetch(g.url + "/t/" + g.pass + "/file", {method: "PUT", body: file, headers: {"X-File-Name": file.name}});
+        let up;
+        try { up = await put(); }
+        catch (e) { if (!(window.SkippyDirect && SkippyDirect.demote(g))) throw e; up = await put(); }      // the door gave no answer to the upload: once more by the Funnel
         const d = await up.json().catch(() => ({}));
         if (!up.ok || !d.id) throw new Error(d.error || "the upload failed");
         Object.assign(chip, {ref: d.id, type: d.type, bytes: d.bytes, sending: false});

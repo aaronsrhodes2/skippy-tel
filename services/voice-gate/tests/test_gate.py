@@ -234,7 +234,7 @@ class Studio(Fake):
 @pytest.fixture
 def studio():
     fake = Studio()
-    app = gate.create_app(KEY, "http://w", "http://studio", clock=lambda: NOW, post=fake.post, get=fake.get)
+    app = gate.create_app(KEY, "http://w", "http://studio", clock=lambda: NOW, post=fake.post, get=fake.get, health_ttl=0)   # (0: every /health asks, so a test can change the studio's answer between two calls)
     return app.test_client(), fake
 
 
@@ -318,6 +318,65 @@ def test_health_says_which_voices_can_speak(studio):
     assert c.get("/health").get_json()["voices"] == {"stock": True, "skippy": False}
     fake.health = Resp(500)
     assert c.get("/health").get_json()["voices"]["stock"] is False
+
+
+def _wait_for(cond, seconds=5.0):
+    import time
+    end = time.time() + seconds
+    while time.time() < end and not cond():
+        time.sleep(0.01)
+    return cond()
+
+
+def test_health_keeps_what_it_learned_about_whisper_and_the_studio_a_few_seconds_and_refreshes_it_in_the_background():
+    """The direct front door (edge/Caddyfile, /voice/health) makes /health reachable by anyone: a flood of it must not be a flood of probes of Whisper and
+    the studio (each can wait 3 s on a sick service, and this gate has few threads), and no call may wait on them once an answer is kept."""
+    fake, t = Studio(), {"now": 100.0}
+    c = gate.create_app(KEY, "http://w", "http://studio", clock=lambda: NOW, post=fake.post, get=fake.get,
+                        health_ttl=5.0, health_clock=lambda: t["now"]).test_client()
+    first = c.get("/health").get_json()
+    assert first["whisper"] is True and first["voices"] == {"stock": True, "skippy": True}
+    assert len(fake.gets) == 2                                           # Whisper's /health and the studio's: the first call asks
+    for _ in range(40):
+        assert c.get("/health").get_json()["voices"] == {"stock": True, "skippy": True}
+    assert len(fake.gets) == 2                                           # forty more calls: not one more probe
+    fake.health = Resp(200, {"voices": {"stock": True, "skippy": False}})
+    t["now"] += 6                                                        # the kept answer is stale now
+    assert c.get("/health").get_json()["voices"] == {"stock": True, "skippy": True}    # the old answer, at once ...
+    assert _wait_for(lambda: len(fake.gets) == 4)                        # ... and ONE refresh behind it (both probes)
+    assert _wait_for(lambda: c.get("/health").get_json()["voices"] == {"stock": True, "skippy": False})
+    assert len(fake.gets) == 4
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_a_background_refresh_that_blows_up_does_not_stay_busy_for_ever():
+    fake, t, bug = Studio(), {"now": 100.0}, {"on": False}
+
+    def get(url, **kw):
+        if bug["on"]:
+            raise RuntimeError("a bug in a probe")
+        return fake.get(url, **kw)
+    c = gate.create_app(KEY, "http://w", "http://studio", clock=lambda: NOW, post=fake.post, get=get,
+                        health_ttl=5.0, health_clock=lambda: t["now"]).test_client()
+    assert c.get("/health").status_code == 200
+    bug["on"] = True
+    t["now"] += 6
+    assert c.get("/health").status_code == 200                           # the kept answer, at once; the refresh behind it dies
+    import time
+    time.sleep(0.2)
+    bug["on"] = False
+    t["now"] += 6
+    n = len(fake.gets)
+    assert c.get("/health").status_code == 200                           # a later stale call starts a new refresh: nothing is stuck "busy"
+    assert _wait_for(lambda: len(fake.gets) >= n + 2)
+
+
+def test_health_ttl_zero_keeps_nothing_and_asks_every_time():
+    fake = Studio()
+    c = gate.create_app(KEY, "http://w", "http://studio", clock=lambda: NOW, post=fake.post, get=fake.get, health_ttl=0).test_client()
+    for _ in range(3):
+        c.get("/health")
+    assert len(fake.gets) == 6                                           # two probes (Whisper, the studio) each time
 
 
 def test_the_wake_word_model_is_for_the_captains_pass_only(tmp_path):

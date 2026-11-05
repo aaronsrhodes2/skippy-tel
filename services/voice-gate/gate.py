@@ -164,7 +164,8 @@ def spoken(text: str) -> str:
 def create_app(key: bytes, whisper_url: str, studio_url: str, clock=time.time,
                slots: int = 3, post=requests.post, get=requests.get,
                ollama_url: str = "", summary_model: str = "qwen2.5:7b",
-               state_dir: str = "", wake_dirs: tuple = (), wake_threshold: float = 0.5) -> Flask:
+               state_dir: str = "", wake_dirs: tuple = (), wake_threshold: float = 0.5,
+               health_ttl: float = 5.0, health_clock=time.monotonic) -> Flask:
     app = Flask(__name__, static_folder=None)
     app.url_map.merge_slashes = False
     app.config["MAX_CONTENT_LENGTH"] = MAX_AUDIO + 4096
@@ -232,6 +233,40 @@ def create_app(key: bytes, whisper_url: str, studio_url: str, clock=time.time,
 
     ready_state = ready_mod.Readiness("voice-gate")
 
+    # /health needs no pass and the direct front door (edge/Caddyfile, /voice/health) makes it reachable from anywhere. Each of its two dependency probes can wait
+    # 3 s on a sick Whisper or studio, and this gate has only a few threads, so a handful of anonymous calls per second would stall Skippy's own voice (reproduced
+    # 2026-11-05: one call 6 s, an authenticated call 4.8 s behind eight). The answer about the dependencies is therefore kept `health_ttl` seconds, and a stale
+    # one is returned at once while ONE background probe refreshes it; only the first ever call waits (video-gate keeps its Jellyfin ping 5 s for the same reason).
+    memo: dict = {"at": None, "whisper": False, "voices": {}, "busy": False}
+    memo_lock = threading.Lock()
+
+    def refill() -> tuple[bool, dict]:
+        try:
+            w = probe(f"{whisper_url}/health")
+            v = dict(studio_voices())
+        except Exception:
+            with memo_lock:
+                memo["busy"] = False
+            raise
+        with memo_lock:
+            memo.update(at=health_clock(), whisper=w, voices=v, busy=False)
+        return w, v
+
+    def dependencies() -> tuple[bool, dict]:
+        """(whisper answers, which voices can speak): kept health_ttl seconds; nothing kept yet (or health_ttl 0) means this call asks."""
+        with memo_lock:
+            at = memo["at"]
+            snap = (memo["whisper"], dict(memo["voices"]))
+            ask_now = at is None or health_ttl <= 0
+            start = (not ask_now) and not (0 <= health_clock() - at < health_ttl) and not memo["busy"]
+            if start:
+                memo["busy"] = True
+        if ask_now:
+            return refill()
+        if start:
+            threading.Thread(target=refill, name="voice-health", daemon=True).start()
+        return snap
+
     @app.before_request
     def _job_begins():
         if request.path != "/health" and request.method != "OPTIONS":      # a call that does work is a job while it runs (PLATINUM section 24)
@@ -245,9 +280,9 @@ def create_app(key: bytes, whisper_url: str, studio_url: str, clock=time.time,
 
     @app.get("/health")
     def health():
-        w = probe(f"{whisper_url}/health")
+        w, voices = dependencies()
         deps = {"whisper": {"ready": bool(w), "detail": "" if w else "Whisper (speech to text, at home) isn't answering"}}
-        rep = ready_state.report(ready=True, deps=deps, ok=True, whisper=w, voices=dict(studio_voices()),
+        rep = ready_state.report(ready=True, deps=deps, ok=True, whisper=w, voices=voices,
                                  tts=bool(studio_url))
         return Response(json.dumps(rep), mimetype="application/json", headers={"Cache-Control": "no-store"})
 

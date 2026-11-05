@@ -2,6 +2,7 @@
 operator commands run in a container with this box's Google identity, and the installed copy updating itself from the tested commit.
 Docker, gcloud and the network are faked."""
 import json
+import re
 import subprocess
 
 import pytest
@@ -307,11 +308,18 @@ def test_the_vendor_command_loads_the_pins_before_it_lays_out_the_build_context(
     assert len(seen["pin"]) == 40 and seen["dest"] == tmp_path and seen["star"] is False
 
 
+ONE_NAME = {"host": "telemetry.makerportal.live", "zone": "makerportal-live"}       # home_dns in its original, single-"host" form
+TWO_NAMES = {**ONE_NAME, "hosts": ["home.makerportal.live"]}                         # ... and with "hosts" beside it, as deploy.json has it now
+TELE, HOME = "telemetry.makerportal.live.", "home.makerportal.live."                 # the names as Cloud DNS spells them
+
+
 class HomeDnsCD(cd_mod.CD):
-    """Home's public IP is `ips` (one per IP service); Cloud DNS holds `have`; every gcloud call is recorded."""
+    """Home's public IP is `ips` (one per IP service); Cloud DNS holds `have`; every gcloud call is recorded. The config is the original
+    single-"host" form of home_dns, so these tests say what that form does, whatever names the real deploy.json keeps today."""
 
     def __init__(self, s, ips, have=""):
         super().__init__(s, log=lambda m: None)
+        self.cfg = {"home_dns": dict(ONE_NAME)}
         self.ips, self.have, self.calls = list(ips), have, []
         cd_mod.oidc.token = lambda: None
 
@@ -350,3 +358,172 @@ def test_two_ip_services_that_disagree_never_repoint_the_name(tmp_path):
 def test_the_home_name_is_one_under_the_tesla_apps_domain():
     spec = json.loads((cd_mod.HERE / "deploy.json").read_text())["home_dns"]
     assert spec["host"].endswith(".makerportal.live") and spec["zone"] == "makerportal-live"
+
+
+# ── several names on home's IP: the car's telemetry door and the direct front door (home.makerportal.live) ──
+
+class CloudDns:
+    """What Cloud DNS holds, for the fakes: `records` {name: ip}; a create or update of a name in `broken` fails (Cloud DNS said no);
+    every call lands in `calls` as ("list" | "create" | "update", name)."""
+
+    def __init__(self, records=None, broken=(), calls=None):
+        self.records, self.broken = dict(records or {}), set(broken)
+        self.calls = [] if calls is None else calls
+
+    def gcloud(self, *args):
+        _, _, verb, *rest = args                                                     # ("dns", "record-sets", "list" | "create" | "update", ...)
+        name = next(a.split("=", 1)[1] for a in args if a.startswith("--name=")) if verb == "list" else rest[0]
+        self.calls.append((verb, name))
+        if verb == "list":
+            return self.records.get(name, "") + "\n"
+        assert {"--zone=makerportal-live", "--type=A", "--ttl=60"} <= set(args)
+        if name in self.broken:
+            raise cd_mod.Failed("gcloud dns record-sets failed: Cloud DNS said no")
+        self.records[name] = next(a.split("=", 1)[1] for a in args if a.startswith("--rrdatas="))
+        return ""
+
+
+class ManyNamesCD(HomeDnsCD):
+    """Home's IP is `ips`, the config is `spec`, `dns` is Cloud DNS (its calls and the "ip" checks share `calls`, in order); what the
+    deployer says goes to `said`."""
+
+    def __init__(self, s, ips, spec, records=None, broken=()):
+        super().__init__(s, ips)
+        self.cfg = {"home_dns": spec}
+        self.dns, self.said = CloudDns(records, broken, calls=self.calls), []
+        self.say = self.said.append
+
+    def gcloud(self, *args, cwd=None, timeout=900, quiet=False):
+        return self.dns.gcloud(*args)
+
+
+def test_home_names_are_host_then_hosts_each_once_spelled_as_cloud_dns_does():
+    names = cd_mod.CD.home_names
+    assert names(ONE_NAME) == [TELE]                                                 # the original form still names its one host
+    assert names(TWO_NAMES) == [TELE, HOME]
+    assert names({"hosts": ["a.example.", "b.example"]}) == ["a.example.", "b.example."]
+    assert names({"host": "t.example", "hosts": ["Home.Example", "t.example.", " home.example "]}) == ["t.example.", "home.example."]
+    assert names({"hosts": "only.example"}) == ["only.example."]                     # one name written as a string is one name, not its letters
+    assert names({"host": "", "hosts": [None, 5, "", "."]}) == names({}) == names({"hosts": None}) == []
+
+
+def test_several_names_get_one_ip_check_each_is_created_or_updated_and_a_right_record_is_left_alone(tmp_path):
+    b = ManyNamesCD(settings(tmp_path), ["76.1.2.3", "76.1.2.3"], TWO_NAMES, records={TELE: "76.1.2.3"})    # telemetry is already right
+    assert b.home_dns() == "76.1.2.3"
+    assert b.calls == ["ip", ("list", TELE), ("list", HOME), ("create", HOME)]       # ONE check of the IP; telemetry is asked about, never written
+    assert b.dns.records == {TELE: "76.1.2.3", HOME: "76.1.2.3"} and b.state["home_ip"] == "76.1.2.3"
+    b.calls.clear()
+    assert b.home_dns() is None and b.calls == []                                    # inside 5 minutes: not even asked
+    b.state["home_ip_at"] = 0
+    assert b.home_dns() == "76.1.2.3" and b.calls == ["ip"]                          # same IP, every name known to be right: Cloud DNS untouched
+    b.state["home_ip_at"], b.ips = 0, ["76.9.9.9", "76.9.9.9"]
+    b.calls.clear()
+    assert b.home_dns() == "76.9.9.9"
+    assert b.calls == ["ip", ("list", TELE), ("update", TELE), ("list", HOME), ("update", HOME)]
+    assert b.dns.records == {TELE: "76.9.9.9", HOME: "76.9.9.9"} and b.state["home_ip"] == "76.9.9.9"
+
+
+def test_a_name_added_to_the_config_is_made_though_homes_ip_has_not_moved(tmp_path):
+    """The day home.makerportal.live joined telemetry, home's IP had not changed in weeks and the one-name deployer had left only
+    `home_ip` in its state: a check keyed on the IP alone would never have made the new record."""
+    old = ManyNamesCD(settings(tmp_path), ["76.1.2.3"], TWO_NAMES, records={TELE: "76.1.2.3"})
+    old.state.update(home_ip="76.1.2.3", home_ip_at=0)                               # what the one-name deployer left behind
+    assert old.home_dns() == "76.1.2.3"
+    assert old.calls == ["ip", ("list", TELE), ("list", HOME), ("create", HOME)] and old.dns.records[HOME] == "76.1.2.3"
+    new = ManyNamesCD(settings(tmp_path / "again"), ["76.1.2.3"], TWO_NAMES, records={TELE: "76.1.2.3"})
+    new.state["home_dns"] = {TELE: "76.1.2.3"}                                       # what this deployer keeps: telemetry is known to be right
+    assert new.home_dns() == "76.1.2.3" and new.calls == ["ip", ("list", HOME), ("create", HOME)]     # only the new name is asked about
+
+
+def test_a_name_that_fails_does_not_stop_the_others_and_is_asked_about_again_next_tick(tmp_path):
+    b = ManyNamesCD(settings(tmp_path), ["76.1.2.3"], TWO_NAMES, broken={TELE})
+    assert b.home_dns() == "76.1.2.3"
+    assert b.calls == ["ip", ("list", TELE), ("create", TELE), ("list", HOME), ("create", HOME)]     # telemetry failed; home was still made
+    assert b.dns.records == {HOME: "76.1.2.3"} and "home_ip" not in b.state          # not every name is on the IP, and nothing says so
+    assert [m for m in b.said if "couldn't point" in m] == [f"cd: couldn't point {TELE} at 76.1.2.3: gcloud dns record-sets failed: Cloud DNS said no"]
+    b.dns.broken.clear()
+    b.state["home_ip_at"] = 0
+    b.calls.clear()
+    assert b.home_dns() == "76.1.2.3"
+    assert b.calls == ["ip", ("list", TELE), ("create", TELE)]                       # only the name that is not known to be right
+    assert b.dns.records == {TELE: "76.1.2.3", HOME: "76.1.2.3"} and b.state["home_ip"] == "76.1.2.3"
+
+
+def test_a_forced_check_asks_about_every_name_and_says_what_each_got(tmp_path):
+    b = ManyNamesCD(settings(tmp_path), ["76.1.2.3"], TWO_NAMES, records={TELE: "76.1.2.3"})
+    assert b.home_dns_sync() == ("76.1.2.3", {TELE: "already 76.1.2.3", HOME: "created (was unset)"})
+    b.calls.clear()
+    assert b.home_dns_sync() == (None, {}) and b.calls == []                         # not due: nothing asked, nothing done
+    assert b.home_dns_sync(force=True) == ("76.1.2.3", {TELE: "already 76.1.2.3", HOME: "already 76.1.2.3"})
+    assert b.calls == ["ip", ("list", TELE), ("list", HOME)]                         # whatever the clock says, every name is asked
+    b.dns.records[HOME] = "10.0.0.9"                                                 # somebody changed it by hand
+    assert b.home_dns_sync(force=True)[1][HOME] == "updated (was 10.0.0.9)" and b.dns.records[HOME] == "76.1.2.3"
+    b.ips = ["76.1.2.3", "10.0.0.1"]                                                 # the two IP services disagree
+    assert b.home_dns_sync(force=True) == (None, {TELE: "left as it is", HOME: "left as it is"})
+
+
+def test_names_without_a_zone_are_said_not_raised(tmp_path):
+    b = ManyNamesCD(settings(tmp_path), ["76.1.2.3"], {"hosts": ["home.makerportal.live"]})
+    assert b.home_dns() == "76.1.2.3" and b.calls == ["ip"] and b.dns.records == {}
+    assert b.said == [f"cd: couldn't point {HOME} at 76.1.2.3: deploy.json's home_dns has no zone"]
+
+
+def test_the_home_dns_command_prints_the_ip_then_what_each_name_got(tmp_path, monkeypatch, capsys):
+    dns = CloudDns(records={TELE: "76.1.2.3"})
+    monkeypatch.setenv("CD_STATE", str(tmp_path / "cd"))
+    monkeypatch.setattr(cd_mod.oidc, "token", lambda: None)
+    monkeypatch.setattr(cd_mod.CD, "public_ip", lambda self: "76.1.2.3")
+    monkeypatch.setattr(cd_mod.CD, "gcloud", lambda self, *a, **k: dns.gcloud(*a))
+
+    def table():
+        lines = capsys.readouterr().out.splitlines()
+        return lines[0], {l.split()[0]: l.split(None, 1)[1] for l in lines[1:]}      # (the IP, {name: what it got})
+
+    assert cd_mod.main(["home-dns"]) == 0                                            # the real deploy.json's names
+    ip, got = table()
+    assert ip == "76.1.2.3" and got[TELE] == "already 76.1.2.3" and got[HOME] == "created (was unset)"
+    dns.records.pop(HOME)
+    dns.broken.add(HOME)
+    assert cd_mod.main(["home-dns"]) == 1                                            # a name that could not be set: said, and a non-zero exit
+    ip, got = table()
+    assert ip == "76.1.2.3" and got[TELE] == "already 76.1.2.3" and got[HOME] == "failed: gcloud dns record-sets failed: Cloud DNS said no"
+
+
+def test_the_portal_is_told_where_the_direct_front_door_is_and_dns_keeps_that_name_on_home():
+    cfg = json.loads((cd_mod.HERE / "deploy.json").read_text())
+    edge = cfg["portal"]["env"]["EDGE_HOST"]
+    assert edge == "home.makerportal.live"                                           # the portal builds https://<EDGE_HOST>/<prefix> from this
+    assert re.fullmatch(r"[a-z0-9-]+(\.[a-z0-9-]+)+", edge)                          # a bare host: no scheme, port, path or dot at the end
+    assert not any("|" in str(v) for v in cfg["portal"]["env"].values())             # gcloud's --set-env-vars splits on "|": one in a value breaks them all
+    assert "EDGE_HOST" not in cfg["portal"]["secrets"] and "EDGE_HOST" not in cfg["portal"]["vault_secrets"]       # a plain value, not a secret
+    names = cd_mod.CD.home_names(cfg["home_dns"])
+    assert edge + "." in names and TELE in names                                     # DNS keeps the edge on home's IP, and the car's door still
+    assert cfg["home_dns"]["zone"] == "makerportal-live" and edge.endswith(".makerportal.live")
+
+
+class PortalDeployCD(cd_mod.CD):
+    """The portal job with gcloud recorded (`ran`): what `gcloud run deploy` is handed."""
+
+    def __init__(self, s):
+        super().__init__(s, log=lambda m: None)
+        self.cfg = json.loads((cd_mod.HERE / "deploy.json").read_text())
+        self.ran = []
+
+    def sync_vault_secrets(self, part):
+        return []
+
+    def smoke_portal(self, src):
+        pass
+
+    def gcloud(self, *args, cwd=None, timeout=900, quiet=False):
+        self.ran.append(args)
+        return "skippy-portal-00041-old\n"                                           # (describe: the revision serving now)
+
+
+def test_the_deploy_hands_the_portal_its_edge_host_as_a_plain_env_value(tmp_path):
+    cd = PortalDeployCD(settings(tmp_path))
+    cd.portal(tmp_path, "a" * 40)
+    deploy, = [a for a in cd.ran if a[:2] == ("run", "deploy")]
+    env = next(a for a in deploy if a.startswith("--set-env-vars=")).split("=", 1)[1]
+    assert env.startswith("^|^") and "EDGE_HOST=home.makerportal.live" in env[3:].split("|")
+    assert not any("EDGE_HOST" in a for a in deploy if a.startswith("--set-secrets="))

@@ -59,6 +59,7 @@ def load() -> dict:
         "NEST_PROJECT_ID": _optional("NEST_PROJECT_ID", ""),          # the Nest's Device Access project (google_link.py); Admin can override
         "PORTAL_URL": _optional("PORTAL_URL", ""),   # the address the Discord pins link to (a custom domain, once there is one); else where the portal is reached
         "MENTAT_URL": _optional("MENTAT_URL", ""),
+        "EDGE_HOST": _optional("EDGE_HOST", ""),     # the direct door's name (edge.py), e.g. home.makerportal.live; empty = off. Anything but a plain name under makerportal.live/.studio is ignored there
         "DISCORD_BOT_TOKEN": _optional("DISCORD_BOT_TOKEN"),
         # The Admin page's deploy buttons (recovery.py): a fine-grained token, this repo only, Actions read/write. Optional:
         # without it the Deploy pipeline card says "not configured". create_app takes it OUT of app.config at once, so no
