@@ -174,6 +174,24 @@ for the coast NOAA's tide times at the nearest tide station (which way it is goi
 period, sea temperature, wind; metres and Celsius converted with Mentat's factors). Home is `SKIPPY_HOME_LATLON`, else where the car spends the night
 (`state/daily/state.json`); the stations found are kept in `state/weather.json`. Skippy gives the takeaway, a figure or two at most, never a data card.
 
+**His car and Mentat, by voice** (`car.py`, `physics.py`: the portal chat's `car_status` and `ask_mentat`; 2026-11-04, asked "What is my car's charge level right now?" the
+house said it had no access to his car, and the prompt had told it the car and Mentat were out of reach). "What's my car's charge level?", "Is the Tesla plugged in?", "Where is
+the car?" go straight to `car_status` (Core left to itself answered "locked" for a car it had not looked at): READ ONLY, one read of skippy-core's car reader (`:7351`,
+TeslaMate's last values; asking never wakes the car, and nothing here can lock, heat, charge or sign in to anything), said in percent, miles (the range is the car's estimate, else
+its rated range) and °F, home or away from where the house has learned home is (`SKIPPY_HOME_LATLON`, else where the car spends the night), and how old the reading is when the car
+is asleep (it still gives the reading). Physics, chemistry, astronomy and unit questions ("the escape velocity of Mars", "how many ounces are in a cup", "what would 70 kg weigh on
+the Moon") go straight to `ask_mentat`: Mentat on skippy-core (`:7350`; `SKIPPY_MENTAT_URL` overrides; 75 s at most, it is usually 0.1 to 5), the question in his words, the
+answer as the value to five digits with its units, how Mentat read the question (an input it filled in shows there), a short source and its provenance, never a markup, link or
+citation mark. Skippy computes no physics (PLATINUM 21): when his words were a factual question and the reply gives a physical figure with no Mentat call (digits or spoken
+numbers: "five point zero kilometers per second"), or says "Mentat" without one, the house asks Mentat itself with his words and Core only words the answer (`guard=force physics`
+in the house log; a second try with the tool on offer wrote "[ask_mentat: ...]" as text instead, and a call written as words is never spoken). When Mentat leaves an input
+out it suggests a value and computes nothing; only his "yes" sends Mentat's own suggestion back (`use_suggestion`, kept five minutes per room). **Mentat's own answers are not
+always right** (2026-11-04: a driving distance came back as a black hole's radius, the boiling point on Everest as the sea-level one, "energy in a gallon of gasoline" as its
+mass equivalent, the half-life of carbon 14 as an activity): the tool shows how Mentat read the question and its source so Skippy can say "Mentat misread that" instead of passing
+the number off. The prompt's "out of your reach" now lists only what has no tool (his files and code, and the car or Mentat while their tool is missing). Not here: starting or stopping the game servers (`server_status` and the
+rest need a machine route on the portal first), `make_music`/`make_image` and the pop-ups (patient jobs that end in a browser player). Tests: `tests/test_sat_car.py`,
+`tests/test_sat_physics.py`.
+
 **Conversation starters:** the task "Skippy starters refresh" (06:40 daily, `tools/starter_refresh.sh`, log `state/starter-refresh.log`) searches each
 interest in `filler.TOPICS` and a few world subjects (elections, laws, his town and state), lets Core pick one real new development per subject and word
 an opener with no figures (PLATINUM 21), and keeps it only when a strict second reading of the reports supports it. They wait in

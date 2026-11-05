@@ -1096,6 +1096,10 @@ def build_rooms(env: dict):
     import news as news_mod                                      # noqa: PLC0415
     import weather as weather_mod                                # noqa: PLC0415
     house_weather = weather_mod.Weather(env, log=log)            # one house, one weather (its stations and cache are shared by every room)
+    import car as car_mod                                        # noqa: PLC0415 — his Tesla, read only (the car reader on skippy-core): the portal chat's car_status, by voice
+    import physics as physics_mod                                # noqa: PLC0415 — Mentat, the only source of a physical number (PLATINUM 21): the portal chat's ask_mentat, by voice
+    house_car = car_mod.Car(env, log=log)                        # one car and one Mentat for every room (a suggestion of Mentat's waits for his yes in the room that heard it)
+    house_physics = physics_mod.Physics(env, log=log)
     from starters import Starters                                # noqa: PLC0415
     starters = None if env.get("SATELLITE_STARTERS", "on").lower() in ("off", "0", "no") else \
         Starters(Path(__file__).resolve().parents[2] / "state" / "starters", log_root=hlog.root)   # filled daily by tools/starter_refresh.py
@@ -1162,7 +1166,7 @@ def build_rooms(env: dict):
         if book is not None:
             tools = audiobooks.combine(tools, audiobooks.book_tools(lambda: holder["room"], loop))
         tools = audiobooks.combine(tools, house_clock.tools(name), house_lists.tools(), announce_tools(lambda: holder["room"], connected, env, loop))
-        brain = Brain(client, brain_model, timers, hass=house, extra=tools, news=news_mod.News(env, log=log), weather=house_weather)
+        brain = Brain(client, brain_model, timers, hass=house, extra=tools, news=news_mod.News(env, log=log), weather=house_weather, car=house_car, physics=house_physics)
         brain.room = name                                        # the primer says which room of house_layout.json he is talking from
         if book is not None:
             brain.pre_route = lambda heard: book_voice.pre_route(heard, holder["room"])

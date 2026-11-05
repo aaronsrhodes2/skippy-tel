@@ -16,6 +16,8 @@ import lists as lists_mod
 import house as hass_mod                                         # the house: any backend (HomeKit, Home Assistant ...)
 import news as news_mod
 import weather as weather_mod
+import car as car_mod                                            # car_status: his Tesla, read only (the reader on skippy-core)
+import physics as physics_mod                                    # ask_mentat: the only source of a physical number (PLATINUM 21)
 
 PERSONA_FILE = Path(__file__).resolve().parents[1] / "flask-api" / "app" / "skippy_persona.md"
 FALLBACK_PERSONA = ("You are Skippy the Magnificent, the Elder AI: an ancient beer can of unimaginable power, sardonic, loyal, and secretly fond "
@@ -55,6 +57,17 @@ SPOKEN = (
     "{nohouse}He is standing in a room waiting for you, so get to it. The current date and time is {now}."
 )
 
+ABILITIES = (
+    "\n\n## What you are, and what you can reach from here\n"
+    "You are Skippy, running on skippy-pc in his house; your thinking is done by Skippy Core, the local model on skippy-core. From this voice you act ONLY through these tools: {names}. "
+    "Out of your reach from here: {gone}his files and code. {chat}Asked for something none of your tools does, say plainly that this voice cannot do it yet and where it can be done. "
+    "Never claim you did what no tool did, and never claim you cannot do what a tool above does.\n"
+)
+# What is out of reach, said only while it is true (the Captain, 2026-11-04: "What is my car's charge level right now?" was answered "I do not have access to your car's systems";
+# "You are wrong, you DO have access. Missed tool call."). The car and Mentat are tools now (car.py, physics.py), so each is named as out of reach only while its tool is missing;
+# a tool added later shows in the list above by itself. tool -> (how it is said as out of reach, how it is said as what the portal chat has)
+ELSEWHERE = {"car_status": ("his car, ", "the car"), "ask_mentat": ("physics calculations (Mentat), ", "Mentat")}
+
 TOOLS = [
     {"name": "set_timer", "description": "Start a timer. It will be announced aloud when it is done.",
      "input_schema": {"type": "object", "properties": {"seconds": {"type": "integer", "description": "How long, in seconds (1 to 86400)."},
@@ -93,6 +106,9 @@ ANNOTATION = re.compile(r"\[(?:SKIPPY_LEARN|TTS_ADJUST):\s*\{.*?\}\s*\]", re.S)
 # Also "[play_music: what=everything, speaker=everywhere]" (a colon after the name, commas between: 2026-11-01, said "Done" and played nothing)
 TEXT_CALL = re.compile(r"\[(\w+):?((?:[\s,]+\w+=(?:\"[^\"]*\"|'[^']*'|[^\s,\]]+))*)\s*\]")
 TEXT_ARG = re.compile(r"(\w+)=(?:\"([^\"]*)\"|'([^']*)'|([^\s,\]]+))")
+# A call written as words where no tool is on offer (a routed answer, 2026-11-04: Core, handed a Mentat answer that missed, wrote "[ask_mentat: What is the half-life of carbon-14?]"
+# as its whole reply): it is never spoken, and the plain apology stands in.
+PHANTOM = re.compile(r"\[(?:ask_mentat|car_status)\b[^\]]*\]", re.I)
 
 
 _PLACE = r"(?P<place>everywhere|everyone|everybody|the whole house|the house|upstairs|downstairs|(?:the |in the )?(?:living room|kitchen|bedroom|theater|office))"
@@ -367,7 +383,7 @@ def say_duration(seconds: int) -> str:
 
 class Brain:
     def __init__(self, client, model: str, timers, persona: str | None = None, clock=time.time, now=None, hass=None, extra=None, news=None, weather=None,
-                 sleep=time.sleep):
+                 car=None, physics=None, sleep=time.sleep):
         self.client, self.model, self.timers, self.clock = client, model, timers, clock
         self.sleep = sleep                                            # between tries when the model went away (tests pass a no-op)
         self.retries = 0                                              # how many tries the last reply needed past the first (the house log)
@@ -382,6 +398,8 @@ class Brain:
         self.pre_route = None                                         # heard -> tool args for plain commands the model is unreliable at (hub.py: the audiobook); None = the model decides
         self.news = news                                              # news.News: the `news` tool, "about what?", and the headlines it found last
         self.weather = weather                                        # weather.Weather: the `weather` tool (NWS, NOAA tides and buoys, Open-Meteo)
+        self.car = car                                                # car.Car: the `car_status` tool (the Captain's Tesla, read only)
+        self.physics = physics                                        # physics.Physics: the `ask_mentat` tool (Mentat does the physics, PLATINUM 21)
         self.offered: dict | None = None                              # what he brought up himself (a conversation starter) and its sources: {"note", "at"}
 
     def system(self) -> str:
@@ -400,7 +418,17 @@ class Brain:
             offered = ("\n\nYou brought this up yourself a moment ago, unasked; if he wants more, talk only from these sources and say when they don't settle "
                        f"something:\n{self.offered['note']}")
         layout = house_layout.default().primer(getattr(self, "room", ""))   # the floors, rooms and speakers (house_layout.json), and where he is
-        return self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse, music=music) + layout + books + news + (weather_mod.PROMPT if self.weather is not None else "") + offered
+        return (self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse, music=music) + layout + self.abilities() + books + news
+                + (weather_mod.PROMPT if self.weather is not None else "") + (car_mod.PROMPT if self.car is not None else "")
+                + (physics_mod.PROMPT if self.physics is not None else "") + offered)
+
+    def abilities(self) -> str:
+        """What this voice can do, from the tools it really has: so it neither denies a tool nor claims one it lacks (2026-11-04). Out of reach: only what has no tool."""
+        names = {t["name"] for t in self.tools()}
+        gone = [said for tool, said in ELSEWHERE.items() if tool not in names]
+        chat = (f"The Skippy chat on makerportal.live has {' and '.join(on for tool, (_, on) in ELSEWHERE.items() if tool not in names)}, and the private Skippy there writes code. "
+                if gone else "The private Skippy on makerportal.live writes code. ")
+        return ABILITIES.format(names=", ".join(sorted(names)), gone="".join(out for out, _ in gone), chat=chat)
 
     def offer(self, text: str, note: str) -> None:
         """He is about to say `text` unasked (starters.py): it joins his memory, with `note` (its sources) for the follow-up questions."""
@@ -437,6 +465,11 @@ class Brain:
             return self.news.run(args)
         if name == "web_search" and self.news is not None:
             return self.news.web(args)
+        if name == "car_status" and self.car is not None:
+            return self.car.run(args)
+        if name == "ask_mentat" and self.physics is not None:
+            room = getattr(self, "room", "")
+            return self.physics.run(args, room=room, trace=f"house-{room or 'room'}-{int(self.clock())}")
         if self.hass is not None and name in {t["name"] for t in hass_mod.TOOLS}:
             return hass_mod.run_tool(self.hass, name, args)
         if self.run_extra is not None and name in {t["name"] for t in self.extra_tools}:
@@ -445,7 +478,8 @@ class Brain:
 
     def tools(self) -> list[dict]:
         return (TOOLS + (hass_mod.TOOLS if self.hass is not None else []) + list(self.extra_tools) + (self.news.tools() if self.news is not None else [])
-                + (self.weather.tools() if self.weather is not None else []))
+                + (self.weather.tools() if self.weather is not None else []) + (self.car.tools() if self.car is not None else [])
+                + (self.physics.tools() if self.physics is not None else []))
 
     def _create(self, need_words: bool = False, **kw):
         """One model call, made again with backoff while the model is away (transient()), up to RETRY_FOR_S. `need_words`: a reply
@@ -487,6 +521,10 @@ class Brain:
         tool, routed = "audiobook", (self.pre_route(heard) if self.pre_route is not None else None)
         if not routed and self.news is not None:
             tool, routed = "news", self.news.pre_route(heard, self.history)   # "politics", in answer to "news about what?"
+        if not routed and self.car is not None:                      # before the thermostat and the weather: "how warm is it in the car" is the car
+            tool, routed = "car_status", car_mod.pre_route(heard)    # left to itself, Core said "I do not have access to your car's systems" and called nothing (2026-11-04)
+        if not routed and self.physics is not None:                  # before the weather: "the temperature of the sun" is Mentat's
+            tool, routed = "ask_mentat", physics_mod.pre_route(heard)   # a physical number comes from Mentat, never from Core's memory (PLATINUM 21)
         if not routed and self.hass is not None:                     # before the weather: "how warm is it in here" is the thermostat
             tool, routed = hass_mod.thermostat_route(heard) or (tool, None)   # left to itself, Core said "I cannot see the thermostat" (2026-11-01)
         if not routed and self.weather is not None:
@@ -512,7 +550,10 @@ class Brain:
                 text = " ".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
             except Exception:                                         # noqa: BLE001 — it happened (and stayed away): say it plainly
                 text = ""
-            text = text or {"audiobook": result.split(") ", 1)[-1], "news": "I found the headlines, and then my brain wandered off. Ask me again."}.get(
+            text = PHANTOM.sub("", text).strip()
+            text = text or {"audiobook": result.split(") ", 1)[-1], "news": "I found the headlines, and then my brain wandered off. Ask me again.",
+                            "car_status": "I looked at the car, and then my brain wandered off. Ask me again.",
+                            "ask_mentat": "Mentat answered, and then my brain wandered off. Ask me again."}.get(
                 tool, "I have the forecast, and then my brain wandered off. Ask me again.")
             self.history = (self.history + [{"role": "user", "content": heard}, {"role": "assistant", "content": text}])[-2 * MEMORY_TURNS:]
             return text
@@ -545,6 +586,10 @@ class Brain:
         elif text and not self.actions and any(CLAIMED.search(s) for s in musicguard.sentences(text)):
             print(f"[brain] claimed without a tool: {text[:80]!r}: asked again", flush=True)
             text = self._second_try(text, messages, ASK_AGAIN, self.tools(), UNCLAIM, tools_ran=lambda: bool(self.actions))
+        elif text and not self.actions and self.physics is not None and physics_mod.unbacked(text) and physics_mod.askable(heard):
+            print(f"[brain] a physical figure with no Mentat call: {text[:80]!r}: Mentat asked now", flush=True)   # Core answered physics from memory, once as "Mentat" (2026-11-04)
+            self.guard = ("force", "physics")
+            text = self._ask_mentat_now(heard) or text                # a Mentat that cannot be reached is said, never a figure from memory
         text = text or "Hm. I had nothing to say, which is unlike me."
         self.history += [{"role": "user", "content": heard}, {"role": "assistant", "content": text}]
         self.history = self.history[-2 * MEMORY_TURNS:]
@@ -555,6 +600,17 @@ class Brain:
 
     def music_tools(self) -> list[dict]:
         return [t for t in self.tools() if t["name"] in MUSIC_NAMES]
+
+    def _ask_mentat_now(self, heard: str) -> str:
+        """Mentat asked by the house, with his words as they were said, and Core only wording the answer (the routed flow: no tools to forget to call or to write as text)."""
+        result = self.run_tool("ask_mentat", {"question": heard})
+        messages = self.history[-2 * MEMORY_TURNS:] + [{"role": "user", "content": f"{heard}\n\n[The ask_mentat tool's answer for this request: {result}]"}]
+        try:
+            resp = self._create(need_words=True, model=self.model, max_tokens=600, system=self.system(), messages=messages)
+            words = " ".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
+        except Exception:                                             # noqa: BLE001 — it stayed away: the plain apology below
+            words = ""
+        return ANNOTATION.sub("", TEXT_CALL.sub("", PHANTOM.sub("", words))).strip() or "Mentat answered, and then my brain wandered off. Ask me again."
 
     def _second_try(self, text: str, messages: list, nudge: str, tools: list[dict], fallback: str, tools_ran=None) -> str:
         """One more go after a claim with no tool: `nudge` says so, `tools` are what it may call. A tool that runs is its answer; otherwise its words stand only when they take

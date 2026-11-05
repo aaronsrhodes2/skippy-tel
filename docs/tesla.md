@@ -19,6 +19,9 @@ Tesla's servers ──(his own tokens)── TeslaMate ─┬─ Postgres   ever
 - **The portal**: the **Car** tile (`/car`, `portal/car_web.py`): battery and charge limit, range in miles, charging, locks and doors,
   inside/outside °F, the named place, sentry mode. **Skippy's `car_status`** tool, so "how's the car?" works in the chat and by voice.
   Both are the Captain's alone (tool_policy `car`; no grant opens the page), because they include where the car is.
+- **The house voice** (`services/satellite/car.py`, 2026-11-04): the same `car_status` for the hub's brain, read only, straight from the car reader (`:7351`, no reporter in
+  between): percent, miles, °F, home or away (no coordinates, only a place TeslaMate has named), and how old the reading is when the car is asleep. Core left to itself
+  answered "I do not have access to your car's systems", then "locked" for a car it had not looked at, so a plain question about the car runs the tool before the model speaks.
 
 Set up on skippy-core: `sudo bash core/install/tesla.sh --apply` (it makes `/etc/skippy-core/tesla.env` with the encryption key and the
 database password, serves :4000 and :7351 to the tailnet, sets `CORE_TESLA=1` and repairs). Check it: `sudo bash core/install/tesla.sh --check`.
