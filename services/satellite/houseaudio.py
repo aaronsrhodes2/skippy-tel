@@ -8,6 +8,7 @@ Everything here is read-only and never raises: a radio that does not answer is a
 """
 from __future__ import annotations
 
+import re
 import threading
 import time
 
@@ -149,8 +150,56 @@ MUSIC_ROUTINES = ("morning", "homecoming")                                      
 RECENT_RAW = 400                                                                                 # HouseLog.recent keeps the last N RAW records (wake and action events too) before the commands and routines are picked
 
 
-def music_happened(records: list[dict]) -> bool:
-    """Does the house log show a music tool (a command's tools, an action) or a routine's music (started, or left off because he said stop) in these records?"""
+KINDS = ("start", "stop", "skip", "volume", "move", "dj")                                        # musicguard.CLAIM_KINDS (a test keeps the two alike): what a record can show was done
+# What a log record shows was DONE to the music, in the kinds musicguard reads out of a claim ("I paused the music" is a `stop`, "I played jazz" a `start`). The check of a true answer about the
+# past was "any music record of the last three hours", so with only a play_music in the log "Did you stop the music?" - "Yes, I paused it at 7:31" was excused (the review of 2026-11-05, round 2).
+ACT_KINDS = {"pause": "stop", "resume": "start", "play": "start", "next": "skip", "previous": "skip", "tired": "skip", "louder": "volume", "quieter": "volume", "volume": "volume"}      # the music tool's actions
+# The tools that leave no action record (housemem.ACTIONS: only `music` and `play_music` do), and so are known by the command's tool list alone: what each CAN have done, since the record does not say.
+TOOL_KINDS = {"play_music": {"start", "move"}, "spotify": {"start"}, "audiobook": {"start", "stop", "skip"}, "speakers": {"move", "start", "stop"}, "dj_mode": {"dj"}}
+STOP_OUTCOMES = ("routine_stop", "sign_off")                                                      # a command the hub ended with a stop of the house audio (hub.py _also_stop_audio)
+# His words, for a command of the music tool whose action is not in the log (the hub writes an action record beside the command; an older log, or a stop that ended a routine, has none). Every kind that matches is shown.
+_SAID = (("stop", re.compile(r"\b(?:stop|pause|halt|silence|silent|mute|quiet|enough|hush|shush|shut|kill|cut|quit|end|cease|off|no more)\b")),
+         ("volume", re.compile(r"\b(?:louder|quieter|softer|volume|turn (?:\w+ ){0,2}(?:up|down)|too (?:loud|quiet|soft)|lower|raise|crank)\b")),
+         ("skip", re.compile(r"\b(?:next|skip|previous|last (?:song|track)|go back)\b")),
+         ("start", re.compile(r"\b(?:play|resume|unpause|continue|start|shuffle|put on)\b")))
+
+
+def record_kinds(r: dict) -> set:
+    """What this house-log record shows was done to the music (KINDS): the music tool's action when the log has it, else his words; the tools that leave no action by what they can do; a routine's
+    music. Empty for a record that shows no music thing, and for a question ('what's playing')."""
+    kind = r.get("kind")
+    if kind == "routine":
+        outcome = str(r.get("outcome") or "")
+        return ({"stop"} if "off" in outcome else {"start"}) if "music" in outcome else set()       # "left the music off: he said stop" / "started the music"
+    if kind not in ("command", "action"):
+        return set()
+    shown: set = set()
+    for tool in {r.get("tool")} | {t for t in (r.get("tools") or []) if isinstance(t, str)}:
+        if tool == "music":
+            act = str(r.get("act") or "").lower()
+            if act:
+                if act in ACT_KINDS:
+                    shown.add(ACT_KINDS[act])
+            elif r.get("outcome") in STOP_OUTCOMES:
+                shown.add("stop")
+            else:
+                said = str(r.get("words") or "").lower()
+                shown.update(k for k, rx in _SAID if rx.search(said))
+        elif tool in TOOL_KINDS:
+            shown |= TOOL_KINDS[tool]
+    return shown
+
+
+def music_happened(records: list[dict], kinds=None) -> bool:
+    """Does the house log show a music tool (a command's tools, an action) or a routine's music (started, or left off because he said stop) in these records? With `kinds` (what a reply says
+    was done: musicguard.claim_kinds) the log must show EVERY one of them: a play does not excuse a claim of a pause."""
+    if kinds:
+        need = {kinds} if isinstance(kinds, str) else set(kinds)
+        for r in records:
+            need -= record_kinds(r)
+            if not need:
+                return True
+        return False
     for r in records:
         kind = r.get("kind")
         if kind == "routine" and "music" in str(r.get("outcome") or ""):
@@ -167,10 +216,11 @@ class Audio:
     def __init__(self, radio, routines=None, hlog=None):
         self.radio, self.routines, self.hlog = radio, routines, hlog
 
-    def music_lately(self) -> bool:
-        """Did a music tool or a routine's music really run lately (the house log)? So 'Did you stop the music?' - 'Yes, at 7:31' is checked against it, not cut as a claim."""
+    def music_lately(self, kinds=None) -> bool:
+        """Did a music tool or a routine's music really run lately (the house log)? So 'Did you stop the music?' - 'Yes, at 7:31' is checked against it, not cut as a claim. `kinds`: what the
+        answer claims was done ({"stop"} for 'I paused it'): then the log must show that very thing, every one of them, not just any music."""
         try:
-            return self.hlog is not None and music_happened(self.hlog.recent(limit=RECENT_RAW))
+            return self.hlog is not None and music_happened(self.hlog.recent(limit=RECENT_RAW), kinds)
         except Exception:                                          # noqa: BLE001
             return False
 

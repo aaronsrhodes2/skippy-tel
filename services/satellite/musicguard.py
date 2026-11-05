@@ -11,7 +11,8 @@ Three questions, each with its own check:
 A sentence with once / until / unless / whenever / if promises nothing and is skipped.
 A question about the house ("why is the Enclave playing metal?") is answered by describing it: a state in the answer is no claim. A request worded as a question ("how about some jazz
 upstairs?", "can I get some metal on the Enclave?") is no such question. A question about what HAPPENED ("did you stop the music?") answered in the past ("Yes, I paused it at 7:31.") is
-no claim either when the house log shows a music tool or a routine's music really ran lately (classify's `happened`); a claim of NOW ("Playing jazz now.") always is (2026-11-05 review).
+no claim either when the house log shows that very thing really done lately (classify's `happened(kinds)`: "I paused the music" needs a pause or a stop in the log, "I played it" a play, "I turned it down" a
+volume change; a play does not excuse a pause, 2026-11-05 round 2); a claim of NOW ("Playing jazz now.") always is (2026-11-05 review).
 
   asked  + claim            -> reask   (ONE more model call, the music tools only, his words quoted, "only if those words ask for music")
   commanded + loose claim   -> reask   (shadow only: brain.py logs it and leaves the reply)
@@ -24,6 +25,7 @@ tests/test_sat_musicguard.py before changing a pattern: each one is there for a 
 """
 from __future__ import annotations
 
+import inspect
 import re
 
 import mixes
@@ -90,6 +92,22 @@ MUSIC_ACTION = re.compile("|".join(f"(?:{p})" for k, p in PATTERNS.items() if k 
 # really ran lately (classify's `happened`) those patterns are no claim in the answer to a question about what happened; a claim of NOW ("Playing jazz now.") still is (the review of 2026-11-05).
 HISTORY_KEYS = {"past_open", "perfect", "move", "dj_verb"}
 MUSIC_NOW = re.compile("|".join(f"(?:{p})" for k, p in PATTERNS.items() if k not in STATE_KEYS and k not in HISTORY_KEYS), re.I)
+# What a past-tense claim says was DONE (2026-11-05, round 2: the check against the house log was "any music record in the last three hours", so with only a play_music in the log a lie about
+# a pause stood). The kinds are read from the claim's OWN verb (the first one of what HISTORY_KEYS match, and the ones joined to it by "and" / "then" / a comma: "I paused the music and lowered the
+# volume"), never from every verb of the sentence ("I paused the music, and the maid started a movie" claims no start); houseaudio.record_kinds says what a log record shows.
+CLAIM_KINDS = ("start", "stop", "skip", "volume", "move", "dj")                                                            # houseaudio.KINDS (a test keeps the two alike)
+_HISTORY_RX = [re.compile(PATTERNS[k], re.I) for k in sorted(HISTORY_KEYS)]                                                # the patterns of a past-tense claim
+_VERB_KIND = {"paused": "stop", "stopped": "stop", "halted": "stop", "muted": "stop", "silenced": "stop", "killed": "stop",
+              "played": "start", "started": "start", "queued": "start", "shuffled": "start", "resumed": "start", "unpaused": "start", "unmuted": "start", "cued": "start", "fired": "start",
+              "lined": "start", "put": "start", "skipped": "skip", "raised": "volume", "lowered": "volume", "cranked": "volume", "bumped": "volume", "boosted": "volume",
+              "moved": "move", "sent": "move", "routed": "move", "shifted": "move", "moving": "move", "sending": "move", "routing": "move", "shifting": "move"}
+_PARTICLE_VERBS = ("turned", "switched")                                                                                    # "turned the music off / down / on": the particle says which
+_VERB_RX = re.compile(r"\b(" + "|".join([*_VERB_KIND, *_PARTICLE_VERBS, "switching", "enabled", "disabled", "activated", "set"]) + r")\b")
+_DJ_VERBS = {"turned", "switched", "switching", "enabled", "disabled", "activated", "started", "stopped", "set", "put"}      # "turned DJ mode off", "stopped DJ mode": the dj_mode tool, whatever the verb
+_JOINED = re.compile(r"(?:\band|\bthen|,)\s+(?:(?:then|also|just|already|and)\s+)*$")                                      # what may stand between two verbs of ONE claim
+_VOLUME_WORDS = re.compile(r"\b(?:volume|louder|quieter|softer)\b")
+_PARTICLE = re.compile(r"\b(up|down|off|on)\b")
+_PARTICLE_KIND = {"up": "volume", "down": "volume", "off": "stop", "on": "start"}
 
 LOOSE = {   # claims that name nothing, so they only mean something after a music request
     "gerund_open": rf"{OPEN}(?:now )?{GERUND_V}\b(?![^.!?\n]{{0,80}}{FINITE})",
@@ -134,6 +152,8 @@ COMMAND = re.compile(
 _INFO = re.compile(r"^(?:do|does|did|why|how|what|who|which|when|where|is|are|was|were|can i|may i|should i|could i|tell me about|have you)\b")
 _INFO_OK = re.compile(r"what'?s playing|what is playing|what (?:song|track)|who (?:sings|is singing|sang)")
 _REQUEST = re.compile(r"^(?:can i|could i|may i|how about|what about|why not|why don'?t you|when you|do you mind|would you mind|is it possible|are you able|is there a way)\b")      # a request, worded as a question
+_CUE = re.compile(rf"\b(?:paus\w*|resum\w*|skip\w*|mut\w*|turn\w* (?:it|that|this|the \w+) (?:up|down|off|on)|put\w* (?:it|on)|dj|shuffle|{PLACE})\b")      # a question is a request for MUSIC only with a music word, a place or a transport verb in it
+_IF = re.compile(r"\b(?:if|whether)\b")                                                                                                                  # "can I get some metal if she leaves?": a condition, not a plain request
 _PAST_Q = re.compile(r"^(?:did|have you|has|was|were|why did|why was|why were|when did|what happened|what did|how come)\b")                  # a question about what happened, not about how things stand
 _AFFIRM = re.compile(r"^(?:yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|please do|please|that'?s (?:what i (?:just )?said|right|it|correct)|correct|affirmative|exactly|right)\b")
 _QUESTION = re.compile(r"\?")
@@ -157,10 +177,19 @@ def _affirms_offer(w: str, prev: str) -> bool:
     return bool(_AFFIRM.match(w)) and len(w) < 40 and tail.rstrip().endswith("?") and bool(MUSIC_ASK.search(tail))
 
 
+def _requests(heard: str, w: str) -> bool:
+    """A request worded as a question ("how about some jazz upstairs?", "can I get some metal on the Enclave?", "do you mind pausing it?", "would you mind turning it down?"), with no condition
+    in it. `w` is plain(heard), which has lost its "would you": _REQUEST is read on the words before that too."""
+    return bool((_REQUEST.match(w) or _REQUEST.match(_LEADIN.sub("", (heard or "").lower()).strip(" ?!.,"))) and not _IF.search(w)
+                and (MUSIC_ASK.search(w) or _CUE.search(w)))      # ("can I get a timer for ten minutes?" asks for no music: a false "Music is now playing" to it is cut, never asked again)
+
+
 def asked_music(heard: str, prev: str = "") -> bool:
     w = plain(heard)
     if _AFFIRM.match(w) and len(w) < 40:                           # "Yes." / "Go ahead." / "Yes, that's what I just said.": the turn before offered music
         return _affirms_offer(w, prev)
+    if _requests(heard, w):                                        # a request is an ask whatever its shape (2026-11-05, round 2): describing() lets "how about some jazz upstairs?" be answered
+        return True                                                # with a claim, so a false claim of it is asked again; read as "not asked" it was retracted and nothing ever played
     if (_INFO.match(w) and not _INFO_OK.search(w)) or _HYPOTHETICAL.search(w):      # "is it ok to play music at night?", "would you play metal if I asked?"
         return False
     return bool(MUSIC_ASK.search(w))
@@ -196,6 +225,46 @@ def history(heard: str) -> bool:
     return describing(heard) and bool(_PAST_Q.match(plain(heard)))
 
 
+def _verb_kinds(verb: str, after: str) -> set[str]:
+    """What one verb of a claim says was done. `after`: the sentence from the verb on (the particle of "turned the music off" can stand beyond the end of what the claim pattern matched)."""
+    near = after[:30]
+    if verb in _DJ_VERBS and "dj mode" in near:
+        return {"dj"}
+    if verb in _VERB_KIND:
+        return {_VERB_KIND[verb]}
+    if verb in _PARTICLE_VERBS and _VOLUME_WORDS.search(near):
+        return {"volume"}
+    if verb in _PARTICLE_VERBS:
+        p = _PARTICLE.search(" ".join(after.split()[:5]))
+        return {_PARTICLE_KIND[p.group(1)]} if p else ({"move"} if verb == "switched" else set())
+    if verb == "switching":
+        return {"move"}
+    if verb == "set" and (_VOLUME_WORDS.search(near) or re.search(rf"\b(?:to|at) {NUM}\b", near)):      # "set the volume to six", "set the stereo to seven"
+        return {"volume"}
+    return set()
+
+
+def _span_kinds(span: str, tail: str) -> set[str]:
+    """The kinds of one claim (`span`, lower case, a match of HISTORY_KEYS; `tail`, the rest of its sentence): its own verb, and the verbs joined to it by 'and' / 'then' / a comma."""
+    found: set[str] = set()
+    for i, v in enumerate(_VERB_RX.finditer(span)):
+        if i and not _JOINED.search(span[:v.start()]):
+            continue                                               # "I paused the music, and the maid started a movie": that verb is the maid's, not a claim
+        found |= _verb_kinds(v.group(1), span[v.end():] + tail)
+    return found
+
+
+def claim_kinds(text: str) -> frozenset:
+    """What the past-tense claims of a reply ("I paused the music at 7:31", "Stopped the music.") say was done: a subset of CLAIM_KINDS. Empty when the verb is not one it reads ("I set the
+    stereo to seven"): then there is nothing to match against the log but the fact that some music thing happened."""
+    found: set[str] = set()
+    for s in _sentences(text):
+        for rx in _HISTORY_RX:
+            for m in rx.finditer(s):
+                found |= _span_kinds(m.group(0).lower(), s[m.end():].lower())
+    return frozenset(found)
+
+
 def music_claimed(text: str, describing: bool = False, past_ok: bool = False) -> bool:
     rx = (MUSIC_NOW if past_ok else MUSIC_ACTION) if describing else MUSIC_CLAIM
     return any(rx.search(s) for s in _sentences(text))
@@ -208,9 +277,20 @@ def music_loose(text: str) -> bool:
 MUSIC_TOOLS = {"play_music", "music", "speakers", "dj_mode", "spotify", "audiobook"}
 
 
-def _happened(fn) -> bool:
+def _takes_kinds(fn) -> bool:
+    """Can this `happened` check be handed the kinds? One from before round 2 (a lambda: True, a method of no argument) takes none and is asked as it always was."""
     try:
-        return bool(fn()) if callable(fn) else False
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL) for p in params)
+
+
+def _happened(fn, kinds=None) -> bool:
+    try:
+        if not callable(fn):
+            return False
+        return bool(fn(kinds) if kinds and _takes_kinds(fn) else fn())
     except Exception:                                              # noqa: BLE001 — a log that cannot be read excuses nothing
         return False
 
@@ -218,15 +298,17 @@ def _happened(fn) -> bool:
 def classify(heard: str, prev: str, text: str, tools: list[str], happened=None):
     """-> (action, why). action: None (leave it) | 'reask' (he asked, nothing music ran: re-ask with the music tools only) | 'retract' (he did not ask:
     say plainly nothing was played, with NO tools, so nothing can start). why: 'claim' | 'loose' | 'silent'.
-    `happened`: a function (or None) that says whether the house log shows a music tool or a routine's music lately; only a question about what happened ("did you stop the music?") whose
+    `happened`: a function (or None) that says whether the house log shows that thing really done lately; only a question about what happened ("did you stop the music?") whose
     answer says in the past what was done ("Yes, I paused the music at 7:31.") asks it, and then the answer is true, not a claim: (None, 'history'), which Brain.reply also takes as
-    'leave it' for the older claim check (CLAIMED: "I paused ...")."""
+    'leave it' for the older claim check (CLAIMED: "I paused ..."). A `happened` that takes an argument is handed the kinds the answer claims (claim_kinds: a frozenset of CLAIM_KINDS,
+    "stop" for "I paused it") and must find EVERY one of them in the log (a play does not excuse a pause); one that takes none, or an answer whose verbs are not read, asks as before:
+    did any music thing happen?"""
     if not text or any(t in MUSIC_TOOLS for t in tools):
         return None, None
     asked = asked_music(heard, prev)
     about = describing(heard)
     if music_claimed(text, about):
-        if about and history(heard) and not music_claimed(text, about, past_ok=True) and _happened(happened):
+        if about and history(heard) and not music_claimed(text, about, past_ok=True) and _happened(happened, claim_kinds(text)):
             return None, "history"
         return ("reask" if asked else "retract"), "claim"
     if about:                                                      # a question about the house answered with how things stand: nothing to ask again or cut

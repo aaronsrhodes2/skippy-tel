@@ -19,6 +19,7 @@ local model) only words it. Figures are the sources' own (PLATINUM 21: Skippy co
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import math
 import os
@@ -100,6 +101,15 @@ def hm_of(text: str) -> tuple[int, int]:
 def clock_words(ts: float) -> str:
     t = time.localtime(ts)
     return time.strftime("%I:%M %p", t).lstrip("0").replace(":00 ", " ")
+
+
+def takes_a_day(fn) -> bool:
+    """Does the extra take the day to ask about? google_home's first_tomorrow does; a bare `async def first(): ...` (an older caller, a test's stand-in) is called as it was."""
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL) for p in params)
 
 
 def plain_headlines(found: list, n: int = 5) -> str:
@@ -248,7 +258,7 @@ class Daily:
             self.start("bedtime", room)
             return True
         if MORNING_RE.match(c):
-            self.start("morning", room)
+            self.start("morning", room, mark=True)                    # his own "good morning": the day has had its briefing
             return True
         if HOME_RE.match(c):
             self.arrived_at = None
@@ -289,14 +299,18 @@ class Daily:
         if self.asking is not None and self.asking["room"] is not room and self.asking["room"].name == room.name:
             self.asking["room"] = room
         req = self.dir / "request.json"
-        if req.exists() and not self.busy and room.mode != "busy":   # `python daily.py run morning` (from this PC, or a session testing it)
+        if req.exists() and not self.busy and room.mode != "busy":   # `python daily.py run morning` (from this PC, or a session testing it): a test, it does not mark the day
             try:
                 name = json.loads(req.read_text(encoding="utf-8")).get("routine")
             except (OSError, ValueError, AttributeError):
                 name = None
             req.unlink(missing_ok=True)
             if name in ("morning", "bedtime", "homecoming"):
-                self.start(name, room)
+                lt0 = time.localtime(self.clock())
+                # A test run before the briefing's slot must not mark the day (at 03:00 it would cancel the 06:50 one); one asked for AFTER the slot (before 11:00) is the day's briefing, or
+                # the scheduled one would start right behind it at the next tick and say it all twice (round 2 of the 2026-11-05 review).
+                late = name == "morning" and lt0.tm_hour < 11 and (lt0.tm_hour, lt0.tm_min) >= hm_of(self.morning_time(time.strftime("%Y-%m-%d", lt0)))
+                self.start(name, room, mark=late)
                 return
         now = self.clock()
         lt = time.localtime(now)
@@ -328,7 +342,7 @@ class Daily:
             self.state["last_morning"] = today
             self._save()
             if await asyncio.to_thread(self.is_home):
-                self.start("morning", room)
+                self.start("morning", room, mark=True)                # (marked above already: the scheduled start is the day's briefing)
             else:
                 self.log(f"[{room.name}] (morning routine: he isn't home; skipped)")
                 self._record("routine", routine="morning", outcome="away")
@@ -520,7 +534,10 @@ class Daily:
         stereo = self.stereo() if self.stereo is not None else None
         return getattr(stereo, "pauses", 0) + self.stops
 
-    def start(self, name: str, room, **opts) -> None:
+    def start(self, name: str, room, mark: bool = False, **opts) -> None:
+        """Start a routine. `mark`: this morning run is the day's briefing, so the scheduled one does not repeat it (his own "good morning", or the clock's start).
+        A run asked for through request.json (`python daily.py run morning`, a session testing it) is not: at 03:00 it would mark the day and the 06:50 briefing
+        would never start."""
         if self.busy:
             self.run.cancelled = True
             self.run.task.cancel()
@@ -532,7 +549,7 @@ class Daily:
             if self._arrival_stops is not None:                       # a stop between the car getting home and his being heard counts as well
                 self.run.pauses = min(self.run.pauses, self._arrival_stops)
             self._arrival_stops = None
-        if name == "morning":                                         # run by hand ("good morning") or by the clock: the day has had its briefing, the scheduled one does not repeat it
+        if name == "morning" and mark:                                # run by hand ("good morning") or by the clock: the day has had its briefing, the scheduled one does not repeat it
             self.state["last_morning"] = time.strftime("%Y-%m-%d", time.localtime(self.clock()))
             self._save()
         self.run.task = asyncio.ensure_future(self._go(self.run))
@@ -1092,10 +1109,13 @@ class Daily:
         return steps + [Step("", make=self.anything_else, last=True)]
 
     async def plan_tomorrow(self) -> str | None:
-        """An early first event tomorrow moves tomorrow's morning earlier (SKIPPY_MORNING_LEAD_MIN before it, never before 04:30)."""
-        fn = self.extras.get("first_tomorrow")
-        ts = await fn() if fn is not None else None
+        """An early first event on the morning this bedtime leads to moves that morning earlier (SKIPPY_MORNING_LEAD_MIN before it, never before 04:30). The
+        calendar is asked about that very morning (_next_morning(), "2026-11-05"): after midnight it is today's date, not today's + 1, which is the day the
+        briefing line names too. An extra that takes no day (an older caller, a test's stand-in) is called as it was."""
         tomorrow = self._next_morning()
+        fn, ts = self.extras.get("first_tomorrow"), None
+        if fn is not None:
+            ts = await (fn(tomorrow) if takes_a_day(fn) else fn())
         over = self.state.setdefault("morning_override", {})
         for d in [d for d in over if d < time.strftime("%Y-%m-%d", time.localtime(self.clock()))]:
             over.pop(d)
@@ -1157,7 +1177,8 @@ class Daily:
 
 
 def main(argv=None) -> int:
-    """python daily.py run morning|bedtime|homecoming : the running hub starts it in the routine room within a second."""
+    """python daily.py run morning|bedtime|homecoming : the running hub starts it in the routine room within a second. (A morning run asked for this way is a test:
+    it does not mark the day, so the scheduled briefing still comes.)"""
     import argparse                                                   # noqa: PLC0415
     ap = argparse.ArgumentParser(description=main.__doc__)
     ap.add_argument("cmd", choices=["run"])

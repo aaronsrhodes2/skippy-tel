@@ -48,25 +48,43 @@ PRESENT_S = 20 * 60                                             # a voice heard 
 HUSH_S = 45                                                     # ... but not in the last this many seconds: never talk over people
 AFTER_TURN_S = 180                                              # nor this soon after he last spoke to Skippy
 STARTER_ANSWER_S = 180                                          # an offered starter still takes "Skippy, tell me more" this long
-# What Whisper writes for noise it cannot read (2026-11-04 08:12: "Thanks for watching!" was taken as a command): never a thing said to the house. Only a sentence
-# that IS the phrase counts (the review of 2026-11-05): "Skippy, turn off the lights. Thanks for watching!" keeps its command, and a real sentence that merely holds
-# the words ("thank you for watching the kids", "please subscribe me to the weather alerts", "put the subtitles by default on the TV") reaches the house.
+STOP_AUDIO_WAIT_S = 3.0                                         # a plain "stop" waits this long for the radio's pause and then signs off anyway (the radio's own call allows 40 s, and the room is deaf all that time)
+# What Whisper writes for noise it cannot read (2026-11-04 08:12: "Thanks for watching!" was taken as a command): never a thing said to the house. A sentence that
+# merely holds the words is another matter (the review of 2026-11-05): "Skippy, turn off the lights. Thanks for watching!" keeps its command, and a real sentence ("thank you
+# for watching the kids", "please subscribe me to the weather alerts", "put the subtitles by default on the TV") reaches the house. The longer outros are noise too (round 2:
+# "Thanks for watching, see you next time." and "Please subscribe to my channel and like the video." came through as commands, which the first filter had dropped): a sentence
+# that STARTS with the phrase is noise unless the words right after it make it about something (what is watched, who is subscribed to what), and a stock goodbye in the
+# sentence right behind a dropped outro is that video's own.
 _FOR_WATCHING = r"(?:and )?(?:thanks?|thank you)(?: (?:so|very) much)? for watching(?:[ ,]+(?:everyone|everybody|guys|folks|friends|y'all|you all))?"
-ARTIFACT = re.compile(rf"^\W*(?:{_FOR_WATCHING}|please subscribe(?: to (?:my|the|our|this) channel)?|subtitles? by(?! default)\b.*|.*amara\.org.*)\W*$", re.I)
+# what right after "for watching" makes it about something real ("... the kids", "... over the house", "... it for me"); "... my (new) video", "... this channel" do not
+_WATCHED = (r"(?:(?:the|a|an|some|another|my|our|your|his|her|their|this|that|these|those)\s+(?!(?:\S+\s+){0,2}?(?:video|channel|episode|stream|vlog|tutorial|clip|content|lesson|lecture|presentation|podcast)s?\b)"
+            r"|(?:it|him|them|me|us|over|out|after)\b)")
+# ... and right after "please subscribe" ("... me to the alerts", "... to the weather alerts", "... my daughter to ..."); "... (to) my channel", "... and hit the bell" do not
+_SUBSCRIBED = (r"(?:(?:me|us|him|her|them|it)\b|(?:the|my|our|your|his|her|their|this|that)\s+(?!(?:\S+\s+){0,2}?channel\b)"
+               r"|to\s+(?!(?:(?:the|my|our|your|his|her|their|this)\s+)?(?:\S+\s+){0,2}?channel\b))")
+_LEAD_IN = r"(?:(?:so|ok|okay|alright|all right|well|oh|hey|hi|hello|guys|everyone|everybody|folks|friends)\b\W*)*"        # "Hi everyone, thanks for watching!"
+_SUBSCRIBE_ASK = r"please (?:(?:like|share|comment)\W+(?:and\W+)?)*subscribe"                                                   # "please subscribe", "please like, share and subscribe"
+ARTIFACT = re.compile(rf"^\W*(?:{_LEAD_IN}(?:{_FOR_WATCHING}\b(?!\s+{_WATCHED})|{_SUBSCRIBE_ASK}\b(?!\s+{_SUBSCRIBED})).*|subtitles? by(?! default)\b.*|.*amara\.org.*)\W*$", re.I | re.S)
 ARTIFACT_TAIL = re.compile(rf"[,;]?\s*\b{_FOR_WATCHING}\W*$", re.I)                  # ... or the end of a command that ran on into it: "turn off the lights, thank you for watching"
+_CLOSING = (r"(?:(?:i|we)(?:\W?ll| will) )?(?:see|catch) (?:you|ya)\b|(?:talk|speak) to you\b|(?:good ?)?bye\b|take care\b|until next time\b"
+            r"|have a (?:great|good|nice|wonderful|lovely) (?:day|one|week|weekend|night|time)\b|(?:don\W?t forget|remember) to\b|(?:please )?(?:(?:like|share|comment|and)\W+)*subscribe\b|hit the bell\b")
+OUTRO_MORE = re.compile(rf"^\W*(?:and |so )?(?:{_CLOSING})", re.I)                  # "Thanks for watching. See you next time.": the second sentence, only ever behind a dropped outro
 
 
 def without_artifacts(text: str) -> tuple[str, list[str]]:
     """(what is left of `text` when the sentences Whisper makes up for noise are taken out, the sentences taken out). Nothing left: the whole of it was noise."""
     kept, dropped = [], []
+    behind = False                                              # the sentence before this one was an outro, or ended in one: a stock goodbye now is that video's
     for sentence in re.split(r"(?<=[.!?])\s+", (text or "").strip()):
         if not sentence:
             continue
-        if ARTIFACT.match(sentence):
+        if ARTIFACT.match(sentence) or (behind and OUTRO_MORE.match(sentence)):
             dropped.append(sentence)
+            behind = True
             continue
         trimmed = ARTIFACT_TAIL.sub("", sentence).strip()
-        if trimmed and trimmed != sentence:
+        behind = bool(trimmed) and trimmed != sentence
+        if behind:
             dropped.append(sentence[len(trimmed):].strip(" ,;"))
             sentence = trimmed
         kept.append(sentence)
@@ -714,7 +732,10 @@ class Room:
         if run is None or not self._house_audio_playing():      # (the routine's own "Music off." may have got there first)
             return []
         try:
-            said = await asyncio.to_thread(run, "music", {"action": "pause"})
+            said = await asyncio.wait_for(asyncio.to_thread(run, "music", {"action": "pause"}), STOP_AUDIO_WAIT_S)
+        except asyncio.TimeoutError:                            # a radio that took the poll but not the call: the room stays BUSY (deaf) only this long, not for the call's 40 s; its pause may still land
+            self.log(f"[{self.name}] (could not stop the house audio: the radio did not answer within {STOP_AUDIO_WAIT_S:g} s)")
+            return []
         except Exception as e:                                  # noqa: BLE001 — the word still did what it did
             self.log(f"[{self.name}] (could not stop the house audio: {type(e).__name__}: {e})")
             return []
@@ -1640,7 +1661,7 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
         said = radio.tool(name, args, getattr(room, "name", ""))
         if starts:
             import houseaudio                                   # noqa: PLC0415
-            houseaudio.note_start("his own request" if name in PLAYS else "his resume")   # the chat can say why the music is on
+            houseaudio.note_start("his own request" if name in PLAYS else "his resume", ok=houseaudio.start_ok(said))   # the chat can say why the music is on: for a start that started something (the radio away, or "Nothing in his library matches ...", left the note of the one before)
         return said
     return MUSIC_TOOLS, run
 

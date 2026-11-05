@@ -137,8 +137,12 @@ NOT_AN_ORDER = re.compile(r"^\W*(?:(?:hey |ok |okay )?skippy\W+)?(?:(?:so|but|an
                           r"|(?:do|have)\s+(?:you(?! mind\b| think you could\b)|i|we|they|these|those|the|my|any|anyone|anything|someone|there)\b"      # ("do it", "have it ready", "do you mind turning it off" are orders)
                           r"|(?:what|how)\b(?! about)|(?:which|who|whom|whose|where|when|why)\b"                                             # ("how about some jazz" is an order)
                           r"|you (?:can|could|cannot|can't|don't|do not|have|are|should|must)\b|i (?:wish|bet|think|heard|thought|guess|suppose|wonder)\b|(?:if|whether)\b)", re.I)
-# "what can you do for me": a reply that says what it cannot do is the right answer, not a denial to ask again
-ASKS_ABILITY = re.compile(r"\bwhat (?:else )?(?:can|can't|cannot|could|do|are) you\b|\bwhat (?:are|is) your (?:abilities|capabilities|tools|limits)\b|\byour (?:abilities|capabilities|tools)\b|\bwhat you (?:can|could) do\b", re.I)
+# "what can you do for me": a reply that says what it cannot do is the right answer, not a denial to ask again. Only a question about abilities in general is one: the first version took
+# any "what do you / what are you ..." for it, so "what do you know about my car", "what do you see in the car" and "what are you seeing outside" got no second try after "I do not have
+# access to your car's systems" (the review of 2026-11-05, round 2: the car incident of 2026-11-04 again, for the phrasings no pre-route claims).
+ASKS_ABILITY = re.compile(r"\bwhat (?:else |all |exactly )?(?:can|could|can't|cannot) you (?:not |actually |really |even |possibly )?(?:do|help|control|handle)\b"
+                          r"|\bwhat (?:else )?(?:are|do) you (?:actually |really )?(?:able|capable|good (?:at|for)|do|know how to (?:do|control|handle))\b"
+                          r"|\bwhat (?:are|is) your (?:abilities|capabilities|tools|limits)\b|\byour (?:abilities|capabilities|tools)\b|\bwhat you (?:can|could) do\b", re.I)
 
 
 def retry_may(name: str, args: dict, ordered: bool) -> bool:
@@ -297,6 +301,9 @@ _MODES = [("discovery", re.compile(r"\b(?:(?:on|in) )?(?:the )?discover(?:y)?(?:
 _FILLER = re.compile(r"\b(?:play|shuffle|put on|start|turn on|throw on|give me|let'?s hear|bilby|music|songs?|tracks?|tunes|some|my|his|the|me|a few|"
                      r"of|from|mode|please|now|for me|to|all|any|stuff|everything|anything|a bit of|a little|and)\b")
 _ONLY_A_STOP = {"off", "out", "mute", "muted", "quiet", "silence", "silent", "enough", "quit", "sleep"}      # what is left of "bilby, music off" once the filler words are gone
+# What is left of "bilby, turn off DJ mode" / "tell Bilby to turn off shuffle" / "bilby, kill the dj": a way of switching something OFF, which is for the model (the dj_mode tool), never a song to look for.
+# Searched for, nothing matched and the closest, the whole library, started on shuffle (round 2 of the 2026-11-05 review: the stop guards had sent these here).
+_OFF_FORM = re.compile(r"^(?:turn|switch|shut|power|cut|kill|end|halt|quit|mute|stop|pause|silence|disable|cease|no more|enough|i want|i need)\b|\b(?:off|out)$")
 
 def fix_bilby(heard: str) -> str:
     return BILBY_HEARD.sub("Bilby", heard or "")
@@ -410,6 +417,8 @@ def music_grammar(heard: str) -> dict | None:
     if rest in _ONLY_A_STOP and not any(k in out for k in ("playlist", "artist", "album", "song")):
         return None                                           # "bilby, music off": what is left is a stop, not a song called "off" (the library was searched for it and shuffled when nothing matched)
     genre = next((g for g in mixes.GENRE_WORDS if re.fullmatch(rf"{re.escape(g)}(?: music| songs)?", rest)), None)
+    if not genre and _OFF_FORM.search(rest) and not _VERB.match(w) and not any(k in out for k in ("playlist", "artist", "album", "song")):
+        return None                                           # "bilby, turn off dj mode": the model's (a genre such as "power metal" is still a genre, and a play verb still plays)
     if genre:
         out["genre"] = genre
     elif rest:
@@ -515,22 +524,28 @@ _STOP_NOT = re.compile(r"\b(?:when|if|after|until|unless|before|once|while|becau
 _STOP_AUDIO = (r"(?:(?:the|that|this|those|these|my|his|some|any|every|all(?: of)?)\s+)*"
                r"(?:music|audio|sounds?|noise|stereo|speakers?|radio|shuffle|tunes?|songs?|tracks?|playlist|playback|spotify|dj(?: mode)?|mix|beats?"
                r"|audiobook|book|story|podcast|(?:heavy )?metal|rock|punk|goth|industrial|techno|jazz|classical|ambient|darkwave)(?:\s+music)?")
+# The review of 2026-11-05, round 2: "DJ mode off" and "shuffle off" were the modes' switches (the dj_mode tool), but "turn off dj mode", "turn dj mode off" and "stop the dj" still PAUSED the music:
+# the verb forms read dj and shuffle as audio words. DJ mode has its own tool, so `dj` is never a stop in any form (_NO_DJ). Shuffle is a mode's switch in the forms that turn something OFF
+# ("turn off shuffle", "shuffle off", "no more shuffle": _NO_MODE), but "stop the shuffle" stops what plays, as test_sat_stop_bilby pins.
+_NO_DJ = r"(?!.*\bdj\b)"
+_NO_MODE = r"(?!.*\b(?:dj|shuffle)\b)"
 _STOP_RX = [re.compile(p) for p in (
-    rf"^(?:stop|pause|halt|end|kill|cut|silence|mute|quiet|quit|cease)\s+(?:playing\s+)?{_STOP_AUDIO}$",
+    rf"^{_NO_DJ}(?:stop|pause|halt|end|kill|cut|silence|mute|quiet|quit|cease)\s+(?:playing\s+)?{_STOP_AUDIO}$",
     r"^(?:stop|pause|halt|silence|mute|quiet|quit|cease)\s+(?:everything|all of it|it all)$",
-    rf"^(?:turn|switch|shut|power|cut|kill)\s+(?:off|out)\s+{_STOP_AUDIO}$",
-    rf"^(?:shut|power)\s+down\s+{_STOP_AUDIO}$",
-    rf"^(?:turn|switch|shut|power|cut|kill)\s+{_STOP_AUDIO}\s+(?:off|out)$",
-    rf"^(?:shut|power)\s+{_STOP_AUDIO}\s+down$",
+    rf"^{_NO_MODE}(?:turn|switch|shut|power|cut|kill)\s+(?:off|out)\s+{_STOP_AUDIO}$",
+    rf"^{_NO_MODE}(?:shut|power)\s+down\s+{_STOP_AUDIO}$",
+    rf"^{_NO_MODE}(?:turn|switch|shut|power|cut|kill)\s+{_STOP_AUDIO}\s+(?:off|out)$",
+    rf"^{_NO_MODE}(?:shut|power)\s+{_STOP_AUDIO}\s+down$",
     r"^(?:stop|quit|cease)\s+playing$",
-    rf"^(?:no more|enough(?:\s+(?:of|with))?)\s+{_STOP_AUDIO}$",
-    rf"^make\s+{_STOP_AUDIO}\s+stop$",
-    rf"^i\s+(?:want|need|would like)\s+{_STOP_AUDIO}\s+to\s+(?:stop|be\s+(?:off|quiet|stopped))$",
+    rf"^{_NO_MODE}(?:no more|enough(?:\s+(?:of|with))?)\s+{_STOP_AUDIO}$",
+    rf"^{_NO_DJ}make\s+{_STOP_AUDIO}\s+stop$",
+    rf"^{_NO_DJ}i\s+(?:want|need|would like)\s+{_STOP_AUDIO}\s+to\s+(?:stop|be\s+(?:quiet|stopped))$",
+    rf"^{_NO_MODE}i\s+(?:want|need|would like)\s+{_STOP_AUDIO}\s+to\s+be\s+off$",
     # No verb: "music off", "Bilby, music off", "stereo off" (it used to start the library, searching it for a song called "off"). "DJ mode off" and "shuffle off" are the modes' switches, not a stop.
-    rf"^(?!.*\b(?:dj|shuffle)\b){_STOP_AUDIO}\s+off$",
-    rf"^(?!.*\b(?:dj|shuffle)\b)no\s+{_STOP_AUDIO}$",
-    rf"^(?!.*\b(?:dj|shuffle)\b)(?:that'?s|that is|it'?s|it is)\s+enough\s+{_STOP_AUDIO}$",
-    rf"^(?!.*\b(?:dj|shuffle)\b)(?:i'?m|i am)\s+(?:done|finished|through)\s+with\s+{_STOP_AUDIO}$",
+    rf"^{_NO_MODE}{_STOP_AUDIO}\s+off$",
+    rf"^{_NO_MODE}no\s+{_STOP_AUDIO}$",
+    rf"^{_NO_MODE}(?:that'?s|that is|it'?s|it is)\s+enough\s+{_STOP_AUDIO}$",
+    rf"^{_NO_MODE}(?:i'?m|i am)\s+(?:done|finished|through)\s+with\s+{_STOP_AUDIO}$",
 )]
 _QUIETER = re.compile(rf"^(?:turn\s+{_STOP_AUDIO}\s+down|turn\s+down\s+{_STOP_AUDIO})$")            # "turn that music down", "turn the sound down", "turn down the radio": the volume, never a stop
 _STOP_BARE = re.compile(r"^(?:stop|pause|halt|enough|enough already|that'?s enough|shut up|be quiet|quiet|silence|mute|mute it|mute that|stop it|stop that|stop this|stop all that"
@@ -888,10 +903,13 @@ class Brain:
     def music_tools(self) -> list[dict]:
         return [t for t in self.tools() if t["name"] in MUSIC_NAMES]
 
-    def _music_happened(self) -> bool:
-        """Does the house log show a music tool or a routine's music lately? musicguard asks only when a history answer ('Did you stop the music?' - 'Yes, at 7:31') claims one."""
+    def _music_happened(self, kinds=None) -> bool:
+        """Does the house log show a music tool or a routine's music lately? musicguard asks only when a history answer ('Did you stop the music?' - 'Yes, at 7:31') claims one, and says
+        which `kinds` of thing it claims ({"stop"} for 'I paused it'): the log must show those, not just any music. An audio that cannot be asked about a kind proves nothing for it."""
         try:
-            return bool(self.audio is not None and self.audio.music_lately())
+            if self.audio is None:
+                return False
+            return bool(self.audio.music_lately(kinds) if kinds else self.audio.music_lately())
         except Exception:                                             # noqa: BLE001
             return False
 

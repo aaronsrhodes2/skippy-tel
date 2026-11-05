@@ -6,12 +6,15 @@ me up in the morning"). ONE clock for the whole house, ticking on its own: an al
   sleeps (SATELLITE_WAKE_PLACE, default "upstairs"): the Enclave on skippy-core's aux, and the pods of the rooms up there once they exist.
 - Ringing: a chime, then "Good morning, it's 7:00 ...", once a minute, a little louder each time, until he answers or GIVE_UP_S goes by.
   Everything that falls due together, or while one rings, rings as ONE (an alarm leads; a reminder's words and a second place follow it): a reminder
-  never silences an alarm. Unanswered for ALERT_AFTER_S, his phone hears it too (the portal's /home/alert: a Discord DM with the Alarms page's Stop and Snooze).
+  never silences an alarm. A reminder that rides an alarm's ring is said in its first two rings (a ring of reminders alone goes on until each has been said twice),
+  and a reminder that rode a ring which ended before a whole ring was said, or an alarm that fell due in the very tick the ring gave up, comes back a minute later (a
+  reminder that LED the ring and was stopped is not set again). Cancelling a repeating alarm that leads on his phone hands the ring to the next of them. Unanswered for ALERT_AFTER_S, his phone hears it too (the portal's /home/alert: a Discord DM with the Alarms page's Stop and Snooze).
 - He answers with any word to a pod (alarms.Alarms.answered: "stop", "snooze"), or the Stop / Snooze keys on his phone (the portal queues
   them; this clock takes them on its next sync). Whatever comes first wins everywhere: the ringing is this one object's.
 - The portal hears the whole schedule every SYNC_S (every second while one rings), so when this hub is down at alarm time the portal
   alerts his phone itself (portal/alarms.py), and the evening before it checks that the hub is reporting.
-- Timers: each room's own (timers.py, the brain sets them), ticked here, so one that runs out while its pod is away is still said upstairs.
+- Timers: each room's own (timers.py, the brain sets them), ticked here, so one that runs out while its pod is away is still said upstairs. A timer's line is
+  said after the ring, in the background: it never holds the clock, or the next ring, up.
 """
 from __future__ import annotations
 
@@ -94,14 +97,16 @@ class AlarmClock:
         self.alarms = alarms_mod.Alarms(self.state / "alarms" / "house.json" if self.state else None, clock=clock, log=log, wake_place=self.wake_place)
         self._merge_old()
         self.timers: dict = {}                          # room -> timers.Timers
-        self.ringing: dict | None = None                # {"alarm", "key", "since", "rings", "next", "alerts", "also": [(alarm, key)]}: everything due together rings as one (_fire)
+        self.ringing: dict | None = None                # {"alarm", "key", "since", "rings", "next", "alerts", "also": [(alarm, key)], "heard": {key: rings}}: everything due
+                                                        # together rings as one (_fire); "heard" counts the whole rings a reminder's words were said in (it is said twice)
         self.fired: deque = deque(maxlen=30)            # what went off, and how it ended, for the portal
         self.done: list = []                            # command ids the portal sent, carried out (sent back on the next sync)
         self.changed = asyncio.Event() if _loop_running() else None
         self._checked = ""                              # the date of the last evening check
         self._ring_task: asyncio.Task | None = None     # the ring being rung now (an answer cancels it between its parts)
         self._snoozed: dict[int, float] = {}            # snoozed copies still waiting to ring: id -> due (is_ringing: the morning briefing keeps quiet for them)
-        self._bg: set = set()                           # a timer's words waiting for a room's voice (_say_due)
+        self._bg: set = set()                           # the timers' lines being said, or waiting for a room's voice (_say_due)
+        self._lines = asyncio.Lock()                    # one timer's line at a time across the rooms (they were said one after the other while tick() waited on each; now they are started, not waited for)
         self.hub = None
 
     # ── the house's one list ──
@@ -202,22 +207,24 @@ class AlarmClock:
         r = self.ringing
         if r is not None and now >= r["next"]:
             a = r["alarm"]
-            limit = REMINDER_RINGS if a.kind == "reminder" else None
-            if (limit is not None and r["rings"] >= limit) or now - r["since"] >= GIVE_UP_S:
+            if (a.kind == "reminder" and self._all_said(r)) or now - r["since"] >= GIVE_UP_S:
                 self._end("gave_up")
                 if a.kind == "alarm":
                     await self.alert(f"⏰ Your {a.hhmm} alarm rang for {GIVE_UP_S // 60} minutes and nobody answered. I've stopped it.")
             else:
                 r["rings"] += 1
                 r["next"] = now + RING_GAP_S
-                await self._ring_once(a, r["rings"], [m for m, _ in r.get("also") or []])
+                joined, lead_key = self._joined(r), r["key"]
+                if await self._ring_once(a, r["rings"], [m for m, _ in joined]):
+                    self._said(r, [(a, lead_key)] + joined)
                 # (an answer that came in while it rang ended it between the parts: there is nothing left to tell his phone he hasn't answered)
-                if self.ringing is r and a.kind == "alarm" and ((r["alerts"] == 0 and now - r["since"] >= ALERT_AFTER_S)
-                                                                or (r["alerts"] == 1 and now - r["since"] >= ALERT_AGAIN_S)):
+                lead = r["alarm"]                       # (the alarm that led may have been cancelled on his phone while it rang: _cancel_lead)
+                if self.ringing is r and lead.kind == "alarm" and ((r["alerts"] == 0 and now - r["since"] >= ALERT_AFTER_S)
+                                                                   or (r["alerts"] == 1 and now - r["since"] >= ALERT_AGAIN_S)):
                     r["alerts"] += 1
-                    await self.alert(f"⏰ Your {a.hhmm} alarm is ringing" + (f" ({a.label})" if a.label else "") + f" and you haven't answered. "
+                    await self.alert(f"⏰ Your {lead.hhmm} alarm is ringing" + (f" ({lead.label})" if lead.label else "") + f" and you haven't answered. "
                                      f"Stop or snooze it: {PORTAL_PAGE}")
-        await self._timers_due()                        # after the ring, never before it: a timer's line waits for the room's voice, a ring must not wait for that
+        await self._timers_due()                        # after the ring, never before it, and never waited for: a timer's line is said in the background (_say_due)
         await self.evening_check()
 
     def _fire(self, now: float) -> None:
@@ -242,11 +249,32 @@ class AlarmClock:
         rest = [m for m in members if m is not lead]
         if cur is not None and lead[1] == cur["key"]:
             cur["also"], cur["next"] = rest, now        # the newcomer is heard at once, in a ring of the one that is going
-            if lead[0].kind != "alarm":
-                cur["rings"] = 0                        # a reminder rings twice: the one that joined it gets its two as well
-        else:
-            self.ringing = {"alarm": lead[0], "key": lead[1], "since": now, "rings": 0, "next": now, "alerts": 0, "also": rest}
+        else:                                           # (a reminder that was leading and is now one of the others keeps the count of the rings it was said in)
+            self.ringing = {"alarm": lead[0], "key": lead[1], "since": now, "rings": 0, "next": now, "alerts": 0, "also": rest,
+                            "heard": dict(cur.get("heard") or {}) if cur is not None else {}}
         self.poke()
+
+    @staticmethod
+    def _joined(r: dict) -> list:
+        """The others in the ring (_fire) that are in THIS ring, as (alarm, key): an alarm in every one, a reminder in its first REMINDER_RINGS (a reminder is said
+        twice, whatever it rides on: its words, and its place, are not repeated for as long as the alarm goes unanswered)."""
+        heard = r.get("heard") or {}
+        return [m for m in r.get("also") or [] if m[0].kind != "reminder" or heard.get(m[1], 0) < REMINDER_RINGS]
+
+    @staticmethod
+    def _said(r: dict, members: list) -> None:
+        """A whole ring was rung (not cut short by an answer): everything in it has been rung once more (a reminder is said twice; an alarm that rode a ring has been RUNG, which is what
+        keeps it from being put back when the ring gives up, _end)."""
+        heard = r.setdefault("heard", {})
+        for m, k in members:
+            heard[k] = heard.get(k, 0) + 1
+
+    @staticmethod
+    def _all_said(r: dict) -> bool:
+        """A ring of reminders alone (an alarm in a ring rings until it is answered, or gives up) is over when each has been said REMINDER_RINGS times: one that
+        joins a reminder's ring gets its two rings as well."""
+        heard = r.get("heard") or {}
+        return all(heard.get(k, 0) >= REMINDER_RINGS for k in [r["key"]] + [k for _, k in r.get("also") or []])
 
     def _end(self, how: str, by: str = "") -> None:
         r, self.ringing = self.ringing, None
@@ -255,33 +283,72 @@ class AlarmClock:
         task = self._ring_task
         if task is not None and not task.done():
             task.cancel()                               # a ring is several parts one after the other: an answer stops the ones that have not begun
+        heard, back = r.get("heard") or {}, set()
+        for m, k in r.get("also") or []:                # the reminders that rode this ring and were never said: the answer, or the end of the ring, came before one
+            if (m.kind == "reminder" or how == "gave_up") and not heard.get(k) and self._put_back(m):       # whole ring (an answer to the alarm is not an answer to them); an ALARM that fell due in the tick the ring gave up was never rung at all (2026-11-05, round 2)
+                back.add(k)
         keys = {r["key"]} | {k for _, k in r.get("also") or []}
         for f in self.fired:
             if f["key"] in keys and f["ended"] is None:
                 f["ended"], f["by"], f["after_s"] = how, by or None, round(self.clock() - (r["since"] if f["key"] == r["key"] else f["at"]))
+                if f["key"] in back:
+                    f["ended"], f["by"] = "snoozed", "not heard"
         self.poke()
 
-    async def _timers_due(self) -> None:
-        """The rooms' timers that have run out are said in their rooms."""
-        for room, timers in list(self.timers.items()):
-            for t in timers.due():
-                self.log(f"[{room}] timer done: {t.label}")
-                await self._say_due(room, f"Your {alarms_mod.timer_name(t.label)} timer is done.")
-                self.poke()
+    def _put_back(self, reminder) -> bool:
+        """A reminder that was never said is not lost (nor, when its ring gave up, an alarm that fell due in that very tick and so was never rung): a one-off was deleted from
+        the list as it fell due, so it is set again, as a one-shot about a minute on, to ring on its own (`Alarms.snooze`: the same words, the same place). True when it was set."""
+        try:
+            copy = self.alarms.snooze(reminder, 1)
+        except (ValueError, TypeError, OverflowError) as e:
+            self.log(f"(alarm clock: the reminder {reminder.label!r} was not heard and could not be set again: {e})")
+            return False
+        self.log(f"(alarm clock: the reminder {reminder.label!r} was not heard: again at {alarms_mod.say_when(copy.due, self.clock())})")
+        self._remember_snooze(copy)
+        return True
 
-    async def _say_due(self, room: str, text: str) -> None:
-        """A timer's words in its room, waited for no longer than a ring waits for the floor (FLOOR_WAIT_S). The room's voice lock has no bound: a long reply or a
-        routine's part (daily SAY_LIMIT_S, 240 s) would hold this clock's next ring behind a timer's one line. If the room is still talking after that the words
-        are said when it is done, in the background, and the clock goes on."""
+    def _cancel_lead(self, r: dict) -> None:
+        """The alarm that leads the ring was cancelled on his phone (a repeating one: a one-off has left the list as it fell due). Only its own record ends: the
+        others in the ring (_fire) were not cancelled, so the next of them leads and the ring goes on as it was, a minute apart and louder each time. Alone in the
+        ring, its cancelling ends the ring."""
+        others = list(r.get("also") or [])
+        if not others:
+            self._end("cancelled", "phone")
+            return
+        for f in self.fired:
+            if f["key"] == r["key"] and f["ended"] is None:
+                f["ended"], f["by"], f["after_s"] = "cancelled", "phone", round(self.clock() - r["since"])
+        heard = r.get("heard") or {}
+        lead = (next((m for m in others if m[0].kind == "alarm"), None)                                  # an alarm still leads
+                or next((m for m in others if heard.get(m[1], 0) < REMINDER_RINGS), others[0]))          # else a reminder not yet said twice (one that was is not read out a third time as the lead)
+        r["alarm"], r["key"], r["also"] = lead[0], lead[1], [m for m in others if m is not lead]
+        self.poke()                                     # (a reminder that leads on is said by its own count, `heard`: twice)
+
+    async def _timers_due(self) -> None:
+        """The rooms' timers that have run out are said in their rooms, each line in the background (_say_due): the clock goes straight on."""
+        started = False
+        for room, timers in list(self.timers.items()):
+            for t in timers.due():                      # (each timer is handed out once: its line is started once)
+                try:
+                    self.log(f"[{room}] timer done: {t.label}")
+                    self._say_due(room, f"Your {alarms_mod.timer_name(t.label)} timer is done.")
+                except Exception as e:                  # noqa: BLE001 — one timer's line that cannot be started costs the others, and the rings, nothing
+                    self.log(f"(alarm clock: the line for the {t.label!r} timer could not be started: {type(e).__name__}: {e})")
+                started = True
+                self.poke()
+        if started:
+            await asyncio.sleep(0)                      # the lines get their first turn now (a room that is free says it at once), not when the clock next waits
+
+    def _say_due(self, room: str, text: str) -> asyncio.Task:
+        """A timer's words in its room, started and left to say themselves. Never waited for: tick() used to wait up to FLOOR_WAIT_S for the line, and the next ring
+        then waited its own floor on top of that, so an alarm that fell due while the clock was parked on a timer's line started up to twice that late. The room's
+        voice lock has no bound (a long reply, a routine's part: daily SAY_LIMIT_S, 240 s) and is FIFO: the line waits for whoever holds it, and a ring that comes
+        after it queues behind it for the floor (FLOOR_WAIT_S at most, then rings anyway); one that is already ringing is done before the line is started, so the line
+        is said right after it. `_bg` keeps the task until it is done, and an exception in the line is logged there (_said_due), never raised into the clock."""
         task = asyncio.ensure_future(self.say_in(room, text))
         self._bg.add(task)
         task.add_done_callback(self._said_due)
-        try:
-            await asyncio.wait_for(asyncio.shield(task), FLOOR_WAIT_S)
-        except asyncio.TimeoutError:
-            self.log(f"(alarm clock: {room} was still talking after {FLOOR_WAIT_S} s: the timer's words wait for it)")
-        except Exception:                               # noqa: BLE001 — _said_due says what went wrong; the clock goes on to its rings
-            pass
+        return task
 
     def _said_due(self, task) -> None:
         self._bg.discard(task)
@@ -289,16 +356,17 @@ class AlarmClock:
             self.log(f"(alarm clock: a timer's words were not said: {type(task.exception()).__name__}: {task.exception()})")
 
     # ── ringing ──
-    async def _ring_once(self, a, n: int, also=()) -> None:
+    async def _ring_once(self, a, n: int, also=()) -> bool:
         """One ring as a task of its own, so that an answer (`_end`) can stop it between its parts: the box, which rings after the Enclave has finished, never
-        rings an alarm he has already stopped."""
+        rings an alarm he has already stopped. True when the whole ring was rung, False when an answer cut it short."""
         task = self._ring_task = asyncio.ensure_future(self.ring(a, n, also))
         try:
             await task
+            return True
         except asyncio.CancelledError:
             me = asyncio.current_task()
             if task.cancelled() and (me is None or me.cancelling() == 0):
-                return                                  # stopped by an answer, not cancelled from outside
+                return False                            # stopped by an answer, not cancelled from outside
             raise
         finally:
             if self._ring_task is task:
@@ -355,11 +423,12 @@ class AlarmClock:
             await asyncio.gather(*jobs, return_exceptions=True)
 
     @contextlib.asynccontextmanager
-    async def _floor(self):
+    async def _floor(self, who: str = "the ring"):
         """The house has one voice (the Captain, 2026-11-05: "I don't generally want two skippys speaking at the same time"; at 07:10 the alarm's rings were
         spoken over the morning routine's lines, because only the box's part of a ring waited for a room's voice lock and the Enclave's did not). A ring
         takes every room's voice lock, so a line already being said ends first and nothing new is said over the ring; the rooms' own ring (hub.Room.ring)
-        is then told it holds the floor. After FLOOR_WAIT_S the ring speaks anyway: a long line must never keep him asleep."""
+        is then told it holds the floor. After FLOOR_WAIT_S the ring speaks anyway: a long line must never keep him asleep. (A timer's line for a pod that is
+        away takes the floor the same way, `who`: it has no voice lock of its own to wait for.)"""
         held, deadline = [], time.monotonic() + FLOOR_WAIT_S
         try:
             for name, room in sorted((getattr(self.hub, "rooms", {}) or {}).items()):
@@ -370,7 +439,7 @@ class AlarmClock:
                     await asyncio.wait_for(lock.acquire(), max(0.01, deadline - time.monotonic()))
                     held.append(lock)
                 except asyncio.TimeoutError:
-                    self.log(f"(alarm: {name} was still talking after {FLOOR_WAIT_S} s: the ring speaks over it)")
+                    self.log(f"(alarm: {name} was still talking after {FLOOR_WAIT_S} s: {who} speaks over it)")
             yield held
         finally:
             for lock in held:
@@ -416,16 +485,18 @@ class AlarmClock:
         await r.ring(tone, voice, text, quiet=quiet, wait=wait, **held)
 
     async def say_in(self, room: str, text: str) -> None:
-        """A timer's words in its room (its pod and the announcement outputs), or, its pod away, the announcement outputs alone."""
-        r = (getattr(self.hub, "rooms", {}) or {}).get(self.hub_room(room))
-        if r is not None:
-            await r.announce(text)
-            return
-        import speaker_out                              # noqa: PLC0415
-        kinds = speaker_out.announce_kinds(self.env)
-        voice = await self._voice(text)
-        if kinds and voice:
-            await self._play_outs(kinds, [voice], 1.0)
+        """A timer's words in its room (its pod and the announcement outputs), or, its pod away, the announcement outputs alone, once the house's voice is free."""
+        async with self._lines:                         # one timer's line at a time across the rooms: two rooms' timers that fall due together are said one after the other, not over each other
+            r = (getattr(self.hub, "rooms", {}) or {}).get(self.hub_room(room))
+            if r is not None:
+                await r.announce(text)
+                return
+            import speaker_out                          # noqa: PLC0415
+            kinds = speaker_out.announce_kinds(self.env)
+            voice = await self._voice(text)
+            if kinds and voice:
+                async with self._floor("the timer's line"):         # (tick() no longer waits for this line, so it takes its turn on the house's voice as a ring does)
+                    await self._play_outs(kinds, [voice], 1.0)
 
     # ── answering ──
     def answered(self, words: str, by: str = "") -> str | None:
@@ -545,7 +616,7 @@ class AlarmClock:
                 r = self.ringing
                 if ok and r is not None:
                     if r["alarm"].id == gone:
-                        self._end("cancelled", "phone")
+                        self._cancel_lead(r)            # only its own record ends; the next of the ring leads on (alone, the ring ends)
                     else:                               # one of the others in the ring: the ring goes on without it
                         keys = {k for m, k in r.get("also") or [] if m.id == gone}
                         r["also"] = [m for m in r.get("also") or [] if m[0].id != gone]

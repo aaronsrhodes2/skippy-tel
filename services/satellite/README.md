@@ -259,8 +259,21 @@ One clock for the house, ticking on its own (an alarm rings with every pod off t
   (`AlarmClock.wake_time(date)`, read from the schedule; an alarm between 04:30 and 11:00; no alarm that day: `SKIPPY_MORNING_AT`; an early first event can
   only move it earlier), waits while an alarm rings, and the bedtime line says when it comes. (2) A ring takes every room's voice lock (`AlarmClock._floor`):
   it waits up to `FLOOR_WAIT_S` (20 s) for a line being said to end, nothing new is said over the ring, and after 20 s it rings anyway. (3) A box that joins
-  the stereo's ring (the third) rings after the Enclave has finished and its echo has died away (`Room.ring`), never with it. Tests:
-  `test_sat_alarm_clock.py`, `test_sat_one_voice.py`, `test_sat_daily.py`.
+  the stereo's ring (the third) rings after the Enclave has finished and its echo has died away (`Room.ring`), never with it. (4) Things that fall due together,
+  or while one rings, ring as ONE (`_fire`): an alarm leads, a reminder's words and a second place follow it, one stop or snooze covers all, and a reminder
+  never silences an alarm. A reminder that rides an alarm's ring is said in its first two rings (a ring of reminders alone goes on until each has been said twice);
+  a reminder that rode a ring which ended before a whole ring was said, and an alarm that fell due in the very tick the ring gave up, is set again a minute on (a
+  reminder that LED the ring and was stopped is not); and cancelling a repeating alarm that leads, on his phone, hands the ring to the next of them. (5) `wake_time` applies the 04:30-11:00 window to each alarm before it takes the
+  first (a 03:30 one-off, or a snooze due at 00:05, hides nothing), and leaves out today's occurrence of a repeating alarm that first rings tomorrow. (6) The
+  briefing also holds while a snoozed alarm waits (`is_ringing`) and when the day's first alarm is under 7 minutes away (`daily.BRIEFING_NEEDS_S`), so one that
+  missed its slot starts after his answer, not into the ring. (7) His own "good morning" and the clock's scheduled start mark the day, so the scheduled briefing
+  does not repeat it; a run asked for through `request.json` (`python daily.py run morning`) does only once the briefing's slot has come (before 11:00): an earlier test
+  run, at 03:00 say, leaves the day alone, or the 06:50 briefing would never start. (8) Bedtime's alarm-and-briefing line is worked out in
+  turn, after `plan_tomorrow` has stored an early event's time, so it names one briefing time; `plan_tomorrow` asks the calendar (`first_tomorrow(day)` in
+  `google_home.py`) about the very morning the bedtime leads to, which after midnight is today's date. (9) Timers are said after the ring, in the background
+  (`_say_due`), and never hold the clock or a ring up: the line waits for the room's voice lock like any other (a pod that is away takes the house's, as a ring
+  does). (10) A cancelled `RoutedOut.play` (an answer ended the ring) stops its clip on the router, so "Alarm off." is not said over the rest of the ring. Tests:
+  `test_sat_alarm_clock.py`, `test_sat_alarm_clock_r2.py`, `test_sat_one_voice.py`, `test_sat_daily.py`.
 
 ## Bilby's house radio: one station, the hubs are its remotes (`radio.py`, `station.py`, `radio_client.py`)
 

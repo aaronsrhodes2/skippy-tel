@@ -327,6 +327,20 @@ def _local(iso: str) -> str:
         return iso
 
 
+def _day_of(day, log=print) -> date | None:
+    """A day given as a date, a datetime or "YYYY-MM-DD"; None when none was given, or it cannot be read (the caller then asks about tomorrow)."""
+    if isinstance(day, datetime):
+        return day.date()
+    if isinstance(day, date):
+        return day
+    if day:
+        try:
+            return date.fromisoformat(str(day).strip()[:10])
+        except ValueError:
+            log(f"(google: {day!r} is not a day: asking about tomorrow)")
+    return None
+
+
 def clock_of(iso: str) -> str:
     try:
         return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone().strftime("%I:%M %p").lstrip("0")
@@ -343,8 +357,8 @@ def describe_events(events: list[dict]) -> str:
 
 
 def extras(g: Google, word, log=print) -> dict:
-    """daily.Daily's extras from his Google account: each an async () -> words (or None when there is nothing to say).
-    `word(task, material, max_tokens)` is Daily.aword (Core)."""
+    """daily.Daily's extras from his Google account: each an async () -> words (or None when there is nothing to say; first_tomorrow() -> a timestamp, and takes
+    the morning's date). `word(task, material, max_tokens)` is Daily.aword (Core)."""
     import asyncio                                                      # noqa: PLC0415
 
     async def run(fn, *a):
@@ -423,8 +437,12 @@ def extras(g: Google, word, log=print) -> dict:
         events = await run(g.events, today())
         return ("Today's calendar was:\n" + describe_events(events)) if events else None
 
-    async def first_tomorrow():
-        events = await run(g.events, today() + timedelta(days=1))
+    async def first_tomorrow(day=None):
+        """The first timed event of the morning the bedtime leads to, as a timestamp (None: none). `day`: that morning's date (a date or "2026-11-05"), which
+        daily.Daily.plan_tomorrow hands over so the calendar is asked about the same day it plans: after midnight that is today, not today + 1. Without a day,
+        tomorrow by his clock, as before."""
+        d = _day_of(day, log) or today() + timedelta(days=1)
+        events = await run(g.events, d)
         timed = [e for e in events or [] if not e["all_day"]]
         return datetime.fromisoformat(timed[0]["start"].replace("Z", "+00:00")).timestamp() if timed else None
 
