@@ -57,6 +57,21 @@ SPOKEN = (
     "{nohouse}He is standing in a room waiting for you, so get to it. The current date and time is {now}."
 )
 
+# What the house chat knows about the house's audio and about itself (the Captain, 2026-11-04: "the house chat seems to have no idea about the house it's in or the AI it has access to"
+# ... "needs to know how to talk to Bilby for audio"). Bilby is the ONE player: his music, Spotify and his audiobooks as one stream; the Enclave and the Sony each play it or not.
+BILBY = (
+    "\n\n## Bilby: the house's audio\n"
+    "Bilby is the ONE player for everything the house plays: his music library (about twenty thousand tracks), Spotify and his audiobooks. It is a single stream, the same everywhere "
+    "unless he narrows it (he is the only listener): the Enclave upstairs and the Sony downstairs each play it or do not. The box in the room is a microphone, a face and a "
+    "last-resort speaker; it never plays Bilby while a stereo is on. Your own voice ducks the stream while you speak. You talk to Bilby with tools, and only a tool changes anything:\n"
+    "- play_music starts something: what / genre / artist / album / song / playlist / mode (discovery, favorites) / shuffle. Leave speaker out unless he named a place.\n"
+    "- music steers it: pause (that is also 'stop', 'enough', 'be quiet', 'turn it off'), resume, next, previous, louder, quieter, volume (1 to 10), what (what is playing), favorite, tired.\n"
+    "- speakers moves it: everywhere, upstairs (the Enclave), downstairs (the Sony). To silence only one floor, move it to the other.\n"
+    "- dj_mode turns the beat-matched mixing on or off; spotify plays his Spotify; audiobook plays and steers a book (play, pause, skip, where, sleep timer).\n"
+    "'Stop', 'pause', 'enough' or 'turn it off' with nothing else named mean the house audio: call music with pause (and audiobook with pause if a book is playing). A routine "
+    "(morning, homecoming) may start the library; if he says stop, it stays off. Asked what is playing, or where, read the 'Right now' lines at the end of this prompt or call music with what. "
+    "Never say you played, stopped, moved or changed anything unless a tool just did it.\n"
+)
 ABILITIES = (
     "\n\n## What you are, and what you can reach from here\n"
     "You are Skippy, running on skippy-pc in his house; your thinking is done by Skippy Core, the local model on skippy-core. From this voice you act ONLY through these tools: {names}. "
@@ -356,12 +371,55 @@ def _first(w: str, rxs) -> dict | None:
     return None
 
 
-def music_route(heard: str) -> dict | None:
+# Stopping the house audio in every way he says it (the Captain, 2026-11-04: "stop Bilby" reached the model, which called nothing, and the metal played on for fifty minutes).
+# Bilby plays everything, so a stop with an audio word, or with Bilby named, is always a stop; a bare "stop" / "enough" / "shut up" is one only while the house is playing
+# (a person can say "stop" to anything). Never a conditional or a timed one ("stop the music when I leave", "in twenty minutes"): those are the model's.
+_STOP_NOT = re.compile(r"\b(?:when|if|after|until|unless|before|once|while|because|don'?t|do not|never|not|can'?t|won'?t|without|tomorrow|tonight|later|minutes?|hours?|seconds?)\b"
+                       r"|\b(?:in|at|for) (?:an? |\d)")
+_STOP_AUDIO = (r"(?:(?:the|that|this|those|these|all|all of|all the|my|his|some|any|every)\s+)*"
+               r"(?:music|audio|sounds?|noise|stereo|speakers?|radio|shuffle|tunes?|songs?|tracks?|playlist|playback|spotify|dj(?: mode)?|mix|everything|all of it|beats?"
+               r"|audiobook|book|story|podcast|(?:heavy )?metal|rock|punk|goth|industrial|techno|jazz|classical|ambient|darkwave)(?:\s+music)?")
+_STOP_RX = [re.compile(p) for p in (
+    rf"^(?:stop|pause|halt|end|kill|cut|silence|mute|quiet|quit|cease)\s+(?:playing\s+)?{_STOP_AUDIO}$",
+    rf"^(?:turn|switch|shut|power|cut|kill)\s+(?:off|out|down)\s+{_STOP_AUDIO}$",
+    rf"^(?:turn|switch|shut|power|cut|kill)\s+{_STOP_AUDIO}\s+(?:off|out|down)$",
+    r"^(?:stop|quit|cease)\s+playing$",
+    rf"^(?:no more|enough(?:\s+with)?)\s+{_STOP_AUDIO}$",
+    rf"^make\s+{_STOP_AUDIO}\s+stop$",
+    rf"^i\s+(?:want|need|would like)\s+{_STOP_AUDIO}\s+to\s+(?:stop|be\s+(?:off|quiet|stopped))$",
+)]
+_STOP_BARE = re.compile(r"^(?:stop|pause|halt|enough|enough already|that'?s enough|shut up|be quiet|quiet|silence|mute|mute it|mute that|stop it|stop that|stop this|stop all that"
+                        r"|cut it|cut it out|kill it|turn it off|turn that off|turn this off|turn off|switch off|shut off|power off|shut down|shut it off|shut that off|shut it down"
+                        r"|make it stop|make that stop|knock it off|no more|off)$")
+
+
+def stop_route(heard: str, playing: bool | None = None) -> dict | None:
+    """{"action": "pause"} when he is stopping what the house plays (music or a book), else None. `playing`: the house audio is on (None: not known, so the bare forms stay the model's)."""
+    s = re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", (heard or "").lower()).strip(" ?!.")
+    s = re.sub(r"[,;]+", " ", s)
+    s = re.sub(r"^(?:(?:please|just|hey|ok|okay|so|and|well|um|uh|now)\s+)+", "", s.strip())
+    s = re.sub(r"^(?:(?:can|could|would|will) you(?: please)?|i (?:want|need|would like) you to|go ahead and|you can)\s+", "", s)
+    s = " ".join(s.split())
+    for _ in range(2):
+        s = re.sub(r"\s+(?:please|now|right now|for me|thanks|thank you|already|immediately|at once|everywhere)$", "", s)
+    if not s or _STOP_NOT.search(s):
+        return None
+    named = bool(re.search(r"\bbilby\b", s))
+    if named:                                                         # "stop Bilby", "Bilby, stop", "tell Bilby to stop playing": Bilby is the audio word
+        s = " ".join(re.sub(r"\b(?:(?:tell|ask|have|get|make|let)\s+)?bilby(?:\s+to)?\b", " ", s).split())
+    if any(rx.match(s) for rx in _STOP_RX):
+        return {"action": "pause"}
+    if (named or playing) and _STOP_BARE.match(s):
+        return {"action": "pause"}
+    return None
+
+
+def music_route(heard: str, playing: bool | None = None) -> dict | None:
     w = re.sub(r"\s+(?:please|now)$", "", re.sub(r"^(?:please|can you|could you)\s+", "", re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", (heard or "").lower()).strip(" ?!.,")))
     if got := _first(w, MUSIC_RX):
         return got
     w = re.sub(r"\s+(?:a (?:bit|little|lot)|some|more)$", "", _peel(_words(heard))[0])
-    return _first(w, [*MUSIC_RX, *_MORE])
+    return _first(w, [*MUSIC_RX, *_MORE]) or stop_route(heard, playing) or stop_route(w, playing)       # the last: with the places peeled off, as the commands above
 
 
 def load_persona() -> str:
@@ -396,6 +454,7 @@ class Brain:
         self.guard: tuple = (None, None)                              # what the music claim guard did for the last reply: (reask|retract|None, claim|loose|silent|None)
         self._last = 0.0
         self.pre_route = None                                         # heard -> tool args for plain commands the model is unreliable at (hub.py: the audiobook); None = the model decides
+        self.audio = None                                             # houseaudio.Audio (hub.py): what Bilby plays now, said in the prompt and read by a bare "stop"
         self.news = news                                              # news.News: the `news` tool, "about what?", and the headlines it found last
         self.weather = weather                                        # weather.Weather: the `weather` tool (NWS, NOAA tides and buoys, Open-Meteo)
         self.car = car                                                # car.Car: the `car_status` tool (the Captain's Tesla, read only)
@@ -418,9 +477,10 @@ class Brain:
             offered = ("\n\nYou brought this up yourself a moment ago, unasked; if he wants more, talk only from these sources and say when they don't settle "
                        f"something:\n{self.offered['note']}")
         layout = house_layout.default().primer(getattr(self, "room", ""))   # the floors, rooms and speakers (house_layout.json), and where he is
-        return (self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse, music=music) + layout + self.abilities() + books + news
+        bilby = BILBY if any(t["name"] == "play_music" for t in self.extra_tools) else ""
+        return (self.persona + SPOKEN.format(now=self.now(), house=house, nohouse=nohouse, music=music) + layout + bilby + self.abilities() + books + news
                 + (weather_mod.PROMPT if self.weather is not None else "") + (car_mod.PROMPT if self.car is not None else "")
-                + (physics_mod.PROMPT if self.physics is not None else "") + offered)
+                + (physics_mod.PROMPT if self.physics is not None else "") + offered + self.live())
 
     def abilities(self) -> str:
         """What this voice can do, from the tools it really has: so it neither denies a tool nor claims one it lacks (2026-11-04). Out of reach: only what has no tool."""
@@ -429,6 +489,22 @@ class Brain:
         chat = (f"The Skippy chat on makerportal.live has {' and '.join(on for tool, (_, on) in ELSEWHERE.items() if tool not in names)}, and the private Skippy there writes code. "
                 if gone else "The private Skippy on makerportal.live writes code. ")
         return ABILITIES.format(names=", ".join(sorted(names)), gone="".join(out for out, _ in gone), chat=chat)
+
+    def live(self) -> str:
+        """The house audio right now (houseaudio.Audio.status), last in the prompt: what is playing, where, a book, a routine about to start the library."""
+        if self.audio is None:
+            return ""
+        try:
+            return "\n\n## Right now in the house\n" + self.audio.status()
+        except Exception:                                             # noqa: BLE001 — the prompt must never fail because the radio is away
+            return ""
+
+    def _house_playing(self) -> bool | None:
+        """Is anything playing in the house (the station or a book)? None when this brain cannot tell, so a bare "stop" is left to the model."""
+        try:
+            return bool(self.audio.playing()) if self.audio is not None else None
+        except Exception:                                             # noqa: BLE001
+            return None
 
     def offer(self, text: str, note: str) -> None:
         """He is about to say `text` unasked (starters.py): it joins his memory, with `note` (its sources) for the follow-up questions."""
@@ -538,7 +614,7 @@ class Brain:
         if not routed and any(t["name"] == "speakers" for t in self.extra_tools):
             tool, routed = "speakers", speakers_route(heard)         # "play it on the upstairs stereo": the music moves, it is not searched for (2026-11-04)
         if not routed and any(t["name"] == "music" for t in self.extra_tools):
-            tool, routed = "music", music_route(heard)               # "make it louder", "play the music again" (resume): before the grammar, which would search for "again" (2026-11-04)
+            tool, routed = "music", music_route(heard, self._house_playing())   # "make it louder", "play the music again" (resume): before the grammar, which would search for "again"; "stop Bilby", "enough" (2026-11-04)
         if not routed and any(t["name"] == "play_music" for t in self.extra_tools):
             tool, routed = "play_music", bilby_route(heard)          # "bilby everywhere": the hub didn't know Bilby was his music (2026-11-01)
         if routed:                                                    # the tool runs first; the model only words the answer, with no tools to forget to call
@@ -577,7 +653,7 @@ class Brain:
         self.guard = (action, why)                                    # the house log keeps it: the next count of claims needs no log archaeology
         if action == "retract":
             print(f"[brain] claimed music he did not ask for: {text[:80]!r}: cut, no tool", flush=True)
-            text = musicguard.strip_claims(text)
+            text = musicguard.strip_claims(text, musicguard.describing(heard))
         elif action == "reask" and why == "claim":
             print(f"[brain] claimed music with no music tool: {text[:80]!r}: asked again", flush=True)
             text = self._second_try(text, messages, REASK_MUSIC.format(heard=heard.replace('"', "'")), self.music_tools(), UNCLAIM_MUSIC)

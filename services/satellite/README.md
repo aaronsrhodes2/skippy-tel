@@ -267,6 +267,19 @@ can change it, or add to it, but they are not the players."* Bilby's music no lo
   the other floors play on.
 * **A hub restart never stops or skips the music:** nothing the hub holds plays; a pod tuned in keeps the radio's stream, and a hub that comes
   back finds it playing and leaves it alone. Tests: `tests/test_sat_radio.py`, `tests/test_sat_esphome.py` (the pod as tuner and remote).
+* **Stopping Bilby, and the chat knowing what Bilby is (the Captain, 2026-11-04):** *"Bilby plays all the audio, even Audible books ... a single audio
+  stream ... the house chat needs to know how to talk to Bilby for audio."* He said "stop the music" as he came in; the homecoming routine's own
+  library shuffle started it again 90 s later and it played on the Enclave for 50 minutes, while "stop Bilby" and the rest never reached a tool.
+  So: (1) `brain.stop_route` makes every way of stopping (`stop Bilby`, `turn it off`, `enough`, `kill the music`, `stop the heavy metal`, `no more
+  music`, `stop the book` ...) a `music` pause before the model runs; a stop with an audio word or Bilby named is always a stop, a bare `stop` /
+  `enough` / `shut up` only while the house plays (`houseaudio.Audio.playing()`), never a conditional or timed one. (2) The `music` pause pauses the
+  book AND the station (Bilby plays both; `hub.music_tools`). (3) A stop he gives after a routine began keeps that routine's library shuffle off
+  (`RadioClient.pauses` against `Run.pauses`, read by `Daily._music_on`). (4) The chat's prompt (`brain.BILBY`, `ABILITIES`, `Brain.live`) says what Bilby
+  is, how to talk to it (play_music / music / speakers / dj_mode / spotify / audiobook), the tools this voice really has and what it does not (his car,
+  Mentat, code), and, last, `houseaudio.Audio.status()`: what plays and where, volume, queue, a loaded book, a running routine, and who started the
+  music (`houseaudio.note_start`). A question about the house ("why is the Enclave playing metal?") answered with how things stand is no claim
+  (`musicguard.describing`). Tests: `tests/test_sat_stop_bilby.py`. Not yet one stream: an audiobook is still its own player (`audiobooks.py`) that
+  pauses the station; the next step is the book as a queue item of the station and each device opting in or out of the one stream.
 
 ## The Enclave on skippy-core, and several outputs in one room (`router.py`, `sync_outputs.py`)
 

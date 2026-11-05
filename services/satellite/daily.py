@@ -120,6 +120,7 @@ class Step:
 class Run:
     def __init__(self, name: str, steps: list[Step], room):
         self.name, self.steps, self.room = name, steps, room
+        self.pauses = 0                 # the stereo's count of his stops when the routine began: a stop after it vetoes the routine's music (Daily._music_on)
         self.skip_next = self.cancelled = False
         self.snooze_until = 0.0
         self.task: asyncio.Task | None = None
@@ -432,6 +433,7 @@ class Daily:
         self.news = getattr(room.brain, "news", None) or self.news
         steps = {"morning": self.morning_steps, "bedtime": self.bedtime_steps, "homecoming": self.homecoming_steps}[name](room, **opts)
         self.run = Run(name, steps, room)
+        self.run.pauses = getattr(self.stereo() if self.stereo is not None else None, "pauses", 0)
         self.run.task = asyncio.ensure_future(self._go(self.run))
         self._record("routine", routine=name, outcome="started")
         self.log(f"[{room.name}] routine: {name}")
@@ -1028,7 +1030,16 @@ class Daily:
             stereo = self.stereo() if self.stereo is not None else None
             if stereo is None:
                 return None
+            if self.run is not None and getattr(stereo, "pauses", 0) > self.run.pauses:
+                # He said stop after the routine began (2026-11-04: "stop the music" as he came in, and the homecoming routine's own shuffle started it again 90 s later and played for 50 minutes).
+                self.log(f"[{self.run.room.name}] routine {self.run.name}: the music stays off, he said stop")
+                self._record("routine", routine=self.run.name, outcome="left the music off: he said stop")
+                return None
             n = await stereo.shuffle()
+            if n and self.run is not None:
+                import houseaudio                                   # noqa: PLC0415 — so the chat can say why the music is on
+                houseaudio.note_start(f"the {self.run.name} routine")
+                self._record("routine", routine=self.run.name, outcome="started the music")
             return said if n else "I wanted to play your music, but Bilby's library isn't answering."
         return go
 

@@ -79,6 +79,10 @@ PATTERNS = {
     "stage": r"\*[^*\n]{0,40}\b(?:turns?|adjusts?|cranks?|twists?|spins?|flips?|presses|hits|pushes|turned|adjusted)\b[^*\n]{0,30}\b(?:dial|knob|volume|button|switch|record|vinyl|stereo|speakers?)\b[^*\n]{0,30}\*",
 }
 MUSIC_CLAIM = re.compile("|".join(f"(?:{p})" for p in PATTERNS.values()), re.I)
+# The patterns that describe how things stand ("DJ mode is currently enabled", "Volume is at seven", "X is playing on the Enclave"). To a question about the house ("Why was the Enclave playing
+# heavy metal?") a description is the answer, not a claim: the chat's prompt now carries what plays right now, so it answers from that (2026-11-04). The patterns that DO something stay claims.
+STATE_KEYS = {"state", "is_playing", "state3", "state4", "state5", "dj_state", "now_playing", "participle_state", "state2", "next"}
+MUSIC_ACTION = re.compile("|".join(f"(?:{p})" for k, p in PATTERNS.items() if k not in STATE_KEYS), re.I)
 
 LOOSE = {   # claims that name nothing, so they only mean something after a music request
     "gerund_open": rf"{OPEN}(?:now )?{GERUND_V}\b(?![^.!?\n]{{0,80}}{FINITE})",
@@ -171,8 +175,15 @@ def sentences(text: str):
     return _sentences(text)
 
 
-def music_claimed(text: str) -> bool:
-    return any(MUSIC_CLAIM.search(s) for s in _sentences(text))
+def describing(heard: str) -> bool:
+    """He asked about the house ("why is the Enclave playing metal", "how loud is it", "is anything on"), not for music: a state in the answer is a description."""
+    w = plain(heard)
+    return bool(_INFO.match(w)) and not _INFO_OK.search(w)
+
+
+def music_claimed(text: str, describing: bool = False) -> bool:
+    rx = MUSIC_ACTION if describing else MUSIC_CLAIM
+    return any(rx.search(s) for s in _sentences(text))
 
 
 def music_loose(text: str) -> bool:
@@ -188,8 +199,11 @@ def classify(heard: str, prev: str, text: str, tools: list[str]):
     if not text or any(t in MUSIC_TOOLS for t in tools):
         return None, None
     asked = asked_music(heard, prev)
-    if music_claimed(text):
+    about = describing(heard)
+    if music_claimed(text, about):
         return ("reask" if asked else "retract"), "claim"
+    if about:                                                      # a question about the house answered with how things stand: nothing to ask again or cut
+        return None, None
     if commanded(heard, prev) and music_loose(text):               # the loose tier needs a real command, not just a music word in his sentence
         return "reask", "loose"
     if commanded(heard, prev) and not _QUESTION.search(text):      # a music command answered with neither a tool nor a question
@@ -200,8 +214,9 @@ def classify(heard: str, prev: str, text: str, tools: list[str]):
 RETRACTED = "I have not played, moved or changed any music."
 
 
-def strip_claims(text: str) -> str:
+def strip_claims(text: str, describing: bool = False) -> str:
     """A reply that claims music he did not ask for, minus the claiming sentences, plus the plain truth: "It is nine. Also, I started some music" -> "It is nine. I have not
-    played, moved or changed any music." No model call, so nothing can start."""
-    keep = [s for s in _SPLIT.split(text or "") if s.strip() and (_COND.search(s) or not MUSIC_CLAIM.search(s))]
+    played, moved or changed any music." No model call, so nothing can start. `describing`: only the sentences that DO something go; how things stand stays."""
+    rx = MUSIC_ACTION if describing else MUSIC_CLAIM
+    keep = [s for s in _SPLIT.split(text or "") if s.strip() and (_COND.search(s) or not rx.search(s))]
     return " ".join(keep + [RETRACTED])

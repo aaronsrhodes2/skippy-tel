@@ -1109,6 +1109,7 @@ def build_rooms(env: dict):
     import daily as daily_mod                                    # noqa: PLC0415
     from brain import load_persona                               # noqa: PLC0415
     import radio_client                                          # noqa: PLC0415
+    import houseaudio                                            # noqa: PLC0415 — what Bilby plays now: the chat's prompt and a bare "stop"
     radio = radio_client.RadioClient.from_env(env, log=log)       # the house radio (radio.py, its own process): the hub is only its remote
 
     def stereo():
@@ -1168,6 +1169,7 @@ def build_rooms(env: dict):
         tools = audiobooks.combine(tools, house_clock.tools(name), house_lists.tools(), announce_tools(lambda: holder["room"], connected, env, loop))
         brain = Brain(client, brain_model, timers, hass=house, extra=tools, news=news_mod.News(env, log=log), weather=house_weather, car=house_car, physics=house_physics)
         brain.room = name                                        # the primer says which room of house_layout.json he is talking from
+        brain.audio = houseaudio.Audio(radio, lambda: holder.get("room"), routines, hlog)   # the prompt says what Bilby plays now (a book too) and what happened lately; a bare "stop" waits for it
         if book is not None:
             brain.pre_route = lambda heard: book_voice.pre_route(heard, holder["room"])
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
@@ -1400,8 +1402,12 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
         has_book = book is not None and getattr(book, "book", None) is not None
         if name == "music" and has_book and (book.playing or (room.last_media == "book" and not (radio is not None and radio.playing))):
             action = str(args.get("action") or "")
-            if action == "pause":                               # "stop" / "pause" while a book plays means the book
+            if action == "pause":                               # "stop" / "pause" stops what the house plays: the book, and the station too if it is on (Bilby plays both)
                 on_loop(book.pause())
+                if radio is not None and radio.playing and hasattr(radio, "tool"):
+                    return "Done: paused the audiobook. " + radio.tool(name, args, getattr(room, "name", ""))
+                if radio is not None and hasattr(radio, "pauses"):
+                    radio.pauses += 1                           # his stop, for a routine that has not started the music yet (daily._music_on)
                 return "Done: paused the audiobook."
             if action == "resume":
                 on_loop(book.resume())
@@ -1421,6 +1427,8 @@ def music_tools(room_of, loop, favorites=None, stereo=None):
         said = radio.tool(name, args, getattr(room, "name", ""))
         if starts:
             room.last_media = "stereo"
+            import houseaudio                                   # noqa: PLC0415
+            houseaudio.note_start("his own request" if name in PLAYS else "his resume")   # the chat can say why the music is on
         return said
     return MUSIC_TOOLS, run
 

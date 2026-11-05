@@ -27,6 +27,7 @@ class RadioClient:
         self.last: dict = {}
         self.ok = False
         self._warned = False
+        self.pauses = 0                                                   # how many stops came from him through the music tool: a routine that began before one leaves its music off (daily._music_on)
         self.box = _RemoteBox(self)
         if start:
             threading.Thread(target=self._poll, daemon=True, name="radio-poll").start()
@@ -76,6 +77,8 @@ class RadioClient:
     # ── what the hub asks ──
     def tool(self, name: str, args: dict, room: str = "") -> str:
         """One music tool, run by the radio (station.run). Blocking: the brain calls it from its worker thread."""
+        if name == "music" and str((args or {}).get("action") or "") in ("pause", "stop"):
+            self.pauses += 1                                              # his stop, counted even when the radio is away or already paused: it is what he asked for
         got = self.call("POST", "/tool", {"name": name, "args": args or {}, "room": room}, timeout=40.0)
         return (got or {}).get("said") or DOWN
 
@@ -107,6 +110,7 @@ class LocalRadio:
 
     def __init__(self, house, loop, favorites=None):
         self.house, self.loop, self.favorites = house, loop, favorites
+        self.pauses = 0
 
     @property
     def playing(self) -> bool:
@@ -114,6 +118,8 @@ class LocalRadio:
 
     def tool(self, name: str, args: dict, room: str = "") -> str:
         import station                                                    # noqa: PLC0415
+        if name == "music" and str((args or {}).get("action") or "") in ("pause", "stop"):
+            self.pauses += 1
         return asyncio.run_coroutine_threadsafe(station.run(self.house, name, args, room, self.favorites), self.loop).result(40)
 
 

@@ -56,6 +56,26 @@ class HouseLog:
         except OSError:
             return None
 
+    def recent(self, since_s: float = 3 * 3600, limit: int = 40) -> list[dict]:
+        """The last events, oldest first: today's file (and yesterday's, just after midnight) from the last `since_s` seconds. For the chat's "Recently in the house" lines (houseaudio.py)."""
+        now = self.clock()
+        out: list[dict] = []
+        for day in (now - 86400, now):
+            path = self.root / "log" / f"{time.strftime('%Y-%m-%d', time.localtime(day))}.jsonl"
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()[-400:]
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    rec = json.loads(line)
+                    at = time.mktime(time.strptime(str(rec.get("ts")), "%Y-%m-%dT%H:%M:%S"))
+                except (ValueError, TypeError, OverflowError):
+                    continue
+                if now - since_s <= at <= now + 60:
+                    out.append(rec)
+        return out[-limit:]
+
     def actions(self, room: str, calls: list[dict]) -> None:
         """One 'action' event per lights / timer / music tool call of a reply (a read-only question is only part of the command's tools)."""
         for c in calls:
