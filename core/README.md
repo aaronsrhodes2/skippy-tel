@@ -191,6 +191,16 @@ skippy-core sits in the bedroom with the TV on its HDMI. The TV is a console tha
   (`~/.config/wireplumber/wireplumber.conf.d/60-skippy-cards.conf`).
 - **skippy-pc:** Sunshine from winget (`LizardByte.Sunshine`, a Windows service); its web login `SUNSHINE_USER`/`SUNSHINE_PASSWORD` in
   the vault; web UI https://localhost:47990.
+- **skippy-pc's own sound** (2026-11-04): the stream plays on the PC too (`--audio-on-host`). With `--no-audio-on-host` Sunshine (2026.914,
+  empty sunshine.conf) mutes the PC by making "Steam Streaming Speakers" Windows' default playback device while a session lives, and puts it
+  straight back whenever anyone picks another ("Resetting sink to [virtual-Stereo...] after default changed" in
+  `C:\Program Files\Sunshine\config\sunshine.log`). The kiosk's session never ends, so games on the PC (EPSON PJ) had no sound. With host
+  audio on Sunshine leaves the default alone and captures whatever it is. The first session decides for all of them: a Moonlight client that
+  mutes the host (its default) and connects while none is up still takes the default for its own session and gives it back at its end.
+  (Sunshine's newer `external_audio` setting, not in 2026.914, is the
+  cleaner switch once Sunshine is updated.) **Look:** `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/audio-default.ps1
+  sessions` (which program plays to which device, with its peak), `... watch` (a line for every change of the default: catches who moves it),
+  `... set EPSON` (puts it back).
 
 ## Status and recovery
 

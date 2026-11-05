@@ -19,6 +19,14 @@ def test_a_hung_teardown_or_a_flooded_decoder_is_ended_and_nothing_else_is():
     assert "all passed" in run.stdout
 
 
+def test_the_stream_leaves_skippy_pcs_sound_on():
+    """The kiosk's stream never ends, and with --no-audio-on-host Sunshine keeps Windows' default playback device on Steam Streaming Speakers
+    the whole time and resets it whenever he picks his projector: every game on skippy-pc was silent (2026-11-04)."""
+    text = (CORE / "couch" / "run.sh").read_text()
+    args = text[text.index("flatpak run"):].split()
+    assert "--audio-on-host" in args and "--no-audio-on-host" not in args
+
+
 def test_the_loop_trims_its_log_and_starts_the_audio_services_before_each_stream():
     text = (CORE / "couch" / "run.sh").read_text()
     loop = text[text.index("wait_s=3"):]

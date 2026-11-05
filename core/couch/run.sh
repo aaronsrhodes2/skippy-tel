@@ -10,6 +10,11 @@
 # audio servers, the control stream timed out and Moonlight's teardown stuck in "Stopping audio stream" for good. This loop waited on a process
 # that never ended: a black TV for 4.5 hours, skippy-pc still sending frames into "Video decode unit queue overflow"). Each round also starts
 # the audio services first: an OOM kill leaves them "failed" and Moonlight would find no sound server.
+# skippy-pc keeps its own sound (2026-11-04, the Captain: "I get no sound ... I change 'steam streaming speakers' to the epson but it reasserts
+# itself"): with --no-audio-on-host Sunshine mutes the PC by making "Steam Streaming Speakers" Windows' default playback device for as long as
+# the stream lives, and sets it straight back whenever he picks another (sunshine.log: "Resetting sink ... after default changed"). This
+# stream never ends, so every game on skippy-pc was silent. With --audio-on-host Sunshine leaves the default alone and captures whatever it
+# is: the sound plays in both rooms and he can switch devices freely.
 set -uo pipefail
 HOST="${COUCH_HOST:-192.168.0.164}"
 APP="${COUCH_APP:-Desktop}"
@@ -45,7 +50,7 @@ while true; do
   from=$(stat -c %s "$LOG" 2>/dev/null || echo 0)
   # the login session hands down an ambient capability (CAP_WAKE_ALARM) and Flatpak's sandbox refuses to start with any: drop them
   setpriv --inh-caps=-all --ambient-caps=-all flatpak run "$FLATPAK_ID" stream "$HOST" "$APP" \
-    --1080 --yuv444 --fps 60 --bitrate "${COUCH_KBPS:-80000}" --video-codec HEVC --video-decoder software --display-mode fullscreen --no-audio-on-host --keep-awake     >>"$LOG" 2>&1 &
+    --1080 --yuv444 --fps 60 --bitrate "${COUCH_KBPS:-80000}" --video-codec HEVC --video-decoder software --display-mode fullscreen --audio-on-host --keep-awake     >>"$LOG" 2>&1 &
   moonlight=$!
   watch "$moonlight" "$from" &
   watcher=$!
