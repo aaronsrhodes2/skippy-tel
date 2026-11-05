@@ -57,11 +57,11 @@ def speakers_line(st: dict) -> str:
         name = kind_words(o["id"])
         if o["id"].startswith("pod:"):
             if o.get("on"):
-                state = "playing" if o.get("open") else "on but not tuned in"
+                state = ("playing" if st.get("playing") else "on") if o.get("open") else "on but not tuned in"
             else:
                 state = "switched off" if o.get("mode") == "off" else "silent (it plays only if the stereo on its floor drops out)"
         else:
-            state = ("playing it" if o.get("open") else "on but not connected right now") if o.get("on") else "switched off"
+            state = (("playing it" if st.get("playing") else "on") if o.get("open") else "on but not connected right now") if o.get("on") else "switched off"
         said.append(f"{name} is {state}")
     return "Speakers: " + _list(said) + "."
 

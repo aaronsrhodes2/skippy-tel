@@ -335,3 +335,20 @@ def test_a_book_held_for_lack_of_a_speaker_keeps_its_place(tmp_path):
     call(loop, h.listen_tick())
     assert h.box.playing and eng.playing
     stop_all(loop, h)
+
+
+def test_the_chat_says_each_speakers_state_truthfully_playing_only_while_it_plays():
+    import houseaudio                                                                           # noqa: PLC0415
+    outs = [{"id": "hdmi", "name": "Sony", "on": False, "open": True, "floor": "downstairs"}, {"id": "enclave", "name": "Enclave", "on": True, "open": True, "floor": "upstairs"},
+            {"id": "pod:living", "name": "Living box", "on": False, "open": False, "floor": "upstairs", "mode": "auto"}]
+    paused = houseaudio.station_line(dict(playing=False, title="T", artist="A", open=["enclave"], level=0.5, queue_len=3, outputs=outs))
+    assert "Speakers: the Sony downstairs is switched off, the Enclave upstairs is on and the box in the living is silent" in paused and "playing it" not in paused
+    playing = houseaudio.station_line(dict(playing=True, title="T", artist="A", open=["enclave"], level=0.5, queue_len=3, outputs=outs))
+    assert "the Enclave upstairs is playing it" in playing
+    gone = houseaudio.station_line(dict(playing=True, title="T", artist="A", open=[], level=0.5, queue_len=3, outputs=[dict(outs[0], on=True, open=False)] + outs[1:]))
+    assert "the Sony downstairs is on but not connected right now" in gone
+    held = houseaudio.station_line(dict(playing=False, title="T", artist="A", open=[], level=0.5, queue_len=3, held={"kind": "nobody", "why": "no speaker is on", "since": 1.0},
+                                        outputs=[dict(o, on=False) if o["id"] != "pod:living" else o for o in outs]))
+    assert "Bilby is holding T by A: no speaker is on, so there is nobody to play it to. It carries on by itself when a speaker is turned on" in held
+    car = houseaudio.station_line(dict(playing=False, kind="book", title="Aces", book={"title": "Aces", "author": "A. Writer", "chapter": 3, "chapters": 9}, held={"kind": "car", "why": "x", "since": 1.0}))
+    assert "he is listening to it in the car" in car and "'Play my book' carries on from the car's place" in car
