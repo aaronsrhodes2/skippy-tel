@@ -276,10 +276,11 @@ class Front:
             others = [g for g in self.gens if g is not cur and g.alive()]
         return sorted({r["task"] for g in others for r in (self._runs(g) or []) if not r.get("done") and isinstance(r.get("task"), str)})
 
-    def _busy(self, g: Gen) -> bool:
-        """True unless the generation says it holds no unfinished run. Not knowing counts as busy: never stop a run by guessing."""
+    def _busy(self, g: Gen, brain: str | None = None) -> bool:
+        """True unless the generation says it holds no unfinished run (of that brain, when one is named). Not knowing counts as busy: never stop a run by
+        guessing."""
         runs = self._runs(g)
-        return runs is None or any(not r.get("done") for r in runs)
+        return runs is None or any(not r.get("done") and (brain is None or str(r.get("brain") or "core") == brain) for r in runs)
 
     def save(self) -> None:
         try:
@@ -337,8 +338,9 @@ class Front:
         if task:
             target = self._owner_of(task) or cur
         if p == "/workshop" and method == "POST" and target is cur:
-            if any(g is not cur and g.alive() and self._busy(g) for g in self._draining()):
-                return 409, json.dumps(BUSY).encode()        # one queue: the older generation's run comes first
+            brain = str(as_json(body).get("brain") or "core")
+            if any(g is not cur and g.alive() and self._busy(g, brain) for g in self._draining()):
+                return 409, json.dumps(BUSY).encode()        # one queue per brain (the Captain, 2026-11-05): an older generation's Core run holds up Core, not Claude
         if p == "/workshop/runs" and method == "GET":
             return self._all_runs(headers, query)
         status, raw = self.request(method, target.url + p + (("?" + query) if query else ""), body or None,

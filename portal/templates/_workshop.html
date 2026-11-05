@@ -222,6 +222,7 @@
     const pollDelay = (quietMs) => (quietMs < 60000 ? 2000 : quietMs < 300000 ? 5000 : 10000);
     const BUSY = "Skippy is still working on the last one.";   // the portal's and the reporter's wording for a busy bridge
     const WAIT_NOTE = "In line: Skippy is finishing another run first.";   // workshop.WAIT_NOTE
+    const spanOf = (s) => (s >= 3600 ? Math.floor(s / 3600) + " h " + Math.floor((s % 3600) / 60) + " min" : Math.max(1, Math.round(s / 60)) + " min");   // "11 h 2 min": how long the run in front has gone
 
     const store = {
       get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -611,11 +612,12 @@
       const kind = !d ? why : d.state === "unknown" ? "unknown" : (d.state === "stalled" || d.state === "offline") ? d.state : "";
       if (kind) goQuiet(job, kind, d && typeof d.quiet_s === "number" ? d.quiet_s : null);
       else { job.quietSince = null; job.kind = ""; job.srv = null; delete job.turn.note; job.turn.bad = false; }
-      if (d && d.state === "waiting") job.turn.note = WAIT_NOTE + (d.ahead > 0 ? " " + d.ahead + (d.ahead === 1 ? " is" : " are") + " ahead of this." : "");     // sent while another run goes: it waits its turn (portal/workshop.py)
+      if (d && d.state === "waiting") job.turn.note = WAIT_NOTE + (d.ahead > 0 ? " " + d.ahead + (d.ahead === 1 ? " is" : " are") + " ahead of this." : "")
+        + (typeof d.front_s === "number" && d.front_s >= 120 ? " The one in front has been going for " + spanOf(d.front_s) + "." : "");     // sent while another run goes: it waits its turn (portal/workshop.py)
       const out = {kind, end: false, resume: null};
       if (d && (d.state === "done" || d.state === "error")) {
         out.end = true;
-        if (d.state === "error") { job.turn.note = d.error || "It failed."; job.turn.bad = d.error !== "stopped"; }
+        if (d.state === "error") { job.turn.note = d.error || "It failed."; job.turn.bad = d.error !== "stopped" && !/^Paused so another chat/.test(d.error || ""); }   // (a pause is no failure: workshop.PAUSED_TEXT)
         if (d.error === BUSY && job.left) out.resume = job.left;   // the bridge is still on the task this one replaced
         store.del(K.task);
       }

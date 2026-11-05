@@ -32,6 +32,16 @@ JOB_TTL = 2 * 3600         # how long the home queue keeps offering an unanswere
 OFFLINE_S = 30             # no push at all for this long: skippy-pc isn't picking it up
 BRIEF_SILENCE_S = 300      # home silent no longer than this (a reporter restart, a portal deploy): a message waits for it
 WAIT_NOTE = "In line: Skippy is finishing another run first."
+# A run that has gone this long, of another conversation in the same line, is paused for a message that waits behind it, and carries on right after (the
+# Captain, 2026-11-05: a Core run of eleven hours held every chat "in line", purple and orange alike, and none ever came back).
+PREEMPT_AFTER_S = 300
+PAUSED_TEXT = "Paused so another chat could go first. I'll carry on right after."
+CONTINUE_MESSAGE = ("[The house: you were paused so the Captain's other chat could use Skippy first. Carry on with the task from where you stopped; "
+                    "do not start over. Look at the repository first to see what is already done.]")
+QUEUE_KEY = "workshop/queue.json"      # the messages still in line, kept in the bucket: a deploy wipes this process's memory, and with it the line
+QUEUE_MAX = 20
+RESTORE_MAX_AGE_S = 2 * 3600           # a message older than this is not worth running when the portal comes back
+_TASK = re.compile(r"[0-9a-f]{16}")
 STALL_S = 120              # a running task silent for this long: the link to skippy-pc broke
 WANT_S = 120               # a person's "check again" is still worth answering for this long
 _CLIENT_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")          # a message id the page made (crypto.randomUUID, dashes kept or dropped)
@@ -297,11 +307,14 @@ def _conversation(raw) -> dict | None:
 
 
 class Workshop:
-    def __init__(self, home, clock=time.time):
+    def __init__(self, home, clock=time.time, store=None):
         self.home, self.clock = home, clock
         self.started = clock()                   # (a portal that just started hasn't heard from home yet)
         self._tasks: dict[str, dict] = {}
         self._lock = threading.Lock()
+        self.store = store                       # the bucket (tabletop.store_from_env), or None: the line is then kept in memory only, as it always was
+        self._restored = store is None           # the stored line is read back once, by the first call after a start
+        self._qseq, self._qwritten, self._qlock = 0, 0, threading.Lock()
         # The Admin page's kill switch. In this process's memory on purpose: the agent can't reach it (its only way into
         # the portal is a push and a deploy, and pausing cancels its run first). A deploy forgets it; the card says so.
         self.paused: dict | None = None          # {"by": email, "at": epoch s} while paused
@@ -427,10 +440,11 @@ class Workshop:
         job = {"conv": conv, "message": message, "who": owner, "project": project, "brain": brain,
                **({"images": pictures} if pictures else {})}
         with self._lock:
+            self._restore()
             self._prune()
-            # One run at a time on skippy-pc: a message sent while another runs (another conversation, another device, the
-            # voice) waits in line here and goes when that one ends, instead of being refused. The job id is the task id
-            # everywhere: here, in the reporter and in the bridge.
+            # One run at a time per brain on skippy-pc (Core's coder, Claude): a message sent while another of its line runs (another
+            # conversation, another device, the voice) waits in line here and goes when that one ends, instead of being refused. The
+            # job id is the task id everywhere: here, in the reporter and in the bridge.
             task = secrets.token_hex(8)
             now = self.clock()
             self._tasks[task] = {"owner": owner, "conv": conv, "events": [], "state": "waiting", "error": None,
@@ -438,6 +452,7 @@ class Workshop:
                                  "message": message[:200], "job": job}   # its first words, for the notification (never shown to others)
             if client_id:
                 self._client_ids[(owner, client_id)] = (task, now)
+            self._preempt_for(task)               # a long run of another chat in this line is paused so this message goes first, and carries on after it
             self._advance()
         return task, False
 
@@ -446,14 +461,22 @@ class Workshop:
         for key in [k for k, (_, at) in self._client_ids.items() if now - at > CLIENT_ID_KEEP_S]:
             del self._client_ids[key]
 
+    @staticmethod
+    def _lane(rec: dict) -> str:
+        """Who thinks decides the line (the Captain, 2026-11-05: 'even on auto orange it stuck me in line and never followed up'): Skippy Core's coder is one
+        resource and Claude is another, so a long Core run no longer holds up a Claude message, and the other way round."""
+        return rec.get("brain") or "core"
+
     def ahead_of(self, task: str) -> int:
-        """(lock held) How many other tasks are in front of this waiting one: the running or queued one, and any waiting longer.
+        """(lock held) How many other tasks are in front of this waiting one in its own line: the running or queued one, and any waiting longer.
         Counts only; never what they are or whose."""
         rec = self._tasks.get(task)
         if not rec or rec["state"] != "waiting":
             return 0
-        busy = sum(1 for t, r in self._tasks.items() if t != task and r["state"] in ("queued", "running"))
-        line = [t for t, r in sorted(((t, r) for t, r in self._tasks.items() if r["state"] == "waiting"), key=lambda tr: tr[1]["created"])]   # as _advance orders it
+        lane = self._lane(rec)
+        busy = sum(1 for t, r in self._tasks.items() if t != task and r["state"] in ("queued", "running") and self._lane(r) == lane)
+        line = [t for t, r in sorted(((t, r) for t, r in self._tasks.items() if r["state"] == "waiting" and self._lane(r) == lane),
+                                     key=lambda tr: tr[1]["created"])]   # as _advance orders it
         return busy + line.index(task)
 
     def briefly_silent(self) -> bool:
@@ -464,16 +487,118 @@ class Workshop:
         return age < BRIEF_SILENCE_S if age is not None else self.clock() - self.started < BRIEF_SILENCE_S
 
     def _advance(self) -> None:
-        """(lock held) When nothing is queued or running, hand the oldest message in line to skippy-pc."""
-        if any(r["state"] in ("queued", "running") for r in self._tasks.values()):
+        """(lock held) In each line (Skippy Core's, Claude's), when nothing of that line is queued or running, hand its oldest message to skippy-pc."""
+        self._restore()
+        for lane in sorted({self._lane(r) for r in self._tasks.values() if r["state"] == "waiting"}):
+            if any(r["state"] in ("queued", "running") and self._lane(r) == lane for r in self._tasks.values()):
+                continue
+            line = sorted(((t, r) for t, r in self._tasks.items() if r["state"] == "waiting" and self._lane(r) == lane), key=lambda tr: tr[1]["created"])
+            if not line:
+                continue
+            task, rec = line[0]
+            job = rec["job"]
+            self.home.start("workshop", rec["owner"], ttl=JOB_TTL, _id=task, **job)
+            rec["job"] = {k: v for k, v in job.items() if k != "images"}      # (kept until skippy-pc has taken it up, for a restart of this process: see push; the pictures are home's now)
+            now = self.clock()
+            rec["state"], rec["created"], rec["pushed_at"] = "queued", now, now
+        self._persist()
+
+    def front_age(self, task: str) -> int:
+        """(lock held) How long the oldest run in front of this waiting message's line has been going, in seconds (0: none)."""
+        rec = self._tasks.get(task)
+        if not rec:
+            return 0
+        lane, now = self._lane(rec), self.clock()
+        return max([int(now - r["created"]) for t, r in self._tasks.items() if t != task and r["state"] in ("queued", "running") and self._lane(r) == lane] or [0])
+
+    def _preempt_for(self, new_task: str) -> None:
+        """(lock held) A message that would wait behind a LONG run of another conversation in its line goes first: that run is paused (stopped, the way the Stop key
+        stops it) and queued to carry on right after, instead of the message waiting hours (the Captain, 2026-11-05: an eleven-hour Core run held every chat
+        "in line", purple and orange alike, and none ever came back). A run younger than PREEMPT_AFTER_S is left to finish, and so is one of the same conversation
+        (a follow-up queues behind its own chat, as before)."""
+        new = self._tasks.get(new_task)
+        if not new:
             return
-        line = sorted(((t, r) for t, r in self._tasks.items() if r["state"] == "waiting"), key=lambda tr: tr[1]["created"])
-        if not line:
+        lane, now = self._lane(new), self.clock()
+        for task, rec in list(self._tasks.items()):
+            if (task == new_task or rec["state"] != "running" or self._lane(rec) != lane or rec["conv"] == new["conv"]
+                    or rec.get("preempted") or now - rec["created"] < PREEMPT_AFTER_S):
+                continue
+            self._withdraw(task, rec, "paused")
+            rec["preempted"] = True
+            again = secrets.token_hex(8)
+            self._tasks[again] = {"owner": rec["owner"], "conv": rec["conv"], "events": [], "state": "waiting", "error": None,
+                                  "created": new["created"] + 0.001, "pushed_at": now, "touched": now, "stop": False, "project": rec.get("project") or DEFAULT_PROJECT,
+                                  "brain": rec.get("brain") or "core", "message": "(carrying on)", "auto": True,
+                                  "job": {"conv": rec["conv"], "message": CONTINUE_MESSAGE, "who": rec["owner"], "project": rec.get("project") or DEFAULT_PROJECT,
+                                          "brain": rec.get("brain") or "core"}}
+
+    # ── the line survives a deploy ──
+    def _restore(self) -> None:
+        """(lock held) The messages that were still in line when the last instance of this portal ended come back into line, once. A deploy wipes this process's
+        memory, and a message that was waiting (or handed to home and not yet taken up) was simply gone: the chat stayed "in line" for ever."""
+        if self._restored:
             return
-        task, rec = line[0]
-        self.home.start("workshop", rec["owner"], ttl=JOB_TTL, _id=task, **rec.pop("job"))
+        self._restored = True
+        try:
+            raw = self.store.get(QUEUE_KEY)
+            items = json.loads(raw) if raw else []
+        except Exception:  # noqa: BLE001 — a bucket that doesn't answer: the line starts empty, as it always did
+            return
         now = self.clock()
-        rec["state"], rec["created"], rec["pushed_at"] = "queued", now, now
+        for it in items if isinstance(items, list) else []:
+            try:
+                task, owner, conv, created = str(it["task"]), str(it["owner"]), str(it["conv"]), float(it["created"])
+                raw_job = it["job"]
+                job = {"conv": conv, "message": str(raw_job["message"])[:MAX_MESSAGE], "who": owner,
+                       "project": str(raw_job.get("project") or DEFAULT_PROJECT), "brain": str(raw_job.get("brain") or "core")}
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (not _TASK.fullmatch(task) or task in self._tasks or not _CONV.fullmatch(conv) or not owner or now - created > RESTORE_MAX_AGE_S
+                    or not _PROJECT.fullmatch(job["project"]) or job["brain"] not in ("core", "claude") or not job["message"].strip()):
+                continue
+            self._tasks[task] = {"owner": owner, "conv": conv, "events": [], "state": "waiting", "error": None, "created": created, "pushed_at": now,
+                                 "touched": now, "stop": False, "project": job["project"], "brain": job["brain"], "message": job["message"][:200],
+                                 "job": job, **({"auto": True} if it.get("auto") else {})}
+
+    def _persist(self) -> None:
+        """(lock held) Write the line down (messages waiting, or handed to home and not yet taken up), off this thread so the bucket never slows a poll. No
+        pictures: they are big and rare."""
+        if self.store is None:
+            return
+        items = []
+        for t, r in sorted(self._tasks.items(), key=lambda kv: kv[1]["created"]):
+            if r["state"] in ("waiting", "queued") and isinstance(r.get("job"), dict):
+                job = {k: r["job"][k] for k in ("conv", "message", "who", "project", "brain") if k in r["job"]}
+                items.append({"task": t, "owner": r["owner"], "conv": r["conv"], "created": r["created"], "project": r.get("project"),
+                              "brain": r.get("brain"), "message": r.get("message", ""), "auto": bool(r.get("auto")), "job": job})
+        items = items[:QUEUE_MAX]
+        sig = json.dumps([i["task"] for i in items])
+        if sig == getattr(self, "_qsig", None):
+            return
+        self._qsig = sig
+        self._qseq += 1
+        th = threading.Thread(target=self._write_queue, args=(self._qseq, items), daemon=True)
+        self._qthreads = [x for x in getattr(self, "_qthreads", []) if x.is_alive()] + [th]
+        th.start()
+
+    def _write_queue(self, seq: int, items: list) -> None:
+        with self._qlock:
+            if seq < self._qwritten:
+                return                                # a newer line has been written since
+            try:
+                if items:
+                    self.store.put(QUEUE_KEY, json.dumps(items, separators=(",", ":")).encode(), "application/json")
+                else:
+                    self.store.delete(QUEUE_KEY)
+            except Exception:  # noqa: BLE001 — a line that can't be kept is as good as no line, which is how it was
+                return
+            self._qwritten = seq
+
+    def flush(self) -> None:
+        """Wait for the line's writes to finish (tests, and a clean stop)."""
+        for th in list(getattr(self, "_qthreads", [])):
+            th.join(5)
 
     def read(self, owner: str, task: str, after: int = 0) -> dict:
         """What the browser polls: events from index `after`, and the state. A task that is still going also says
@@ -481,6 +606,7 @@ class Workshop:
         slow task. `next` never goes below `after`: a record rebuilt by a fresh portal holds fewer events for a
         moment, and a page that took `next` at its word would show the same events twice."""
         with self._lock:
+            self._restore()                       # (the line a deploy wiped comes back before anyone is told "unknown")
             rec = self._tasks.get(task)
             if not rec or rec["owner"] != owner:
                 return {"state": "unknown", "events": [], "next": max(0, after), "error": None}
@@ -493,8 +619,11 @@ class Workshop:
             after = max(0, after)
             out = {"state": state, "error": rec["error"], "events": rec["events"][after:],
                    "next": max(after, len(rec["events"])), "project": rec.get("project") or DEFAULT_PROJECT}
+            if rec.get("preempted") and state in _FINAL:
+                out["error"] = PAUSED_TEXT        # not "stopped": nobody pressed Stop, it carries on by itself behind the message that went first
             if state == "waiting":
                 out["ahead"] = self.ahead_of(task)                 # "2 ahead of you" (another chat, another device): counts only
+                out["front_s"] = self.front_age(task)              # ... and how long the run in front has been going
             if rec["state"] in ("queued", "running"):          # the raw state: "stalled" and "offline" are these, gone quiet
                 out["quiet_s"] = max(0, int(now - rec["pushed_at"]))
             return out
@@ -523,6 +652,7 @@ class Workshop:
             else:
                 self._withdraw(task, rec, "stopped")
             self._advance()
+            self._persist()
         return True
 
     # ── the Admin page's controls (recovery.py; admin only, like everything here) ──────────────────────
@@ -707,14 +837,18 @@ class Workshop:
                 rec["state"] = "running"          # a gap, but skippy-pc is on it: it is no longer waiting to be picked up
             rec["pushed_at"], rec["touched"] = now, now
             rec.pop("resync", None)               # this is the answer to anyone's "check again"
+            if rec["state"] != "queued":
+                rec.pop("job", None)              # skippy-pc has taken it up (or it is over): no need to keep it for a restart of this process
             if ended:
                 self._advance()                   # the next message in line goes now
+            else:
+                self._persist()
             reply = {"have": len(rec["events"]), "stop": rec["stop"]}
             owner = rec["owner"]
             # Tell the Captain (portal/notify.py) only when THIS process saw the run going and now sees it end: a record
             # rebuilt from a run that was already over (a deploy, then the reporter catching up) is never news.
             final_news = None
-            if ended and not created and was in ("queued", "running") and not rec.get("relearned"):
+            if ended and not created and was in ("queued", "running") and not rec.get("relearned") and not rec.get("preempted"):
                 last_text = next((e["text"] for e in reversed(rec["events"]) if e["t"] == "text"), "")
                 final_news = {"owner": owner, "task": task, "project": rec.get("project") or DEFAULT_PROJECT,
                               "request": rec.get("message") or "", "state": state, "error": rec["error"],

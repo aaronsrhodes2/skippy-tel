@@ -51,7 +51,7 @@ class World:
             return (200, json.dumps({"runs": self.runs[port]}).encode()) if (headers or {}).get("Authorization") else (401, b"{}")
         if path == "/workshop" and method == "POST":
             task = json.loads(body)["task"]
-            self.runs[port].append({"task": task, "done": False, "age_s": 0})
+            self.runs[port].append({"task": task, "done": False, "age_s": 0, "brain": json.loads(body).get("brain") or "core"})
             return 200, json.dumps({"ok": True, "task": task, "done": False}).encode()
         return 200, b"{}"
 
@@ -69,8 +69,8 @@ def make(tmp_path):
     return w, f
 
 
-def start(f, task):
-    return f.route("POST", "/workshop", "", json.dumps({"task": task, "conv": "conv-12345678", "message": "m"}).encode(), AUTH)
+def start(f, task, brain=None):
+    return f.route("POST", "/workshop", "", json.dumps({"task": task, "conv": "conv-12345678", "message": "m", **({"brain": brain} if brain else {})}).encode(), AUTH)
 
 
 def test_new_work_goes_to_the_newest_and_a_run_stays_with_the_bridge_that_holds_it(tmp_path):
@@ -93,6 +93,17 @@ def test_one_queue_a_new_run_waits_for_the_older_generations_run(tmp_path):
     assert status == 409 and json.loads(raw)["error"] == "busy"
     w.runs[f.gens[0].port][0]["done"] = True
     assert start(f, "task-new1")[0] == 200 and any(r["task"] == "task-new1" for r in w.runs[f.current().port])
+
+
+def test_one_queue_per_brain_an_older_generations_core_run_does_not_hold_up_claude(tmp_path):
+    """The Captain, 2026-11-05: 'even on auto orange it stuck me in line and never followed up', behind an eleven-hour Core run in a draining generation."""
+    w, f = make(tmp_path)
+    start(f, "task-old1", brain="core")
+    f.handover("test")
+    assert start(f, "task-new1", brain="core")[0] == 409                      # Core waits for Core ...
+    assert start(f, "task-new2", brain="claude")[0] == 200                    # ... Claude does not
+    assert any(r["task"] == "task-new2" for r in w.runs[f.current().port])
+    assert start(f, "task-new3")[0] == 409                                    # no brain named is Core (purple), as everywhere
 
 
 def test_a_drained_generation_is_stopped_and_its_runs_adopted_by_the_new_one(tmp_path):

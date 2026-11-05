@@ -712,6 +712,7 @@ class Workshop:
         self._lock = threading.Lock()
         self._save_error: str | None = None
         self._maintenance: str | None = None      # set by host_ops while it resets a clone or restarts the bridge
+        self._sess_lock = threading.Lock()        # the sessions file's read-modify-write (_remember)
 
     def hold(self, why: str) -> bool:
         """Refuse new runs (start() raises Busy with `why`) until release(). False, and nothing held, when a run is going:
@@ -804,8 +805,9 @@ class Workshop:
     # ── runs ─────────────────────────────────────────────────────────────
     def start(self, task: str, conv: str, message: str, who: str = "", attach: bool = False,
               project: str = "", images=None, brain: str = "core", client_id: str = "") -> Run:
-        """Begin a task, or re-attach if it's already known. One task at a time across ALL projects: the chat follows one
-        run, the Captain reviews one outcome at a time, and two runs would race on the shared sessions file.
+        """Begin a task, or re-attach if it's already known. One task at a time per BRAIN across all projects (the Captain, 2026-11-05: "even on
+        auto orange it stuck me in line and never followed up", behind an eleven-hour Core run): Skippy Core's coder is one resource and Claude is
+        another, so a Core run and a Claude run go side by side; two runs of the same brain would still fight over one model slot and one chat.
 
         `attach` says "I only want to follow this task": an unknown one raises UnknownTask and nothing starts, so a
         relay that is re-attaching after a restart can never begin a Claude run (full permissions) by mistake, and
@@ -848,7 +850,7 @@ class Workshop:
                 raise UnknownTask(task)
             elif self._maintenance:
                 raise Busy(self._maintenance)
-            elif any(not r.done for r in self._runs.values()):
+            elif any(not r.done and r.brain == brain for r in self._runs.values()):
                 raise Busy("Skippy is still working on the last thing")
             else:
                 run = self._runs[task] = Run(task, conv, message, who, project=project, brain=brain, client_id=(client_id or "")[:64])
@@ -1090,15 +1092,16 @@ class Workshop:
             return {}
 
     def _remember(self, conv: str, session: str) -> None:
-        data = self._sessions()
-        data[conv] = session
-        path = Path(self.sessions_path)
-        tmp = path.with_suffix(".tmp")
-        try:
-            tmp.write_text(json.dumps(data), encoding="utf-8")
-            tmp.replace(path)
-        except OSError:
-            pass                                   # the next message starts a fresh session; not fatal
+        with self._sess_lock:                      # a Core run and a Claude run now go side by side: two read-modify-writes must not lose one
+            data = self._sessions()
+            data[conv] = session
+            path = Path(self.sessions_path)
+            tmp = path.with_suffix(".tmp")
+            try:
+                tmp.write_text(json.dumps(data), encoding="utf-8")
+                tmp.replace(path)
+            except OSError:
+                pass                               # the next message starts a fresh session; not fatal
 
     # ── Skippy Core as the brain ─────────────────────────────────────────
     def _core_settings(self) -> tuple[str, str]:

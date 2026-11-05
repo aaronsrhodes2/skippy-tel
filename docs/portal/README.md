@@ -193,7 +193,13 @@ browser <── poll /me/workshop/events ── portal <── POST /home/worksh
   checkout itself is only passed with `--add-dir`. The card's picker shows the open conversation's project (fixed once it has
   a message); **New chat** asks which project the next one is for. The prompt (`workshop_prompt.md`) keeps SkippyTel's
   deploy rules for SkippyTel only; for any other project the rule is that repo's own CLAUDE.md, else run its tests, push to
-  its branch (solo repos, Platinum 17) and say plainly what was not deployed. Still one run at a time across all projects.
+  its branch (solo repos, Platinum 17) and say plainly what was not deployed. One run at a time **per brain** across all projects (2026-11-05):
+  a Core run and a Claude (orange) run go side by side, so a long Core run never holds orange in line. A message behind a running one of its own brain
+  waits in a **line that is kept in the bucket** (`workshop/queue.json`, so a portal deploy no longer empties it; one older than 2 h is dropped on
+  restore); when the run ahead is from another conversation and has gone 5 minutes, it is **paused** ("Paused so another chat could go first"),
+  the waiting message runs, and the paused conversation then **carries on by itself** (an automatic "carry on from where you stopped"). Code:
+  `portal/workshop.py` (`_lane`, `_advance`, `_preempt_for`, `_persist`/`_restore`), the bridge's `start()` per brain (`workshop_engine.py`) and its
+  front door's per-brain busy check (`front.py`).
   Sessions are kept per project (SkippyTel keeps the bare conversation id, so older chats carry on).
 - **Conversations.** The **Conversations** button lists the newest 50 (title = the first message, project, how many
   messages, when, "working now"); tap one to read it and carry on in it (a turn still running is followed live). The bridge

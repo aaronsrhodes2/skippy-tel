@@ -414,7 +414,9 @@ own clone `D:\Aaron\development\<name>-workshop`, never his checkout; **or any f
 `D:\Aaron\development` opened IN PLACE** (ids `f-<slug>`, "· folder" in the picker, the Captain's choice 2026-10-20: the
 agent works right in it, git is the undo, its prompt opens with "never discard his uncommitted work"); **a brain per
 conversation**: Claude (Sonnet) or Skippy Core's coder (Claude Code with its own `CLAUDE_CONFIG_DIR` pointed at skippy-core's
-llama-swap via SKIPPY_CORE_URL/KEY; offered only when the box answers); one run at a time across all of them; a
+llama-swap via SKIPPY_CORE_URL/KEY; offered only when the box answers); one run at a time **per brain** (2026-11-05: a Core run and an
+orange run go side by side; a message behind a running one waits in a line kept in the bucket, so a deploy no longer empties it, and a run of another chat
+that has gone 5 minutes is paused for it and carries on by itself afterwards: `portal/workshop.py` lanes, never "in line" for hours); a
 Conversations list to reopen and continue any conversation; a ship card per push (`portal/ship.py`: the deploy run
 for that commit, green only when `/version` serves it); a Discord DM to the Captain when a run ends (`portal/notify.py`,
 once per run, switch on the card; `DISCORD_CAPTAIN_ID` in the VM settings, else the server owner); a screenshot of a

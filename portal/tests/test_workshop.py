@@ -566,3 +566,126 @@ def test_only_a_brain_skippy_pc_offers_and_can_reach_is_accepted():
     assert [b["id"] for b in w.brains()] == ["claude", "core"]
     w.home = SimpleNamespace(workshop_brains=lambda: [])
     assert w.brains() == [{"id": "core", "label": "Skippy Core", "ready": True}]     # an older home: purple only (no brain named = purple)
+
+
+# ── two lines (Core's coder, Claude), a long run paused for a waiting message, and a line that survives a deploy (the Captain, 2026-11-05) ──
+def two_brains(home):
+    home.accept({"capabilities": {"workshop": {"ready": True, "model": "claude-sonnet-5-5",
+                                               "brains": [{"id": "claude", "label": "Claude", "ready": True}, {"id": "core", "label": "Skippy Core", "ready": True}]}}})
+
+
+def test_each_brain_has_its_own_line_so_a_claude_message_never_waits_behind_a_core_run(shop):
+    ws, home, _ = shop
+    two_brains(home)
+    core1 = ws.send(ADMIN, "aaaaaaaa-1", "a long Core job", brain="core")
+    claude1 = ws.send(ADMIN, "bbbbbbbb-2", "a quick orange question", brain="claude")      # "even on auto orange it stuck me in line and never followed up"
+    core2 = ws.send(ADMIN, "cccccccc-3", "another Core message", brain="core")
+    claude2 = ws.send(ADMIN, "dddddddd-4", "another orange one", brain="claude")
+    assert ws.read(ADMIN, core1)["state"] == "queued" and ws.read(ADMIN, claude1)["state"] == "queued"      # both lines are going
+    r3, r4 = ws.read(ADMIN, core2), ws.read(ADMIN, claude2)
+    assert (r3["state"], r3["ahead"]) == ("waiting", 1) and (r4["state"], r4["ahead"]) == ("waiting", 1)        # each counts only its own line
+    assert sorted(j["brain"] for j in home.jobs_reply()["jobs"]) == ["claude", "core"]
+    ws.push(claude1, ADMIN, "bbbbbbbb-2", 0, [TEXT], "done", None)
+    assert ws.read(ADMIN, claude2)["state"] == "queued" and ws.read(ADMIN, core2)["state"] == "waiting"        # the Claude line moved; the Core line did not
+
+
+def test_a_long_run_of_another_chat_is_paused_for_a_waiting_message_and_carries_on_after_it(shop):
+    ws, home, clock = shop
+    news = []
+    ws.on_final = news.append
+    long_run = ws.send(ADMIN, "aaaaaaaa-1", "build the whole thing")
+    ws.push(long_run, ADMIN, "aaaaaaaa-1", 0, [TEXT], "running", None)
+    clock.now += workshop_mod.PREEMPT_AFTER_S + 1                                  # it has been going for hours, or minutes enough
+    two_brains(home)                                                               # (home is still reporting)
+    quick = ws.send(ADMIN, "bbbbbbbb-2", "what time is it in Tokyo")
+    assert ws.push(long_run, ADMIN, "aaaaaaaa-1", 0, [TEXT], "running", None)["stop"] is True        # skippy-pc is told to stop it, as the Stop key does
+    assert ws.read(ADMIN, quick)["state"] == "waiting"                              # (it goes the moment the bridge says that run has ended)
+    ws.push(long_run, ADMIN, "aaaaaaaa-1", 1, [], "error", "stopped")
+    assert ws.read(ADMIN, quick)["state"] == "queued"
+    ended = ws.read(ADMIN, long_run)
+    assert ended["state"] == "error" and ended["error"] == workshop_mod.PAUSED_TEXT       # not "stopped": nobody pressed Stop
+    assert news == []                                                                     # and no notification that Skippy stopped
+    ws.push(quick, ADMIN, "bbbbbbbb-2", 0, [TEXT], "running", None)
+    ws.push(quick, ADMIN, "bbbbbbbb-2", 1, [], "done", None)
+    [again] = [j for j in home.jobs_reply()["jobs"] if j["id"] not in (long_run, quick)]
+    assert again["conv"] == "aaaaaaaa-1" and again["message"] == workshop_mod.CONTINUE_MESSAGE and again["who"] == ADMIN       # the paused run carries on by itself
+
+
+def test_nothing_is_paused_for_a_young_run_the_same_chat_or_another_line(shop):
+    ws, home, clock = shop
+    two_brains(home)
+    run = ws.send(ADMIN, "aaaaaaaa-1", "job")
+    ws.push(run, ADMIN, "aaaaaaaa-1", 0, [TEXT], "running", None)
+    ws.send(ADMIN, "bbbbbbbb-2", "quick")                                           # the run is seconds old: it finishes first
+    assert ws.push(run, ADMIN, "aaaaaaaa-1", 0, [TEXT], "running", None)["stop"] is False
+    clock.now += workshop_mod.PREEMPT_AFTER_S + 1
+    two_brains(home)                                                               # (home is still reporting)
+    ws.send(ADMIN, "aaaaaaaa-1", "a follow-up in the same chat")                    # a follow-up queues behind its own chat, as it always did
+    assert ws.push(run, ADMIN, "aaaaaaaa-1", 0, [TEXT], "running", None)["stop"] is False
+    ws.send(ADMIN, "cccccccc-3", "an orange question", brain="claude")              # another line: it has nothing to do with this run
+    assert ws.push(run, ADMIN, "aaaaaaaa-1", 0, [TEXT], "running", None)["stop"] is False
+
+
+def test_a_waiting_message_says_how_long_the_run_in_front_has_been_going(shop):
+    ws, home, clock = shop
+    run = ws.send(ADMIN, "aaaaaaaa-1", "job")
+    ws.push(run, ADMIN, "aaaaaaaa-1", 0, [TEXT], "running", None)
+    waiting = ws.send(ADMIN, "aaaaaaaa-1", "same chat, so it waits")
+    clock.now += 4000
+    got = ws.read(ADMIN, waiting)
+    assert got["state"] == "waiting" and got["ahead"] == 1 and got["front_s"] == 4000
+
+
+def test_the_line_survives_a_deploy_because_it_is_kept_in_the_bucket(shop):
+    import tabletop
+    ws0, home, clock = shop
+    store = tabletop.MemoryStore()
+    ws = workshop_mod.Workshop(home, clock=clock, store=store)
+    first = ws.send(ADMIN, "aaaaaaaa-1", "running one")
+    ws.push(first, ADMIN, "aaaaaaaa-1", 0, [TEXT], "running", None)
+    second = ws.send(ADMIN, "bbbbbbbb-2", "waiting one")
+    handed = ws.send(ADMIN, "cccccccc-3", "waiting two")
+    ws.flush()
+    assert {i["task"] for i in json.loads(store.get(workshop_mod.QUEUE_KEY))} == {second, handed}
+    fresh = workshop_mod.Workshop(home, clock=clock, store=store)                  # the portal is redeployed: this process knows nothing
+    got = fresh.read(ADMIN, second)
+    assert got["state"] == "queued"                                                 # a fresh portal knows nothing of the first one: the oldest in the line goes to home (which waits for the bridge)
+    third = fresh.read(ADMIN, handed)
+    assert third["state"] == "waiting" and third["ahead"] == 1                       # ... and the other is still in line, in order
+    assert [j["message"] for j in home.jobs_reply()["jobs"] if j["id"] == second] == ["waiting one"]
+    fresh.flush()
+    assert [i["task"] for i in json.loads(store.get(workshop_mod.QUEUE_KEY))] == [second, handed]      # (both are still kept until skippy-pc has taken one up)
+
+
+class DownStore:
+    def get(self, path):
+        raise OSError("bucket down")
+
+    def put(self, path, data, content_type):
+        raise OSError("bucket down")
+
+    def delete(self, path):
+        raise OSError("bucket down")
+
+
+def test_a_stored_line_that_is_old_damaged_or_tampered_with_is_not_run(shop):
+    import tabletop
+    ws0, home, clock = shop
+    store = tabletop.MemoryStore()
+    good = {"task": "a" * 16, "owner": ADMIN, "conv": "aaaaaaaa-1", "created": clock.now, "project": "skippytel", "brain": "core", "message": "hi",
+            "job": {"conv": "aaaaaaaa-1", "message": "hi", "who": ADMIN, "project": "skippytel", "brain": "core", "ttl": 1, "_id": "x", "images": ["data:image/png;base64,AAAA"]}}
+    old = {**good, "task": "b" * 16, "created": clock.now - workshop_mod.RESTORE_MAX_AGE_S - 1}
+    bad_project = {**good, "task": "c" * 16, "job": {**good["job"], "project": "../../etc"}}
+    bad_brain = {**good, "task": "d" * 16, "job": {**good["job"], "brain": "gpt"}}
+    bad_id = {**good, "task": "not-a-task-id"}
+    store.put(workshop_mod.QUEUE_KEY, json.dumps([good, old, bad_project, bad_brain, bad_id, "junk", {"task": 5}]).encode(), "application/json")
+    ws = workshop_mod.Workshop(home, clock=clock, store=store)
+    assert ws.read(ADMIN, "a" * 16)["state"] == "queued"                            # the good one is restored and, nothing running, goes at once
+    [job] = home.jobs_reply()["jobs"]
+    assert job == {"id": "a" * 16, "kind": "workshop", "conv": "aaaaaaaa-1", "message": "hi", "who": ADMIN, "project": "skippytel", "brain": "core"}      # only the five fields: no ttl, no id, no pictures
+    for t in ("b" * 16, "c" * 16, "d" * 16):
+        assert ws.read(ADMIN, t)["state"] == "unknown"
+    broken = workshop_mod.Workshop(home, clock=clock, store=DownStore())
+    assert broken.read(ADMIN, "a" * 16)["state"] == "unknown"                       # a bucket that does not answer: the line starts empty, as it always did
+    task = broken.send(ADMIN, "eeeeeeee-5", "still works")                          # ... and sending still works with the bucket down
+    assert broken.read(ADMIN, task)["state"] == "queued"

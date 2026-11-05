@@ -219,7 +219,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                 **{k: v for k, v in meta["job"].items() if k not in ("id", "kind")})
         except Exception as exc:  # noqa: BLE001 — no bucket: nothing to put back
             print(json.dumps({"event": "patient_requeue_failed", "why": str(exc)[:200]}), flush=True)
-    workshop = workshop_mod.Workshop(home)          # the Captain's private Skippy (admin only)
+    workshop = workshop_mod.Workshop(home, store=tabletop_mod.store_from_env())     # the Captain's private Skippy (admin only); its line of waiting messages survives a deploy in the bucket
     app.extensions["workshop"] = workshop
     player = player_mod.Player(home)                # Bilby's Audio Service: the pass and Connect (admin only)
     favs = favorites_mod.from_env()                 # Bilby favorites: the Captain's songs marked for DJing (favorites.py)

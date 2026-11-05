@@ -1,5 +1,5 @@
 """Projects: the private Skippy works on any of the Captain's repos (projects.json), each in its OWN clone, never his
-checkout, one run at a time across all of them, and each conversation keeps to its project (its own Claude session,
+checkout, one run at a time per brain across all of them, and each conversation keeps to its project (its own Claude session,
 its own prompt)."""
 import json
 import os
@@ -154,6 +154,25 @@ def test_one_run_at_a_time_across_all_projects(multi, monkeypatch):
     finish(first)
     monkeypatch.setenv("FAKE_MODE", "ok")
     assert finish(multi.start("bbbbbbbb", "conv-87654321", "now", project="other")).ok is True
+
+
+def test_a_core_run_and_a_claude_run_go_side_by_side_but_two_of_one_brain_do_not(multi, monkeypatch):
+    """The Captain, 2026-11-05: 'even on auto orange it stuck me in line and never followed up', behind an eleven-hour Core run."""
+    monkeypatch.setenv("FAKE_MODE", "slow")
+    monkeypatch.setattr(engine.Workshop, "core_ready", lambda self: True)     # (no real skippy-core to answer the probe, as in CI)
+    core = multi.start("aaaaaaaa", "conv-12345678", "long Core job", project="skippytel", brain="core")
+    claude = multi.start("bbbbbbbb", "conv-87654321", "quick orange question", project="other", brain="claude")
+    assert multi.get("bbbbbbbb") is claude and not core.done and not claude.done
+    with pytest.raises(engine.Busy):
+        multi.start("cccccccc", "conv-11111111", "a second Core job", project="skippytel", brain="core")
+    with pytest.raises(engine.Busy):
+        multi.start("dddddddd", "conv-22222222", "a second orange one", project="other", brain="claude")
+    assert multi.busy()
+    multi.cancel("aaaaaaaa")
+    multi.cancel("bbbbbbbb")
+    finish(core)
+    finish(claude)
+    assert not multi.busy()
 
 
 def test_each_project_has_its_own_rules_file_and_rules(multi):
