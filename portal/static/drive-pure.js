@@ -89,7 +89,7 @@
     for (let i = Math.max(0, at); i < queue.length; i++) if (playable(queue[i], canSpotify)) return i;
     return -1;
   }
-  // The song to fetch ahead while this one plays (the Captain, 2026-11-05: throughput problems to the car): the next playable row's path when it is a Bilby file, else "".
+  // The song to load ahead while this one plays (the Captain, 2026-11-05: throughput problems to the car): the next playable row's path when it is a Bilby file, else "".
   function warmTarget(queue, at, canSpotify) {
     const i = nextPlayable(queue, at + 1, canSpotify);
     return i >= 0 && queue[i].kind === "bilby" ? queue[i].path : "";
