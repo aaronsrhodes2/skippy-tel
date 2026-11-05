@@ -279,3 +279,41 @@ def test_a_book_the_car_is_playing_is_let_go_without_writing_the_houses_place_ov
     call(loop, station.run(h, "audiobook", {"action": "play"}, "living"))
     assert eng.playing and play_args(r)[play_args(r).index("-ss") + 1] == "10.00"                 # at home it carries on from the car's place
     stop_all(loop, h)
+
+
+# ── the hub's side: a pod forwards the portal's book command, and the plain commands ask the radio ──
+def test_a_pods_book_command_and_the_plain_commands_go_through_the_radios_api(tmp_path):
+    import radio_client                                                                              # noqa: PLC0415
+    import book_voice                                                                                # noqa: PLC0415
+    from aiohttp import web                                                                          # noqa: PLC0415
+    loop = on_loop()
+    h, r, eng, wall = make_station(tmp_path, switches=tmp_path / "outputs.json", mono=Clock())
+    h.place(["hdmi"])
+    rad = radio.Radio(ENV, h, log=lambda *a: None, state=tmp_path)
+
+    async def serve():
+        runner = web.AppRunner(rad.app())
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        return runner, site._server.sockets[0].getsockname()[1]
+    runner, port = call(loop, serve())
+    client = radio_client.RadioClient(f"http://127.0.0.1:{port}", log=lambda *a: None, start=False)
+    view = radio_client.BookView(client)
+    client.last = client.call("GET", "/state")
+    assert not view.loaded and book_voice.pre_route("read my book", view) == {"action": "play"}      # nothing loaded yet: "read my book" is the tool's, before the model
+    best, many = view.find("the dragon one")
+    assert best["id"] == DRAGON and [m["id"] for m in many] == [DRAGON]
+    assert book_voice.pre_route("read the dragon one", view) == {"action": "play", "title": "the dragon one"}
+    tuner = radio_client.PodTuner(None, client, "living")
+    assert asyncio.run(tuner.book_command(f"book:play:{DRAGON}"))                                    # the Audiobooks page's "Play on" the living room's box
+    assert h.box.playing and h.box.kind() == "book" and eng.playing and h.speakers == {"enclave"}   # that room's speakers (the living room is the Enclave) play the one stream
+    client.last = client.call("GET", "/state")
+    assert view.loaded and view.current and view.playing and not view.sleeping and view.speed == 1.0
+    assert book_voice.pre_route("stop", view) == {"action": "pause"} and book_voice.pre_route("next chapter", view) == {"action": "next_chapter"}
+    assert not asyncio.run(tuner.book_command("book:play:no-such-book"))                             # a book he does not have: refused, nothing changes
+    assert client.state()["track"] == "" and client.state()["kind"] == "book" and client.state()["book"]["id"] == DRAGON
+    assert tuner.state()["track"] == "" and tuner.state()["title"] == "Dragonflight" if "pod:living" in client.state()["speakers"] else tuner.state()["playing"] is False
+    call(loop, h.box.pause())
+    call(loop, runner.cleanup())
+    loop.call_soon_threadsafe(loop.stop)
