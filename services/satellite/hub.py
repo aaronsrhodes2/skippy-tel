@@ -798,17 +798,49 @@ class Room:
         finally:
             self._resume(IDLE if was == BUSY else was, self.followup_ms if was == FOLLOWUP else 0)
 
-    async def ring(self, tone: bytes, voice, text: str) -> None:
-        """One ring of the house's alarm clock on this pod (alarm_clock.py): the chime, then the words; then a plain "stop" needs no name."""
+    def stereo_kinds(self) -> list[str]:
+        """The PC outputs that are this room's one voice and can sound right now ([] when only the box can speak): open and not taken for off, the
+        same test as _out's but a look that spends nothing (RoutedOut.playable). The box's own speaker is the last resort for everything (the Captain,
+        2026-11-04: "we never want to output to the hub speakers unless that house level's stereo is unavailable")."""
+        # only the outputs the vault gives this room: "talk to me downstairs" rewrites the RoutedOut's kinds until the next restart (music_tools), and
+        # another floor's stereo is no stand-in for this box
+        configured = None
+        env = getattr(self, "env", None)
+        if env:
+            import speaker_out                                  # noqa: PLC0415
+            configured = set(speaker_out.room_kinds(env, self.name)) - {"pod"}
+        for out in self.pc_outs:
+            if getattr(out, "sole", False):
+                kinds = out.playable() if hasattr(out, "playable") else (sorted(out.kinds) if out.available() else [])
+                kinds = [k for k in kinds if configured is None or k in configured]
+                if kinds:
+                    return kinds
+        return []
+
+    async def ring(self, tone: bytes, voice, text: str, quiet: bool = False, wait=None) -> None:
+        """One ring of the house's alarm clock on this pod (alarm_clock.py): the chime, then the words; then a plain "stop" needs no name.
+        `quiet`: the room's stereo is ringing for it and `wait` is that ring (a task answering True when something sounded). The box shows the words
+        and stays busy, deaf, until the stereo has finished and its echo has died away (its microphone would hear "Say stop" and the alarm would stop
+        itself), then opens the "stop" window as after any ring. If the stereo's ring failed or never finished, the box rings after all."""
         import alarm_clock                                      # noqa: PLC0415
         was, self.mode = self.mode, BUSY
         try:
             async with self.voice:
                 await self.link.show(text)
-                await self.link.announce("", ("pcm", *alarm_clock.pcm_of(tone)))
-                if voice is not None:
-                    clip = ("mp3", voice) if voice[:4] != b"RIFF" else ("pcm", *alarm_clock.pcm_of(voice))
-                    await self.link.announce(text, clip)
+                if quiet and wait is not None:
+                    try:
+                        if await asyncio.wait_for(asyncio.shield(wait), alarm_clock.RING_WAIT_S) is False:
+                            quiet = False                       # nothing sounded on the stereo
+                    except Exception as e:                      # noqa: BLE001 — it failed, or took too long: the box is the only speaker left
+                        self.log(f"[{self.name}] (the stereo's ring failed: {type(e).__name__}: the box rings)")
+                        quiet = False
+                if quiet:
+                    await asyncio.sleep(alarm_clock.LISTEN_AFTER_S)
+                else:
+                    await self.link.announce("", ("pcm", *alarm_clock.pcm_of(tone)))
+                    if voice is not None:
+                        clip = ("mp3", voice) if voice[:4] != b"RIFF" else ("pcm", *alarm_clock.pcm_of(voice))
+                        await self.link.announce(text, clip)
         finally:
             self._resume(IDLE if was == BUSY else was, self.followup_ms if was == FOLLOWUP else 0)
         self._listen_for_answer()
@@ -1283,12 +1315,30 @@ def announce_tools(room_of, connected: dict, env: dict, loop):
             if voice is None:
                 return "Not announced: I have no voice right now."
             heard = []
-            if kinds and voice[0] == "mp3":
-                out = speaker_mod.RoutedOut(router_mod.shared(env), kinds, log=here.log, duck_others=False)
-                if any(out.router.available(k) for k in kinds):
-                    asyncio.ensure_future(out.play(voice[1]))
-                    heard.append(lay.place_words(kinds) or place)
+            # A box whose room's stereo is on stays silent and the stereo says it for it: the box's own speaker is the last resort (the Captain, 2026-11-04).
+            stereo, loud, standing_in = list(kinds), [], []
             for r in pods:
+                try:
+                    outs = list(r.stereo_kinds()) if hasattr(r, "stereo_kinds") else []     # even a stereo the asking room shares: it just hears it too
+                except Exception:                               # noqa: BLE001 — a failed look at the stereo must never keep the box from speaking
+                    outs = []
+                if outs and voice[0] == "mp3":
+                    stereo += [k for k in outs if k not in stereo]
+                    standing_in.append(r)
+                else:
+                    loud.append(r)
+            if stereo and voice[0] == "mp3":
+                out = speaker_mod.RoutedOut(router_mod.shared(env), stereo, log=here.log, duck_others=False)
+                if any(out.router.available(k) for k in stereo):
+                    async def by_stereo(out=out, boxes=tuple(standing_in)) -> None:
+                        if not await out.play(voice[1]):        # the router dropped it (never played late) or it would not decode: the boxes it stood in for say it
+                            for box in boxes:
+                                await box.link.announce(text, voice)
+                    asyncio.ensure_future(by_stereo())
+                    heard.append(lay.place_words(stereo) or place)
+                else:                                           # the stereo went off since the look: those boxes speak after all
+                    loud += standing_in
+            for r in loud:
                 asyncio.ensure_future(r.link.announce(text, voice))
                 heard.append(r.name)
             here.log(f"[{here.name}] announced {place}: {text}")

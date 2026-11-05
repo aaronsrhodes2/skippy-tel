@@ -29,11 +29,18 @@ class Hub:
 
 
 class Pod:
-    def __init__(self):
-        self.rang, self.said = [], []
+    def __init__(self, stereo=()):
+        self.rang, self.said, self.quiet, self.waited = [], [], [], []
+        self.stereo = list(stereo)              # the PC outputs that are the room's one voice and on now (hub.Room.stereo_kinds)
 
-    async def ring(self, tone, voice, text):
+    def stereo_kinds(self):
+        return list(self.stereo)
+
+    async def ring(self, tone, voice, text, quiet=False, wait=None):
         self.rang.append(text)
+        self.quiet.append(quiet)
+        if quiet and wait is not None:          # what hub.Room.ring does: wait for the stereo's ring, and learn whether it sounded
+            self.waited.append(await wait)
 
     async def announce(self, text):
         self.said.append(text)
@@ -51,6 +58,7 @@ def make(tmp_path, now, router=None, rooms=(), env=None):
 
     async def play(kinds, clips, gain):
         played.append((tuple(kinds), len(clips), gain))
+        return True                                     # something sounded (AlarmClock._play_outs)
     c._play_outs = play
 
     async def voice(text):
@@ -288,3 +296,130 @@ def test_a_room_renamed_still_rings_what_was_set_in_it(tmp_path):
     up = c.alarms.add("alarm", "07:00", where="upstairs", room="theater")
     assert c.place_of(up) == (["enclave"], ["living"])
     assert c.hub_room("living") == "living" and c.hub_room("den") == "den"
+
+
+# ── the box's own speaker is the last resort (the Captain, 2026-11-04: "we never want to output to the hub speakers unless that house level's
+#    stereo is unavailable") ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+UPSTAIRS = house_layout.Layout({"floors": {"upstairs": {"rooms": ["living room"]}},
+                                "rooms": {"living room": {"pods": ["living"], "outputs": ["enclave"]}}})
+
+
+def upstairs_clock(tmp_path, monkeypatch, pod, where="upstairs", at_hhmm=(6, 30), kind="alarm"):
+    monkeypatch.setattr(alarm_clock, "LISTEN_AFTER_S", 0)
+    now = [at(2026, 11, 2, 6, 0)]
+    c, _, played = make(tmp_path, now, rooms={"living": pod})
+    c.layout = UPSTAIRS
+    a = c.alarms.add(kind, f"{at_hhmm[0]:02d}:{at_hhmm[1]:02d}", "take the pills" if kind == "reminder" else "", where=where, room="living")
+    now[0] = at(2026, 11, 2, *at_hhmm)
+    return c, now, played, a
+
+
+def ticks(c, now, count):
+    for _ in range(count):
+        run(c.tick())
+        now[0] += 60
+
+
+def test_a_box_whose_stereo_is_on_rings_silently_until_the_third_ring(tmp_path, monkeypatch):
+    pod = Pod(stereo=["enclave"])
+    c, now, played, _ = upstairs_clock(tmp_path, monkeypatch, pod)
+    ticks(c, now, 4)
+    assert pod.quiet == [True, True, False, False]                       # the stereo rings alone for two minutes, then the box joins
+    assert [p[0] for p in played] == [("enclave",)] * 4                  # and the stereo rings every time
+    assert pod.waited == [True, True]                                    # a silent box is handed the stereo's ring: it waits for it, and learns it sounded
+
+
+def test_an_alarm_set_without_a_place_keeps_ringing_the_boxs_stereo_when_the_box_joins(tmp_path, monkeypatch):
+    pod = Pod(stereo=["enclave"])
+    c, now, played, a = upstairs_clock(tmp_path, monkeypatch, pod, where="", at_hhmm=(18, 0))
+    assert c.place_of(a) == ([], ["living"])                             # no announcement output in this vault: before, only the box rang
+    ticks(c, now, 4)
+    assert [p[0] for p in played] == [("enclave",)] * 4                  # the stereo does not drop out when the box joins at ring 3
+    assert pod.quiet == [True, True, False, False]
+
+
+def test_a_reminder_is_rung_on_the_box_at_its_last_ring(tmp_path, monkeypatch):
+    """A reminder rings twice and has no phone alert behind it: the box joins on the second, or a stereo that is on but inaudible loses it."""
+    pod = Pod(stereo=["enclave"])
+    c, now, played, _ = upstairs_clock(tmp_path, monkeypatch, pod, kind="reminder")
+    ticks(c, now, 3)
+    assert pod.quiet == [True, False] and [p[0] for p in played] == [("enclave",)] * 2 and c.ringing is None
+
+
+def test_a_box_whose_stereo_is_off_rings_loud_from_the_first_ring(tmp_path, monkeypatch):
+    pod = Pod(stereo=[])
+    c, now, played, _ = upstairs_clock(tmp_path, monkeypatch, pod)
+    ticks(c, now, 2)
+    assert pod.quiet == [False, False] and pod.waited == []              # nothing else can ring: the box does
+    assert [p[0] for p in played] == [("enclave",)] * 2                   # the place's own output still gets its try
+
+
+def test_the_box_is_handed_the_stereos_own_ring_and_what_became_of_it(tmp_path, monkeypatch):
+    """hub.Room.ring waits for this task, stays deaf until it is done, and speaks itself when it answers False."""
+    events = []
+    pod = Pod(stereo=["enclave"])
+    c, now, played, _ = upstairs_clock(tmp_path, monkeypatch, pod)
+
+    async def playing(kinds, clips, gain):
+        events.append("playing")
+        await asyncio.sleep(0.01)
+        events.append("played")
+        return False                                                     # nothing sounded: the router dropped the clip
+    c._play_outs = playing
+    real_ring = pod.ring
+
+    async def noting_ring(tone, voice, text, quiet=False, wait=None):
+        events.append("box rings")
+        await real_ring(tone, voice, text, quiet=quiet, wait=wait)
+        events.append("box done")
+    pod.ring = noting_ring
+    run(c.tick())
+    assert pod.waited == [False] and events[-1] == "box done" and events.index("played") < events.index("box done")
+
+
+def test_a_stereo_that_cannot_be_looked_at_never_keeps_the_alarm_quiet(tmp_path, monkeypatch):
+    class Broken(Pod):
+        def stereo_kinds(self):
+            raise RuntimeError("router gone")
+    pod = Broken()
+    c, now, played, _ = upstairs_clock(tmp_path, monkeypatch, pod)
+    run(c.tick())
+    assert pod.quiet == [False] and c.ringing is not None               # the box rings; the place's own output still gets its try
+    assert played[-1][0] == ("enclave",)
+
+
+def test_an_alarm_that_names_a_place_with_no_box_rings_as_before(tmp_path, monkeypatch):
+    pod = Pod(stereo=["enclave"])
+    c, now, played, a = upstairs_clock(tmp_path, monkeypatch, pod, where="downstairs")
+    assert c.place_of(a)[1] == []                                        # downstairs has no box in this layout: only its outputs ring
+    run(c.tick())
+    assert pod.rang == [] and pod.waited == [] and c.ringing is not None
+
+
+def test_the_real_play_outs_says_whether_anything_sounded(tmp_path):
+    """The answer the silent box waits for: True when a clip started, False when nothing did (no router, nothing open, a dropped clip)."""
+    import speaker_out
+    now = [at(2026, 11, 2, 6, 0)]
+    c = AlarmClock(tmp_path, {}, clock=lambda: now[0], log=lambda m: None, router=Router(open_=("enclave",)), layout=LAYOUT)
+    plays = []
+
+    class Out:
+        def __init__(self, router, kinds, **kw):
+            self.answers = plays
+
+        async def play(self, clip, gain=1.0):
+            return self.answers.pop(0)
+    real, speaker_out.RoutedOut = speaker_out.RoutedOut, Out
+    try:
+        plays[:] = [True, True]
+        assert run(c._play_outs(["enclave"], [b"RIFFtone", b"mp3"], 0.5)) is True
+        plays[:] = [False, False]
+        assert run(c._play_outs(["enclave"], [b"RIFFtone", b"mp3"], 0.5)) is False
+        plays[:] = [False, True]
+        assert run(c._play_outs(["enclave"], [b"RIFFtone", b"mp3"], 0.5)) is True          # the chime dropped, the words sounded
+        assert run(c._play_outs(["hdmi"], [b"RIFFtone"], 0.5)) is False                     # nothing of it is open
+        c.router = None
+        assert run(c._play_outs(["enclave"], [b"RIFFtone"], 0.5)) is False
+    finally:
+        speaker_out.RoutedOut = real

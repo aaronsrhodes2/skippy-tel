@@ -8,7 +8,7 @@ import numpy as np
 import router as rt
 import speaker_out
 import sync
-from hub import Room
+from hub import BUSY, FOLLOWUP, IDLE, Room
 from timers import Timers
 
 
@@ -91,6 +91,158 @@ def test_one_voice_off_keeps_both_speaking():
 
 def test_the_vault_setting_and_the_room_decide_one_voice():
     assert speaker_out.one_voice({}) and not speaker_out.one_voice({"SATELLITE_ONE_VOICE": "0"})
+
+
+def test_a_rooms_stereo_kinds_are_its_one_voice_while_it_is_on():
+    """The box's own speaker is the last resort (the Captain, 2026-11-04): the alarm clock and the announce tool ask the room which stereo stands in for it."""
+    out = Out()
+    out.kinds = {"enclave"}
+    r = room(out)
+    assert r.stereo_kinds() == ["enclave"]
+    out.open_ = False
+    assert r.stereo_kinds() == []                                      # the stereo is off: only the box can speak
+    out.open_, out.sole = True, False
+    assert r.stereo_kinds() == []                                      # one voice is off: the box speaks as well, so the stereo does not stand in for it
+
+
+def test_a_look_at_the_stereo_spends_no_probe_and_leaves_out_what_is_taken_for_off():
+    """RoutedOut.available() restarts a silent output's probe clock and flags the next clip as its probe, but the alarm clock and the announce tool play on
+    a RoutedOut of their own, which drops the outputs taken for off: they ask playable() instead (found by the review of this change, 2026-11-04)."""
+    class Cal:
+        def silent(self, kind):
+            return kind == "hdmi"
+
+        def probe_due(self, kind):
+            raise AssertionError("a look must not touch the probe clock")
+
+    class FakeRouter:
+        calibrator = Cal()
+
+        def available(self, kind):
+            return True
+
+    both = speaker_out.RoutedOut(FakeRouter(), ["hdmi", "enclave"], log=lambda m: None, sole=True)
+    r = Room("living", Link(), Gate(), object(), Timers(), log=lambda m: None, pc_outs=[both])
+    assert both.playable() == ["enclave"] and r.stereo_kinds() == ["enclave"] and both.probe is False
+    only = speaker_out.RoutedOut(FakeRouter(), ["hdmi"], log=lambda m: None, sole=True)
+    r = Room("theater", Link(), Gate(), object(), Timers(), log=lambda m: None, pc_outs=[only])
+    assert only.playable() == [] and r.stereo_kinds() == [] and only.probe is False       # taken for off: the box speaks, and no probe is spent
+
+
+def test_the_real_clock_and_the_real_room_ring_the_stereo_alone_then_the_box_joins(tmp_path, monkeypatch):
+    """The contract between AlarmClock.ring and hub.Room (stereo_kinds, ring(quiet=, wait=)) with neither side faked: the Enclave rings alone for two
+    rings and the box listens for "stop" once it is done; at the third ring the box rings too."""
+    import alarm_clock
+    from test_sat_alarm_clock import UPSTAIRS, at, make, run
+    monkeypatch.setattr(alarm_clock, "LISTEN_AFTER_S", 0)
+    out = Out()
+    out.kinds = {"enclave"}
+    r = Room("living", Link(), Gate(), object(), Timers(), log=lambda m: None, pc_outs=[out])
+    now = [at(2026, 11, 2, 6, 0)]
+    c, _, played = make(tmp_path, now, rooms={"living": r})
+    c.layout = UPSTAIRS
+    c.alarms.add("alarm", "06:30", where="upstairs", room="living")
+    now[0] = at(2026, 11, 2, 6, 30)
+    for ring in (1, 2):
+        run(c.tick())
+        assert r.link.spoken == [] and r.mode == FOLLOWUP and played[-1][0] == ("enclave",), ring     # the stereo alone; the clock opened the window
+        r.mode = IDLE
+        now[0] += 60
+    run(c.tick())
+    assert [s[0] for s in r.link.spoken] == ["announce", "announce"] and played[-1][0] == ("enclave",)   # ring 3: the chime and the words on the box too
+    out.open_ = False
+    r.link.spoken.clear()
+    now[0] += 60
+    run(c.tick())
+    assert [s[0] for s in r.link.spoken] == ["announce", "announce"]
+
+
+def test_a_stereo_that_is_off_at_the_first_ring_means_the_box_rings_at_once(tmp_path, monkeypatch):
+    import alarm_clock
+    from test_sat_alarm_clock import UPSTAIRS, at, make, run
+    monkeypatch.setattr(alarm_clock, "LISTEN_AFTER_S", 0)
+    out = Out(open_=False)
+    out.kinds = {"enclave"}
+    r = Room("living", Link(), Gate(), object(), Timers(), log=lambda m: None, pc_outs=[out])
+    now = [at(2026, 11, 2, 6, 0)]
+    c, _, played = make(tmp_path, now, rooms={"living": r})
+    c.layout = UPSTAIRS
+    c.alarms.add("alarm", "06:30", where="upstairs", room="living")
+    now[0] = at(2026, 11, 2, 6, 30)
+    run(c.tick())
+    assert [s[0] for s in r.link.spoken] == ["announce", "announce"]       # nothing is on in the room: the box is the only thing that can wake him
+
+
+def silent_ring(r, wait):
+    import alarm_clock
+    return r.ring(alarm_clock.chime(0.5, repeats=1), b"VOICE", "Your alarm.", quiet=True, wait=wait)
+
+
+def test_a_silent_ring_is_deaf_until_the_stereo_has_finished_and_then_listens_as_after_any_ring(monkeypatch):
+    """The Enclave beside the box says "Say stop" aloud: a box that listened then would stop the alarm by itself, in a quiet room or in the middle of
+    a conversation window alike (found by the review of this change, 2026-11-04)."""
+    import alarm_clock
+    monkeypatch.setattr(alarm_clock, "LISTEN_AFTER_S", 0.05)
+    for before in (IDLE, FOLLOWUP):
+        out = Out()
+        out.kinds = {"enclave"}
+        r = room(out)
+        r.mode = before
+
+        async def go():
+            stereo = asyncio.get_running_loop().create_future()
+            ring = asyncio.ensure_future(silent_ring(r, stereo))
+            await asyncio.sleep(0.03)
+            ringing = r.mode                                           # the stereo is still ringing
+            stereo.set_result(True)
+            await asyncio.sleep(0.02)
+            echo = r.mode                                              # it has finished; its echo has not died away
+            await ring
+            return ringing, echo
+        ringing, echo = asyncio.run(go())
+        assert (ringing, echo) == (BUSY, BUSY), before
+        assert r.link.spoken == [] and r.mode == FOLLOWUP              # no sound from the box; then the "stop" window
+
+
+def test_a_stereo_ring_that_failed_or_never_finished_means_the_box_rings_after_all(monkeypatch):
+    import alarm_clock
+    monkeypatch.setattr(alarm_clock, "LISTEN_AFTER_S", 0)
+    monkeypatch.setattr(alarm_clock, "RING_WAIT_S", 0.05)
+    for outcome in ("nothing sounded", "raised", "never finished"):
+        out = Out()
+        out.kinds = {"enclave"}
+        r = room(out)
+
+        async def go():
+            stereo = asyncio.get_running_loop().create_future()
+            if outcome == "nothing sounded":
+                stereo.set_result(False)
+            elif outcome == "raised":
+                stereo.set_exception(RuntimeError("mixer stalled"))
+            await silent_ring(r, stereo)
+        asyncio.run(go())
+        assert [s[0] for s in r.link.spoken] == ["announce", "announce"], outcome      # the chime and the words, on the box
+        assert r.mode == FOLLOWUP
+
+
+def test_a_loud_ring_is_as_before_the_chime_the_words_and_then_listening():
+    import alarm_clock
+    out = Out()
+    out.kinds = {"enclave"}
+    r = room(out)
+    asyncio.run(r.ring(alarm_clock.chime(0.5, repeats=1), b"VOICE", "Your alarm."))
+    assert [s[0] for s in r.link.spoken] == ["announce", "announce"] and r.mode == FOLLOWUP
+
+
+def test_a_rooms_stereo_is_what_the_vault_gives_it_not_where_its_voice_was_last_sent():
+    """"Talk to me downstairs" rewrites the RoutedOut's kinds until the next restart (hub.music_tools): another floor's stereo is no stand-in for this box."""
+    out = Out()
+    out.kinds = {"enclave", "hdmi"}                                    # "talk to me everywhere"
+    r = room(out)
+    r.env = {"SATELLITE_OUT": "office=pod+enclave"}
+    assert r.stereo_kinds() == ["enclave"]
+    out.kinds = {"hdmi"}                                               # "talk to me downstairs"
+    assert r.stereo_kinds() == []
 
 
 def test_the_lips_start_when_the_router_says_it_sounds():

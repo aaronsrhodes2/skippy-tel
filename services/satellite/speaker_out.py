@@ -187,6 +187,12 @@ class RoutedOut:
             return True
         return None
 
+    def playable(self) -> list[str]:
+        """The outputs that are open and not taken for off right now, sorted: a look that spends nothing. available() would restart a silent output's
+        probe clock and flag the next clip as its probe; the alarm clock and the announce tool ask this instead, because their clips go out on a
+        RoutedOut of their own, which drops the outputs taken for off (Room.stereo_kinds)."""
+        return sorted(k for k in self.kinds if self.router.available(k) and not self._silent(k))
+
     async def play(self, mp3: bytes, gain: float = 1.0, on_sound=None) -> bool:
         """Play it on the outputs; True when it started (False: dropped, never late). `on_sound(at, seconds)`, at once when it starts: when it
         sounds in the room (time.monotonic: the router's queue, the stream's latency and the measured rest, sync.py), for the pod's drawn lips."""

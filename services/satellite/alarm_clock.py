@@ -33,6 +33,9 @@ ALERT_AFTER_S = 3 * 60              # unanswered this long: his phone too
 ALERT_AGAIN_S = 10 * 60             # and once more, if he still hasn't answered
 GIVE_UP_S = 30 * 60                 # then it stops, and his phone is told it was never answered
 REMINDER_RINGS = 2
+POD_JOINS_AT_RING = 3               # a box whose room has a stereo that is on rings by it alone until this ring (2 minutes unanswered), then joins
+LISTEN_AFTER_S = 1.2                # a silent box opens its "stop" window this long after the stereo went quiet: the Enclave's latency and the room's echo
+RING_WAIT_S = 45                    # the longest a silent box waits for the stereo's ring (a clip is seconds long) before it speaks after all
 GAINS = (0.45, 0.6, 0.75, 0.9, 1.0)  # each ring a little louder (the first never startles him out of bed)
 CHECK_AT = "21:30"                  # the evening check: an alarm tomorrow and the way it rings is broken -> his phone is told tonight
 PORTAL_PAGE = "https://makerportal.live/alarms"
@@ -238,9 +241,28 @@ class AlarmClock:
         kinds, pods = self.place_of(a)
         tone = chime(gain, repeats=2 if n < 3 else 3) if a.kind == "alarm" else chime(gain * 0.7, repeats=1)
         voice = await self._voice(text)
-        self.log(f"ring {n} ({gain:.2f}): outputs {'+'.join(kinds) or 'none'}, pods {', '.join(pods) or 'none'}: {text}")
-        jobs = [self._play_outs(kinds, [tone, voice], gain)] if kinds else []
-        jobs += [self._ring_pod(room, tone, voice, text) for room in pods]
+        # The box's own speaker is the last resort (the Captain, 2026-11-04: "we never want to output to the hub speakers unless that house level's
+        # stereo is unavailable"): a box whose room's stereo is on stays silent (it still shows the words, and stays deaf until the stereo is quiet)
+        # while the stereo rings for it, and speaks after all if that ring fails. The software cannot see the stereo's own switch or knob, so the
+        # box joins the stereo when nobody has answered in two minutes (an alarm's third ring; a reminder rings twice, so its second).
+        joins_at = POD_JOINS_AT_RING if a.kind == "alarm" else min(POD_JOINS_AT_RING, REMINDER_RINGS)
+        quiet, kinds = [], list(kinds)
+        for room in pods:
+            r = (getattr(self.hub, "rooms", {}) or {}).get(self.hub_room(room))
+            try:
+                outs = r.stereo_kinds() if r is not None and hasattr(r, "stereo_kinds") else []
+            except Exception as e:                      # noqa: BLE001 — a failed look at the stereo must never keep an alarm quiet: the box rings
+                self.log(f"(alarm: could not look at {room}'s stereo: {type(e).__name__}: {e}: the box rings)")
+                outs = []
+            if outs:
+                kinds += [k for k in outs if k not in kinds]    # the room's stereo rings every time it is on: the box joins it, it never replaces it
+                if n < joins_at:
+                    quiet.append(room)
+        self.log(f"ring {n} ({gain:.2f}): outputs {'+'.join(kinds) or 'none'}, pods {', '.join(pods) or 'none'}"
+                 f"{' (silent: ' + ', '.join(quiet) + ')' if quiet else ''}: {text}")
+        stereo = asyncio.ensure_future(self._play_outs(kinds, [tone, voice], gain)) if kinds else None
+        jobs = [stereo] if stereo is not None else []
+        jobs += [self._ring_pod(room, tone, voice, text, quiet=room in quiet, wait=stereo) for room in pods]
         await asyncio.gather(*jobs, return_exceptions=True)
 
     async def _voice(self, text: str) -> bytes | None:
@@ -258,23 +280,30 @@ class AlarmClock:
                 self.log(f"(alarm: no voice at all: {e}: the chime only)")
         return None
 
-    async def _play_outs(self, kinds: list[str], clips: list, gain: float) -> None:
+    async def _play_outs(self, kinds: list[str], clips: list, gain: float) -> bool:
+        """The clips on the router's outputs, one after the other. True when something sounded, False when nothing did (no router, nothing open,
+        every clip dropped): a box that stayed silent for this ring speaks after all (hub.Room.ring)."""
         if self.router is None:
-            return
+            return False
         import speaker_out                              # noqa: PLC0415
         out = speaker_out.RoutedOut(self.router, kinds, log=self.log, duck_others=False)
         if not any(self.router.available(k) for k in kinds):
             self.log(f"(alarm: {'+'.join(kinds)} not open: nobody hears it there)")
-            return
+            return False
+        sounded = False
         for clip in clips:
             if clip:
-                await out.play(clip, gain=gain if clip[:4] == b"RIFF" else min(1.0, gain + 0.2))
+                sounded = bool(await out.play(clip, gain=gain if clip[:4] == b"RIFF" else min(1.0, gain + 0.2))) or sounded
+        return sounded
 
-    async def _ring_pod(self, room: str, tone: bytes, voice: bytes | None, text: str) -> None:
+    async def _ring_pod(self, room: str, tone: bytes, voice: bytes | None, text: str, quiet: bool = False, wait=None) -> None:
         r = (getattr(self.hub, "rooms", {}) or {}).get(self.hub_room(room))
         if r is None:
             return
-        await r.ring(tone, voice, text)
+        if quiet:
+            await r.ring(tone, voice, text, quiet=True, wait=wait)
+        else:
+            await r.ring(tone, voice, text)
 
     async def say_in(self, room: str, text: str) -> None:
         """A timer's words in its room (its pod and the announcement outputs), or, its pod away, the announcement outputs alone."""

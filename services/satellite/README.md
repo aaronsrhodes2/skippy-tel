@@ -60,6 +60,20 @@ Captain switched it off), logged as `(no audio from the box ...: ...)` and `(the
 checks every reply. Four long replies in a row it never heard and the output is taken for off: the pod speaks. Every 10 min one reply goes to the
 output alone as a probe; heard, it is the room's voice again, not heard, the pod says it right after.
 
+**The box's own speaker is the last resort** (the Captain, 2026-11-04: "we never want to output to the hub speakers unless that house level's stereo is
+unavailable"). A room's stereo (the Enclave upstairs, the Sony downstairs) is its voice; the box is the microphone, the face and the lips, and its speaker
+sounds only when none of its room's stereos is on. So `SATELLITE_OUT=living=pod+enclave` does not mean both: `pod` there says the box may be the fallback.
+Replies, the filler, timers, routines and Home-chat words (`Room._out`), alarms and reminders (`AlarmClock.ring`), and the announce tool to other rooms all
+follow it (`Room.stereo_kinds()` is the one test: the room's own outputs from the vault that are open and not taken for off, a look that spends no probe).
+An alarm: the stereo rings every time it is on; the box stays silent for two rings and joins it at ring `POD_JOINS_AT_RING` (a reminder rings twice, so its
+box joins on the second), because the software cannot see the stereo's own switch, knob or input. A silent box shows the words but stays busy and deaf until
+the stereo's ring is over plus `LISTEN_AFTER_S` (its microphone would hear "Say stop" and stop the alarm itself), then opens the "stop" window as after any
+ring; if the stereo's ring failed (nothing sounded, an error, over `RING_WAIT_S`) it rings after all (`Room.ring(quiet=, wait=)`). Music: "here" is the room's
+place (`house_layout.json`: the living room is the Enclave), and a pod is a station speaker (`pod:<room>`) only in a room with no stereo; with the stereo off
+the station says "Upstairs isn't on, so not there" and does not move to the box.
+The firmware plays no sound of its own (`rooms/skippy-room.yaml`). The vault's room name and the layout's `pods` must agree (`SATELLITE_ROOMS=living=...`,
+`pods: ["living"]`): with the vault saying `theater` while the box stood upstairs (2026-11-02 to 11-04), "here" and the voice went to the Sony.
+
 ## The house, natively (no Alexa, no cloud, no hub)
 
 Skippy talks to the lights and switches itself, over the local network, with open-source libraries. His Leviton Decora Smart Wi-Fi dimmers and switches
