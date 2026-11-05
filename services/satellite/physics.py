@@ -38,7 +38,7 @@ TOOL = {"name": "ask_mentat",
 
 PROMPT = (" For a physics, chemistry, astronomy or unit-conversion NUMBER (an escape velocity, a boiling point, a molar mass, how long light takes, how many ounces in a cup), "
           "call ask_mentat with his question in his own words, numbers and units included: Mentat is the calculator, you never are. Say the number the way the tool gave it "
-          "(said the way a person would), say it came from Mentat and name its source in a few words ('Mentat, from CODATA'), and if the tool says Mentat read the question "
+          "(said the way a person would), say it came from Mentat and name the source exactly as the Source line says, in a few words, and if the tool says Mentat read the question "
           "with an input he did not give, say what it assumed. Never recall, convert or recompute a physical number yourself: if he wants other units, ask Mentat again. If "
           "Mentat is offline or cannot model the question, say so; do not answer it yourself. If it needs an input it suggests a value: tell him the suggestion and ask "
           "whether to use it, and only if he says yes call ask_mentat again with use_suggestion=true. Never read its formula or notes aloud. Mentat is for physics, chemistry, "
@@ -50,7 +50,7 @@ SLOW = ("Mentat did not answer in time (it is busy, or a model on skippy-core is
         "and do not give a number from memory.")
 NO_SUGGESTION = ("There is no suggestion of Mentat's waiting (they last five minutes). Ask him the question again, with the values he wants, and call ask_mentat with "
                  "the question alone.")
-REMINDER = (" (Say the number in the units given, name Mentat and its source in a few words; never calculate or convert it yourself. "
+REMINDER = (" (Say the number in the units given, name Mentat and the source exactly as the Source line says, in a few words, and no other source; never calculate or convert it yourself. "
             "Check that the source and the reading are about what he asked: if Mentat solved a different question, or used an input he did not give, say it misread or "
             "assumed that and do not pass the number off as the answer; you cannot ask Mentat again in this reply, so do not say you will: he can ask again in other words.)")
 

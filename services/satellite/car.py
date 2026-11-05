@@ -31,8 +31,8 @@ TOOL = {"name": "car_status",
             "about": {"type": "string", "enum": list(ABOUT), "description": "What he asked about: charge (battery, range, plugged in), where (home or away), locks, climate, or all (default)."}}}}
 
 PROMPT = (" For his car (its charge, battery or range, whether it is plugged in, charging, locked or at home, where it is), call car_status: it is read only, never wakes the car, "
-          "and gives TeslaMate's last report. Answer in a sentence or two with only what he asked ('Fifty-seven percent, about two hundred miles of range, and it is not plugged in'), "
-          "never the whole card. A sleeping or offline car still has a last reading: give it and say how old it is, and never say you cannot reach the car. From this voice you "
+          "and gives TeslaMate's last report. Answer in a sentence or two with only what he asked, using only the numbers the tool gave (the percent, the miles of range, whether it is "
+          "plugged in), never the whole card. A sleeping or offline car still has a last reading: give it and say how old it is, and never say you cannot reach the car. From this voice you "
           "cannot lock, unlock, heat, charge or open the car: say so if he asks (only the private Skippy on makerportal.live can start or stop its charging), and never say you "
           "have no access to his car.")
 
