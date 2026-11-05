@@ -198,7 +198,11 @@ skippy-core sits in the bedroom with the TV on its HDMI. The TV is a console tha
   audio on Sunshine leaves the default alone and captures whatever it is. The first session decides for all of them: a Moonlight client that
   mutes the host (its default) and connects while none is up still takes the default for its own session and gives it back at its end.
   (Sunshine's newer `external_audio` setting, not in 2026.914, is the
-  cleaner switch once Sunshine is updated.) **Look:** `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/audio-default.ps1
+  cleaner switch once Sunshine is updated.) **The PC's volume is also the TV's** (measured 2026-11-04: the same beeps with Windows' volume on
+  the EPSON at 20% reached the TV's sink 24 dB lower; expect mute to silence it): keep Windows' volume up and set the room's level on the
+  projector/receiver; the TV's own level is skippy-core's HDMI sink (40% then). **Heal** a PC that went silent again (a muting client got in
+  first): end that client's session, `sudo systemctl restart couch`, then `audio-default.ps1 get` (`set EPSON` if it is not there). Not tested:
+  the projector switched off and on again (Windows picks another default while its endpoint is gone). **Look:** `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/audio-default.ps1
   sessions` (which program plays to which device, with its peak), `... watch` (a line for every change of the default: catches who moves it),
   `... set EPSON` (puts it back).
 

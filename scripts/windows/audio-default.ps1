@@ -5,15 +5,18 @@
 #   get             the default for each role
 #   set <name|id>   make the ONE active endpoint whose name contains <name> (or whose id is <id>) the default (-Role all|console|multimedia|comm)
 #   watch           print a line whenever the default changes (-Seconds N, -IntervalMs N): the way to catch who moves it
-#   peaks           the loudest peak each endpoint showed over -Seconds N (is anything reaching that device?)
+#   peaks           the loudest peak each endpoint showed over -Seconds N (is anything reaching that device?). It reads the signal BEFORE the
+#                   device's volume: at 20% volume the meter still reads full, while Sunshine's loopback (the TV) gets 24 dB less
 #   sessions        every program with an audio session: which device it plays to, its own volume/mute, its peak over -Seconds N
 #                   (a game that opened its sound while the default was elsewhere shows up here, silent on the wrong device)
+#   volume <name>   read an active device's master volume; with -Percent N set it (says before and after)
 param(
-  [Parameter(Position = 0)][ValidateSet('list', 'get', 'set', 'watch', 'peaks', 'sessions')][string]$Action = 'list',
+  [Parameter(Position = 0)][ValidateSet('list', 'get', 'set', 'watch', 'peaks', 'sessions', 'volume')][string]$Action = 'list',
   [Parameter(Position = 1)][string]$Arg = '',
   [int]$Seconds = 10,
   [int]$IntervalMs = 250,
-  [ValidateSet('all', 'console', 'multimedia', 'comm')][string]$Role = 'all'
+  [ValidateSet('all', 'console', 'multimedia', 'comm')][string]$Role = 'all',
+  [int]$Percent = -1
 )
 $ErrorActionPreference = 'Stop'
 
@@ -296,6 +299,38 @@ namespace SkAudio
             return pick.Name;
         }
 
+        // read (percent < 0) or set the master volume of the ONE active playback device matching <idOrName>; says before and after
+        public static string Volume(string idOrName, int percent)
+        {
+            IMMDeviceEnumerator en = NewEnum();
+            IMMDeviceCollection col;
+            en.EnumAudioEndpoints(0, 1, out col);
+            int n; col.GetCount(out n);
+            IMMDevice found = null; string fname = null; int hits = 0;
+            for (int i = 0; i < n; i++)
+            {
+                IMMDevice dev; col.Item(i, out dev);
+                string id; dev.GetId(out id);
+                string name = FriendlyName(dev);
+                if (string.Equals(id, idOrName, StringComparison.OrdinalIgnoreCase)) { found = dev; fname = name; hits = 1; break; }
+                if (name.IndexOf(idOrName, StringComparison.OrdinalIgnoreCase) >= 0) { found = dev; fname = name; hits++; }
+            }
+            if (hits == 0) throw new Exception("no ACTIVE playback device matches '" + idOrName + "'");
+            if (hits > 1) throw new Exception("more than one active playback device matches '" + idOrName + "': be more specific");
+            Guid iid = IID_Volume; object o;
+            if (found.Activate(ref iid, CLSCTX_ALL, IntPtr.Zero, out o) != 0) throw new Exception("cannot open the endpoint volume");
+            IAudioEndpointVolume v = (IAudioEndpointVolume)o;
+            float before; v.GetMasterVolumeLevelScalar(out before);
+            if (percent >= 0)
+            {
+                Guid g = Guid.Empty;
+                int hr = v.SetMasterVolumeLevelScalar(percent / 100f, ref g);
+                if (hr != 0) throw new Exception("SetMasterVolumeLevelScalar failed 0x" + hr.ToString("X"));
+            }
+            float after; v.GetMasterVolumeLevelScalar(out after);
+            return fname + ": volume " + ((int)Math.Round(before * 100)) + "% -> " + ((int)Math.Round(after * 100)) + "%";
+        }
+
         public static void Watch(int seconds, int intervalMs)
         {
             IMMDeviceEnumerator en = NewEnum();
@@ -418,4 +453,8 @@ switch ($Action) {
   'watch' { [SkAudio.Audio]::Watch($Seconds, $IntervalMs) }
   'peaks' { [SkAudio.Audio]::Peaks($Seconds, 40) }
   'sessions' { [SkAudio.Audio]::Sessions($Seconds) }
+  'volume' {
+    if (-not $Arg) { throw 'volume needs a device name (or id); add -Percent N to set it' }
+    [SkAudio.Audio]::Volume($Arg, $Percent)
+  }
 }
