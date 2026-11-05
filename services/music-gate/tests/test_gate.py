@@ -138,20 +138,32 @@ def test_catalog_and_seeking(client):
     assert client.get(f"/t/{tok}/a/Artist%20A/Album%201/tagged.m4a").mimetype == "audio/mp4"
 
 
-def test_each_audio_response_leaves_one_line_with_what_the_client_took(client, monkeypatch):
-    """The Captain, 2026-11-05: throughput problems to the car, and nothing in the log to read."""
+def test_each_audio_response_leaves_one_line_with_what_the_gate_handed_over(client, monkeypatch):
+    """The Captain, 2026-11-05: throughput problems to the car, and nothing in the log to read. The line says what this gate handed to its connection (not what the car
+    received: the review measured Docker's forwarder and Tailscale's proxy absorbing several MB), and a HEAD or a 304 leaves one too."""
     lines = []
     monkeypatch.setattr(gate.logging, "info", lambda fmt, *a: lines.append(fmt % a))
     tok = gate.sign(KEY, NOW + 3600)
     song = "Artist%20A/Album%201/01%20-%20Artist%20A%20-%20Song%20One.mp3"
     whole = client.get(f"/t/{tok}/a/{song}", headers={"User-Agent": "QtCarBrowser Tesla"})
     assert len(whole.data) == 3 + 256 * 40 and whole.status_code == 200
+    whole.close()                                                       # a real server closes every response; the test client only does when asked
     part = client.get(f"/t/{tok}/a/{song}", headers={"Range": "bytes=10-19"})
     assert part.status_code == 206 and len(part.data) == 10
+    part.close()
     assert len(lines) == 2
-    assert lines[0].startswith("audio 200 01 - Artist A - Song One.mp3 range=- sent=10243 of 10243 in ") and lines[0].endswith("ua=QtCarBrowser Tesla")
-    assert lines[1].startswith("audio 206 01 - Artist A - Song One.mp3 range=bytes=10-19 sent=10 of 10 in ")
+    assert lines[0].startswith("audio 200 01 - Artist A - Song One.mp3 range=- handed=10243 of 10243 held=") and lines[0].endswith("ua=QtCarBrowser Tesla")
+    assert lines[1].startswith("audio 206 01 - Artist A - Song One.mp3 range=bytes=10-19 handed=10 of 10 held=")
     assert all(tok not in line for line in lines)                      # the pass is the credential: never in a log
+    etag = whole.headers["ETag"]
+    head = client.head(f"/t/{tok}/a/{song}")
+    unchanged = client.get(f"/t/{tok}/a/{song}", headers={"If-None-Match": etag})
+    assert head.status_code == 200 and unchanged.status_code == 304
+    head.close()
+    unchanged.close()
+    assert len(lines) == 4                                              # their bodies are never read, yet each response leaves its line (and its file is closed)
+    assert lines[2].startswith("audio 200 ") and "handed=0 of 10243" in lines[2]
+    assert lines[3].startswith("audio 304 ") and "handed=0" in lines[3]
 
 
 @pytest.mark.parametrize("rel", ["../secret.mp3", "Artist%20A/../../secret.mp3", "Artist%20A/Album%201/lossless.flac",

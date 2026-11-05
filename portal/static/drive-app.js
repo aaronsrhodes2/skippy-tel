@@ -24,6 +24,8 @@
 
   // ── ducking: this page's own player follows Skippy's voice ──
   let ours = false;                                      // the next pause is this page's own (a key), not the system's
+  let warmed = "", warmCtl = null;                        // the song fetched ahead (see warmNext) and the fetch that is still running
+  function warmStop() { if (warmCtl) { warmCtl.abort(); warmCtl = null; } }   // an unfinished whole-file download of an address makes the audio element's own request for it wait (Chromium's cache lock, up to 20 s of silence)
   const duck = window.SkippyDuck ? SkippyDuck.follow({ level: f => { au.volume = Math.max(0, Math.min(1, f)); }, paused: () => au.paused, resume: () => play() }) : null;
   au.addEventListener("pause", () => { if (!ours && !au.ended) heard("system-pause"); if (duck && !au.ended) duck.paused(ours); ours = false; if (S.mode === "book") saveBook(true); paint(); });
   au.addEventListener("play", paint);
@@ -55,6 +57,7 @@
     S.label = "Resume: " + b.t;
     now("book", b.t + (b.a ? " · " + b.a : ""));
     pauseHouseBook();
+    warmStop();
     ours = true; au.src = bu(`a/${b.id}`);
     au.addEventListener("loadedmetadata", () => { au.currentTime = pos; }, { once: true });
     meta(b.t, b.a, "Audiobooks");
@@ -165,9 +168,12 @@
       S.q = [/^spotify:/.test(k) ? { kind: "spotify", uri: k } : { kind: "bilby", path: k }].concat(S.q.filter(it => (it.path || it.uri) !== k));
       S.startAt = /^spotify:/.test(k) ? 0 : +first.pos || 0;
     }
+    if (!S.q.some(it => D.playable(it, S.sp.can))) {      // checked BEFORE the mode changes (the review, 2026-11-05): what was playing goes on under its own mode, and the words say why
+      now("shuffle", S.q.length ? "Those are Spotify songs, and Spotify is off in the car" : mode === "library" ? "No favorites yet: the star in Bilby marks one" : "The library is empty");
+      paint(); return;
+    }
     S.label = "Bilby: " + mode;
     S.mode = mode; S.qi = -1;
-    if (!S.q.some(it => D.playable(it, S.sp.can))) { now("shuffle", mode === "library" ? "No favorites yet: the star in Bilby marks one" : "The library is empty"); paint(); return; }
     await nextSong();
   }
   function build(mode, lib, pool, sp, only) {          // only: return the queue without making it the current one
@@ -235,6 +241,7 @@
     const t = S.lib.get(it.path) || { t: it.path, a: "" };
     try { await musicGate(); } catch (e) { now("shuffle", String(e.message || e)); return; }
     now("shuffle", t.t + (t.a ? " · " + t.a : ""));
+    warmStop();
     ours = true; au.src = mu("a", it.path);
     if (S.startAt > 0) { const at = S.startAt; au.addEventListener("loadedmetadata", () => { au.currentTime = at; }, { once: true }); }
     S.startAt = 0;
@@ -256,12 +263,16 @@
   // The next song is fetched whole while this one plays, at low priority (the Captain, 2026-11-05: "throughput problems to the car"): on a poor link a new song costs a new
   // connection (seconds of handshake through a slow Funnel ingress) and a cold start; fetched ahead it is in the browser's cache, under the same address, when `ended` sets it
   // as the source. Nothing about playing changes: a miss is just today's cold start. Once per song; a failure is not retried (the link is poor, the current song comes first).
-  let warmed = "";
+  // Two rules from the review (2026-11-05, both reproduced in Chrome 156): it starts only once THIS song is wholly downloaded (at 0.5 Mbit/s two downloads left both under the 40 KB/s a
+  // 320 kbps song needs: 7 stalls in 100 s), and it is aborted before the audio element is given a new source (otherwise the element's Range request for the same address waited for it).
   function warmNext() {
     const path = D.warmTarget(S.q, S.qi, S.sp.can);
     if (!path || path === warmed || !S.music) return;
+    const b = au.buffered;
+    if (!D.songFullyBuffered(au.duration, b && b.length ? b.end(b.length - 1) : 0)) return;
     warmed = path;
-    fetch(mu("a", path), { priority: "low" }).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => {});
+    const ctl = warmCtl = new AbortController();
+    fetch(mu("a", path), { priority: "low", signal: ctl.signal }).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => {}).finally(() => { if (warmCtl === ctl) warmCtl = null; });
   }
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveBook(true); });
   addEventListener("pagehide", () => saveBook(true));

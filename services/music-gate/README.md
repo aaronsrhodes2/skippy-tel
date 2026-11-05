@@ -16,7 +16,7 @@ step, its own session like flask-api's, since the module names `gate`, `library`
 | `GET /health` | no pass: `{ok, ready, tracks, scanning, lyrics}`, the reporter's probe |
 | `catalog.json` | the library, gzipped, ETag. `fields` lists the columns: `p,t,a,al,n,d,g,s,art,y,m` (path, title, artist, album, track, disc, genre, seconds, has art, **year** (0 unknown), **mtime**). New columns only ever go on the end |
 | `lyrics.json` | `{"v":1,"by":{<catalog path>: "one sentence about the song"}}`, gzipped, ETag. `by` is empty until flask-api has answered once |
-| `a/<path>` | the track, with Range. Each response leaves one line in the log when it ends (2026-11-05, for the car's throughput): `audio 206 <file> range=bytes=0- sent=4123456 of 4700000 in 61.3s ua=<first 40 characters>`, never the pass; a `sent` short of the length is a client that gave up (the player then asks again from byte 0) |
+| `a/<path>` | the track, with Range. Each response for a song (also a HEAD or a 304) leaves one line in the log when it is over (2026-11-05, for the car's throughput): `audio 206 <file> range=bytes=0- handed=4123456 of 4700000 held=61.3s ua=<first 40 characters>`, never the pass. `handed` is what this gate gave its connection, not what the car received: Docker's port forwarder and Tailscale's proxy absorb several MB, so a typical song reads "under a second" on any link and only a file bigger than that shows backpressure; a `handed` short of the length is a client that left before those buffers filled. Errors (403, 404, 416) leave no line |
 | `art/<path>` | the cover as it is in the file |
 | `art/<path>?w=192` | a JPEG thumbnail; `w` snaps to 96, 192, 384 or 768 (a non-number or 0 or > 4096 is a 400); `Cache-Control: private, max-age=604800` + ETag |
 

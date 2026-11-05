@@ -63,23 +63,34 @@ def valid(key: bytes, token: str, now: float) -> bool:
 
 
 def counted(resp: Response, rel: str, rng: str, ua: str, log=None, clock=time.monotonic) -> Response:
-    """One line in the log for each audio response, when it ends: the status, which song, the Range asked, the bytes the client actually took, how long it took, and
-    who asked (never the pass). The Captain, 2026-11-05: "Bilby was having throughput problems to the car, wondering why and if our song buffering is working"; this gate kept
-    no access log, so a bad drive left nothing to read. A song taken in a second is a good link, one taken in a minute is not, and a response that ends short is a client that
-    gave up (a stall: the player then asks again from byte 0)."""
-    started, sent, inner = clock(), [0], resp.response
+    """One line in the log for each audio response, when it is over (a song, a range of one, a HEAD, a 304): the status, which song, the Range asked, the bytes this gate
+    HANDED to its connection, how long that took, and who asked (never the pass). The Captain, 2026-11-05: "Bilby was having throughput problems to the car, wondering why
+    and if our song buffering is working"; this gate kept no access log, so a bad drive left nothing to read.
+
+    What it does NOT say is what the car received: Docker's port forwarder and Tailscale's proxy sit between this gate and the car and absorb several megabytes between
+    them, so a typical song reads "handed in under a second" on any link, and only a file larger than that shows real backpressure (the review, 2026-11-05, measured it). Read
+    `handed` short of the length as "the client left before those buffers filled" (a big file), never as a verdict on the link; for the link, the page's own timings are the
+    evidence. The line is written when the response closes, so a HEAD or a 304 (whose body is never read) leaves one too, and the file is closed then."""
+    started, handed, inner, logged = clock(), [0], resp.response, []
+
+    def over():                                  # once, by whichever ends first
+        if logged:
+            return
+        logged.append(1)
+        close = getattr(inner, "close", None)
+        if close is not None:
+            close()
+        (log or logging.info)("audio %s %s range=%s handed=%d of %s held=%.1fs ua=%s", resp.status_code, Path(rel).name[:60], rng, handed[0], resp.content_length, clock() - started, ua)
 
     def body():
         try:
             for chunk in inner:
-                sent[0] += len(chunk)
+                handed[0] += len(chunk)
                 yield chunk
         finally:
-            close = getattr(inner, "close", None)
-            if close is not None:
-                close()
-            (log or logging.info)("audio %s %s range=%s sent=%d of %s in %.1fs ua=%s", resp.status_code, Path(rel).name[:60], rng, sent[0], resp.content_length, clock() - started, ua)
+            over()
     resp.response = body()
+    resp.call_on_close(over)                     # a HEAD or a 304: werkzeug never reads the body, but it does close the response
     return resp
 
 

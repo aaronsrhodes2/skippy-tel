@@ -239,3 +239,13 @@ test("the song to fetch ahead is the next playable Bilby row: never a Spotify ro
   assert.equal(D.warmTarget(q, 2, false), "");         // the end of the queue
   assert.equal(D.warmTarget([], -1, false), "");
 });
+
+test("the next song is fetched ahead only once the playing one is wholly downloaded, so the two never share a slow link", () => {
+  assert.equal(D.songFullyBuffered(180, 0), false);          // nothing buffered yet
+  assert.equal(D.songFullyBuffered(180, 90), false);         // half of it
+  assert.equal(D.songFullyBuffered(180, 177.9), false);      // still two seconds short
+  assert.equal(D.songFullyBuffered(180, 178), true);         // the end, within the browser's rounding
+  assert.equal(D.songFullyBuffered(180, 180), true);
+  assert.equal(D.songFullyBuffered(0, 0), false);            // no duration known (a stream, or metadata not loaded): not yet
+  assert.equal(D.songFullyBuffered(NaN, 10), false);
+});
