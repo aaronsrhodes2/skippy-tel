@@ -224,7 +224,7 @@ class RoutedOut:
         lag = max((self.router.sinks[k].delay_s for k in self.kinds if k in self.router.sinks), default=0)
         self.talking_until = max(self.talking_until, time.monotonic() + len(pcm) / RATE + lag + ECHO_TAIL_S)
         ducker = Ducker() if self.duck_others else None            # other programs (Bilby in a browser, a game) still duck under him
-        started = False
+        started, p = False, None
         if ducker:
             await asyncio.to_thread(ducker.duck)
         try:
@@ -243,6 +243,9 @@ class RoutedOut:
                 self.last_heard = not any(self._silent(k) for k in targets)
             elif cal is not None and p.marks:                      # how far each copy landed from the pod's (sync.py), in the background
                 asyncio.ensure_future(asyncio.to_thread(cal.measure, pcm, dict(p.marks)))
+        except asyncio.CancelledError:
+            self.router.stop(p)                                    # an answer ended the ring (alarm_clock._end): the clip already on the router stops with it, not said over
+            raise
         finally:
             if ducker:
                 await asyncio.to_thread(ducker.restore)

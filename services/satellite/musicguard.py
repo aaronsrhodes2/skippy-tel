@@ -9,6 +9,9 @@ Three questions, each with its own check:
               commanded(heard, prev)     strict: his words ARE a music command ("play ...", "pause", "turn it down", "louder", "bilby ...", "heavy metal upstairs")
   ran?        a MUSIC tool is among the turn's actions (a light switched on does not excuse a music claim)
 A sentence with once / until / unless / whenever / if promises nothing and is skipped.
+A question about the house ("why is the Enclave playing metal?") is answered by describing it: a state in the answer is no claim. A request worded as a question ("how about some jazz
+upstairs?", "can I get some metal on the Enclave?") is no such question. A question about what HAPPENED ("did you stop the music?") answered in the past ("Yes, I paused it at 7:31.") is
+no claim either when the house log shows a music tool or a routine's music really ran lately (classify's `happened`); a claim of NOW ("Playing jazz now.") always is (2026-11-05 review).
 
   asked  + claim            -> reask   (ONE more model call, the music tools only, his words quoted, "only if those words ask for music")
   commanded + loose claim   -> reask   (shadow only: brain.py logs it and leaves the reply)
@@ -83,6 +86,10 @@ MUSIC_CLAIM = re.compile("|".join(f"(?:{p})" for p in PATTERNS.values()), re.I)
 # heavy metal?") a description is the answer, not a claim: the chat's prompt now carries what plays right now, so it answers from that (2026-11-04). The patterns that DO something stay claims.
 STATE_KEYS = {"state", "is_playing", "state3", "state4", "state5", "dj_state", "now_playing", "participle_state", "state2", "next"}
 MUSIC_ACTION = re.compile("|".join(f"(?:{p})" for k, p in PATTERNS.items() if k not in STATE_KEYS), re.I)
+# What a TRUE answer about the past says ("Did you stop the music?" - "Yes, I paused the music at 7:31."): the first person, past. When the house log shows that a music tool or a routine's music
+# really ran lately (classify's `happened`) those patterns are no claim in the answer to a question about what happened; a claim of NOW ("Playing jazz now.") still is (the review of 2026-11-05).
+HISTORY_KEYS = {"past_open", "perfect", "move", "dj_verb"}
+MUSIC_NOW = re.compile("|".join(f"(?:{p})" for k, p in PATTERNS.items() if k not in STATE_KEYS and k not in HISTORY_KEYS), re.I)
 
 LOOSE = {   # claims that name nothing, so they only mean something after a music request
     "gerund_open": rf"{OPEN}(?:now )?{GERUND_V}\b(?![^.!?\n]{{0,80}}{FINITE})",
@@ -126,6 +133,8 @@ COMMAND = re.compile(
     r"|\bwhat'?s playing\b|\bwhat is playing\b|\bwho (?:sings|is singing)\b", re.I)
 _INFO = re.compile(r"^(?:do|does|did|why|how|what|who|which|when|where|is|are|was|were|can i|may i|should i|could i|tell me about|have you)\b")
 _INFO_OK = re.compile(r"what'?s playing|what is playing|what (?:song|track)|who (?:sings|is singing|sang)")
+_REQUEST = re.compile(r"^(?:can i|could i|may i|how about|what about|why not|why don'?t you|when you|do you mind|would you mind|is it possible|are you able|is there a way)\b")      # a request, worded as a question
+_PAST_Q = re.compile(r"^(?:did|have you|has|was|were|why did|why was|why were|when did|what happened|what did|how come)\b")                  # a question about what happened, not about how things stand
 _AFFIRM = re.compile(r"^(?:yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|please do|please|that'?s (?:what i (?:just )?said|right|it|correct)|correct|affirmative|exactly|right)\b")
 _QUESTION = re.compile(r"\?")
 _HYPOTHETICAL = re.compile(r"\bif (?:i|we|you) (?:ask|asked|want|wanted|say|said|told|did|tried)\b|\bwhether\b|^(?:would|could|may|might|should|shall)\b", re.I)      # "would you play metal if I asked": a question about music, not an order
@@ -176,13 +185,19 @@ def sentences(text: str):
 
 
 def describing(heard: str) -> bool:
-    """He asked about the house ("why is the Enclave playing metal", "how loud is it", "is anything on"), not for music: a state in the answer is a description."""
+    """He asked about the house ("why is the Enclave playing metal", "how loud is it", "is anything on"), not for music: a state in the answer is a description. A request worded as a
+    question ("how about some jazz upstairs?", "can I get some metal on the Enclave?", "do you mind pausing it?") is not: its answer 'Jazz is now playing upstairs.' is a claim."""
     w = plain(heard)
-    return bool(_INFO.match(w)) and not _INFO_OK.search(w)
+    return bool(_INFO.match(w)) and not _INFO_OK.search(w) and not _REQUEST.match(w)
 
 
-def music_claimed(text: str, describing: bool = False) -> bool:
-    rx = MUSIC_ACTION if describing else MUSIC_CLAIM
+def history(heard: str) -> bool:
+    """He asked about the house AND about what happened ("did you stop the music?", "why did the music start again?"): a true answer says what was done, in the past."""
+    return describing(heard) and bool(_PAST_Q.match(plain(heard)))
+
+
+def music_claimed(text: str, describing: bool = False, past_ok: bool = False) -> bool:
+    rx = (MUSIC_NOW if past_ok else MUSIC_ACTION) if describing else MUSIC_CLAIM
     return any(rx.search(s) for s in _sentences(text))
 
 
@@ -193,14 +208,26 @@ def music_loose(text: str) -> bool:
 MUSIC_TOOLS = {"play_music", "music", "speakers", "dj_mode", "spotify", "audiobook"}
 
 
-def classify(heard: str, prev: str, text: str, tools: list[str]):
+def _happened(fn) -> bool:
+    try:
+        return bool(fn()) if callable(fn) else False
+    except Exception:                                              # noqa: BLE001 — a log that cannot be read excuses nothing
+        return False
+
+
+def classify(heard: str, prev: str, text: str, tools: list[str], happened=None):
     """-> (action, why). action: None (leave it) | 'reask' (he asked, nothing music ran: re-ask with the music tools only) | 'retract' (he did not ask:
-    say plainly nothing was played, with NO tools, so nothing can start). why: 'claim' | 'loose' | 'silent'."""
+    say plainly nothing was played, with NO tools, so nothing can start). why: 'claim' | 'loose' | 'silent'.
+    `happened`: a function (or None) that says whether the house log shows a music tool or a routine's music lately; only a question about what happened ("did you stop the music?") whose
+    answer says in the past what was done ("Yes, I paused the music at 7:31.") asks it, and then the answer is true, not a claim: (None, 'history'), which Brain.reply also takes as
+    'leave it' for the older claim check (CLAIMED: "I paused ...")."""
     if not text or any(t in MUSIC_TOOLS for t in tools):
         return None, None
     asked = asked_music(heard, prev)
     about = describing(heard)
     if music_claimed(text, about):
+        if about and history(heard) and not music_claimed(text, about, past_ok=True) and _happened(happened):
+            return None, "history"
         return ("reask" if asked else "retract"), "claim"
     if about:                                                      # a question about the house answered with how things stand: nothing to ask again or cut
         return None, None

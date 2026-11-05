@@ -238,8 +238,8 @@ def test_the_bedtime_routine_says_tomorrows_alarm_before_its_goodnight(tmp_path)
         return c.tomorrow_line()
     d.extras["alarm_tomorrow"] = line
     steps = d.bedtime_steps(room)
-    said = run(steps[-2].make())
-    assert said == "Your alarm is set for 6:30." and steps[-1].last
+    said = run(steps[-2].act())                                       # (an act, worked out in turn after plan_tomorrow, not a make started with the routine)
+    assert said == "Your alarm is set for 6:30." and steps[-1].last and steps[-2].make is None
 
 
 def test_plain_alarm_requests_go_to_the_tool_before_the_model():
@@ -492,3 +492,375 @@ def test_the_real_play_outs_says_whether_anything_sounded(tmp_path):
         assert run(c._play_outs(["enclave"], [b"RIFFtone"], 0.5)) is False
     finally:
         speaker_out.RoutedOut = real
+
+
+# ── more than one thing falls due (review of 2026-11-05: tick() let the LAST item due ring and ended the others as "replaced") ──────────────────
+
+def recording_voice(c):
+    """The words each ring is voiced with (make() stubs the voice with one fixed clip)."""
+    said = []
+
+    async def voice(text):
+        said.append(text)
+        return b"mp3"
+    c._voice = voice
+    return said
+
+
+def test_an_alarm_and_a_reminder_due_in_the_same_minute_ring_as_one_and_the_alarm_is_never_the_one_dropped(tmp_path):
+    """A 'take the pills' reminder added after the wake alarm and due at the same minute made the reminder the one that rang: twice, then it gave up, and the
+    alarm, ended as 'replaced', never sounded anywhere. Now one ring says both, and it is the alarm's (30 minutes, louder each time, his phone)."""
+    for order in (("alarm", "reminder"), ("reminder", "alarm")):                 # alarms.due() returns them in the order they were set
+        now = [at(2026, 11, 2, 6, 0)]
+        c, posted, played = make(tmp_path / "-".join(order), now)
+        said = recording_voice(c)
+        for kind in order:
+            if kind == "alarm":
+                c.alarms.add("alarm", "06:30", where="upstairs")
+            else:
+                c.alarms.add("reminder", "06:30", "take the pills")
+        now[0] = at(2026, 11, 2, 6, 30)
+        run(c.tick())
+        assert c.ringing["alarm"].kind == "alarm", order
+        assert played[-1][0] == ("enclave",) and "This is your alarm." in said[-1] and "Reminder: take the pills." in said[-1], order
+        assert sorted(f["kind"] for f in c.fired) == ["alarm", "reminder"] and all(f["ended"] is None for f in c.fired), order     # both are on the portal's record
+        for _ in range(3):                                                                        # a reminder rings twice; the alarm goes on
+            now[0] += 60
+            run(c.tick())
+        assert c.ringing is not None and c.ringing["alarm"].kind == "alarm" and len(played) == 4, order
+        assert c.stop("phone") == "Alarm off."
+        assert sorted((f["kind"], f["ended"]) for f in c.fired) == [("alarm", "stopped"), ("reminder", "stopped")], order
+
+
+def test_a_reminder_that_falls_due_while_the_alarm_rings_joins_the_ring_and_does_not_end_it(tmp_path):
+    now = [at(2026, 11, 2, 6, 0)]
+    c, posted, played = make(tmp_path, now)
+    said = recording_voice(c)
+    c.alarms.add("alarm", "06:30", where="upstairs")
+    c.alarms.add("reminder", "06:33", "take the pills")
+    c.alarms.items[-1].due = at(2026, 11, 2, 6, 31) + 30                                          # it falls due half a minute into the gap between rings 2 and 3
+    gains = []
+    for when in (at(2026, 11, 2, 6, 30), at(2026, 11, 2, 6, 31)):                                 # rings 1 and 2: the alarm alone
+        now[0] = when
+        run(c.tick())
+        gains.append(played[-1][2])
+    assert len(played) == 2 and "pills" not in " ".join(said)
+    now[0] = at(2026, 11, 2, 6, 31) + 30
+    run(c.tick())                                                                                 # the reminder falls due: heard at once, in a ring of the alarm
+    gains.append(played[-1][2])
+    assert len(played) == 3 and c.ringing["alarm"].kind == "alarm" and c.ringing["rings"] == 3 and "Reminder: take the pills." in said[-1]
+    assert not any(f["ended"] == "replaced" for f in c.fired)
+    for when in (at(2026, 11, 2, 6, 32), at(2026, 11, 2, 6, 32) + 30, at(2026, 11, 2, 6, 33) + 30):
+        now[0] = when
+        run(c.tick())                                                                             # (06:32:00 is not a ring: the next is a minute after the one just rung)
+        if len(played) > len(gains):
+            gains.append(played[-1][2])
+    assert len(played) == 5 and gains == sorted(gains) and gains[-1] == 1.0                        # still the same alarm, still getting louder
+    assert c.ringing["alarm"].kind == "alarm" and c.fired[0]["ended"] is None
+
+
+def test_two_alarms_due_together_for_two_places_ring_in_both_and_a_snooze_brings_both_back(tmp_path):
+    for how in ("voice", "phone"):
+        now = [at(2026, 11, 2, 6, 0)]
+        c, posted, played = make(tmp_path / how, now)
+        c.alarms.add("alarm", "06:30", where="upstairs")
+        c.alarms.add("alarm", "06:30", where="downstairs")
+        now[0] = at(2026, 11, 2, 6, 30)
+        run(c.tick())
+        assert played[-1][0] == ("enclave", "hdmi"), how                                          # upstairs, where he sleeps, did not lose to downstairs
+        assert all(f["ended"] is None for f in c.fired) and len(c.fired) == 2
+        reply = c.answered("snooze", by="theater") if how == "voice" else c.snooze("phone")
+        assert "Snoozed" in reply and c.ringing is None, how
+        assert sorted(a.where for a in c.alarms.items) == ["downstairs", "upstairs"], how
+        now[0] += 9 * 60
+        run(c.tick())
+        assert played[-1][0] == ("enclave", "hdmi") and c.ringing is not None, how
+        assert [f["ended"] for f in c.fired] == ["snoozed", "snoozed", None, None], how
+
+
+def test_two_alarms_for_the_same_place_are_one_ring_and_one_snooze(tmp_path):
+    now = [at(2026, 11, 2, 6, 0)]
+    c, posted, played = make(tmp_path, now)
+    said = recording_voice(c)
+    c.alarms.add("alarm", "06:30", where="upstairs")
+    c.alarms.add("alarm", "06:30", "laundry", where="upstairs")
+    now[0] = at(2026, 11, 2, 6, 30)
+    run(c.tick())
+    assert len(played) == 1 and played[-1][0] == ("enclave",) and said[-1].count("This is your alarm") == 1 and "Your laundry alarm." in said[-1]
+    c.snooze("phone")
+    assert len(c.alarms.items) == 1                                                               # one place, one snoozed copy
+
+
+def test_the_wake_word_then_snooze_brings_every_alarm_of_the_ring_back_and_not_its_reminder(tmp_path):
+    now = [at(2026, 11, 2, 6, 0)]
+    c, posted, played = make(tmp_path, now)
+    c.alarms.add("alarm", "06:30", where="upstairs")
+    c.alarms.add("alarm", "06:30", where="downstairs")
+    c.alarms.add("reminder", "06:30", "take the pills")
+    now[0] = at(2026, 11, 2, 6, 30)
+    run(c.tick())
+    assert c.woke(by="living") is True and c.ringing is None
+    assert sorted(f["ended"] for f in c.fired) == ["stopped"] * 3
+    now[0] += 5
+    assert c.snooze_after_wake("snooze").startswith("Fine. Snoozed")
+    assert sorted((a.kind, a.where) for a in c.alarms.items) == [("alarm", "downstairs"), ("alarm", "upstairs")]     # the reminder was said: it is not asked again
+    now[0] += 9 * 60
+    run(c.tick())
+    assert played[-1][0] == ("enclave", "hdmi") and c.ringing is not None
+
+
+def test_cancelling_one_of_the_alarms_in_a_ring_on_his_phone_leaves_the_ring_to_the_rest(tmp_path):
+    now = [at(2026, 11, 2, 6, 0)]
+    c, posted, played = make(tmp_path, now)
+    c.alarms.add("alarm", "06:30", where="upstairs")
+    c.alarms.add("alarm", "06:30", repeat="daily", where="downstairs")                              # a repeating one stays in the list while it rings
+    other = c.alarms.items[-1]
+    now[0] = at(2026, 11, 2, 6, 30)
+    run(c.tick())
+    assert played[-1][0] == ("enclave", "hdmi")
+    assert c.command({"op": "cancel", "alarm": other.id}) == "Cancelled." and c.ringing is not None
+    assert c.ringing["also"] == [] and sorted(f["ended"] or "" for f in c.fired) == ["", "cancelled"]
+    now[0] += 60
+    run(c.tick())
+    assert played[-1][0] == ("enclave",)                                                           # the one he did not cancel rings on, alone
+    assert c.command({"op": "cancel", "alarm": c.ringing["alarm"].id}) == "That one is already gone."     # (a one-off that rings is out of the list already)
+    c.stop("phone")
+    assert [f["ended"] for f in c.fired] == ["stopped", "cancelled"]
+
+
+def test_an_answer_that_lands_while_a_ring_plays_sends_no_alert_to_his_phone(tmp_path):
+    """Ring 4 is the first that tells his phone he hasn't answered; he pressed Stop during it, and the portal still DMed 'you haven't answered' right after."""
+    now = [at(2026, 11, 2, 6, 29)]
+    c, posted, played = make(tmp_path, now)
+    c.alarms.add("alarm", "06:30")
+    now[0] = at(2026, 11, 2, 6, 30)
+    for _ in range(3):
+        run(c.tick())
+        now[0] += 60
+    assert not [b for p, b in posted if p == "/home/alert"]
+
+    async def slow(kinds, clips, gain):
+        await asyncio.sleep(0.3)                                       # the Enclave is saying it
+        return True
+    c._play_outs = slow
+
+    async def go():
+        ring = asyncio.ensure_future(c.tick())                         # 06:33: three minutes unanswered
+        await asyncio.sleep(0.05)
+        c.stop("phone")
+        await ring
+    run(go())
+    assert c.ringing is None and c.fired[-1]["ended"] == "stopped" and not [b for p, b in posted if p == "/home/alert"]
+    c.alarms.add("alarm", "06:34")                                    # (and an unanswered one still tells him)
+    now[0] += 60
+    for _ in range(4):
+        run(c.tick())
+        now[0] += 60
+    assert [b for p, b in posted if p == "/home/alert"]
+
+
+# ── the morning briefing and the alarm clock, wired as hub.py wires them (review of 2026-11-05) ──────────────────────────────────────────────────
+
+def clock_and_routines_wired_as_the_hub_does(tmp_path, now):
+    """A real AlarmClock and a real Daily on one clock, with the extras hub.py gives Daily: the bedtime alarm line, the day's first alarm, whether one rings."""
+    from test_sat_daily import HOME, car_at, make as make_daily
+    d, room, link, *_ = make_daily(tmp_path / "daily", now, car=car_at(HOME))
+    c, posted, played = make(tmp_path / "clock", now)
+
+    async def alarm_tomorrow():
+        return c.tomorrow_line()
+    d.extras.update(alarm_tomorrow=alarm_tomorrow, wake_alarm=c.wake_time, alarm_ringing=c.is_ringing)
+    return d, room, link, c, played
+
+
+def test_the_first_wake_up_alarm_of_the_day_is_the_first_in_the_morning_hours_not_the_first_of_any_hour(tmp_path):
+    """wake_time took the earliest alarm of the date and only then asked whether it was in 04:30-11:00: a 03:30 one-off for an early drive, or a snooze made at
+    23:56 and due at 00:05, hid the 07:00 alarm the morning is planned around, and the briefing fell back to 07:10, after the ring."""
+    now = [at(2026, 11, 4, 22, 30)]
+    d, room, link, c, played = clock_and_routines_wired_as_the_hub_does(tmp_path, now)
+    c.alarms.add("alarm", "07:00", repeat="mon,wed,thu", where="upstairs")
+    assert c.wake_time("2026-11-05") == "07:00" and d.morning_time("2026-11-05") == "06:50"
+    c.alarms.add("alarm", "03:30", date="2026-11-05")                                                  # an early drive
+    assert c.wake_time("2026-11-05") == "07:00" and d.morning_time("2026-11-05") == "06:50"
+    now[0] = at(2026, 11, 4, 23, 56)
+    c.alarms.add("alarm", in_minutes=9)                                                                # a snooze: due at 00:05
+    assert any(alarm_clock.time.strftime("%H:%M", alarm_clock.time.localtime(a.due)) == "00:05" for a in c.alarms.items)
+    assert c.wake_time("2026-11-05") == "07:00" and d.morning_time("2026-11-05") == "06:50"
+    c.alarms.add("alarm", "12:30", date="2026-11-06")
+    assert c.wake_time("2026-11-06") is None                                                           # nothing in the morning hours: the fixed time
+    assert c.wake_time("2026-11-07") is None and d.morning_time("2026-11-06") == "07:10"
+
+
+def test_a_repeating_alarm_set_after_its_time_today_is_not_todays_but_one_that_has_rung_today_still_is(tmp_path):
+    """'Wake me at 5:30 every day' said at 06:00 first rings tomorrow; counted for today, it pulled today's briefing back to 05:20: it started at once."""
+    now = [at(2026, 11, 5, 6, 0)]                                                                      # a Thursday
+    c, posted, played = make(tmp_path, now)
+    c.alarms.add("alarm", "07:00", repeat="daily", where="upstairs")
+    c.alarms.add("alarm", "05:30", repeat="daily", where="upstairs")
+    assert c.wake_time("2026-11-05") == "07:00" and c.wake_time("2026-11-06") == "05:30"
+    now[0] = at(2026, 11, 6, 5, 29)
+    assert c.wake_time("2026-11-06") == "05:30"                                                        # due this morning
+    now[0] = at(2026, 11, 6, 5, 30)
+    run(c.tick())
+    assert c.ringing is not None and c.alarms.items[0].due > now[0]
+    assert c.wake_time("2026-11-06") == "05:30"                                                        # it has rung: today's answer does not move
+
+
+def test_the_whole_bedtime_names_one_briefing_time(tmp_path):
+    """The alarm line was made at the routine's start, in parallel, before plan_tomorrow had stored the early event's override: he heard 6:30 from
+    plan_tomorrow and then 8:20 from the alarm line, with the truth (the earlier) being 6:30."""
+    import re
+    from test_sat_daily import finish
+    now = [at(2026, 11, 5, 22, 30)]                                                                    # Thursday night; tomorrow is Friday
+    d, room, link, c, played = clock_and_routines_wired_as_the_hub_does(tmp_path, now)
+    c.alarms.add("alarm", "08:30", repeat="tue,fri", where="upstairs")
+
+    async def first_event():
+        return at(2026, 11, 6, 8, 0)                                                                   # 90 minutes before it is 06:30
+    d.extras["first_tomorrow"] = first_event
+
+    async def go():
+        await room.handle("goodnight")
+        await finish(d, 15)
+    asyncio.run(go())
+    said = " ".join(link.spoken)
+    assert re.findall(r"briefing comes at ([0-9:]+ [AP]M)", said) == ["6:30 AM", "6:30 AM"] and "Your alarm is set for 8:30." in said
+    assert d.morning_time("2026-11-06") == "06:30"
+
+
+def briefing_that_could_not_start_in_time(tmp_path, answer, repeat):
+    """The briefing's slot (ten minutes before the 07:00 alarm) passes without it starting (the box was off the Wi-Fi, or another routine was running); the
+    alarm rings at 07:00 and he answers. When may the briefing start?"""
+    from test_sat_daily import finish
+    now = [at(2026, 11, 5, 6, 0 if repeat == "daily" else 55)]
+    d, room, link, c, played = clock_and_routines_wired_as_the_hub_does(tmp_path, now)
+    c.alarms.add("alarm", "07:00", repeat=repeat)
+    started = {}
+
+    async def go():
+        now[0] = at(2026, 11, 5, 6, 57 if repeat == "daily" else 55)                                   # (the box is back; or the alarm was only just set)
+        await d.tick(room)
+        started["before the alarm"] = d.busy                                                           # three or five minutes to the ring: no
+        now[0] = at(2026, 11, 5, 7, 0)
+        await c.tick()
+        await d.tick(room)
+        started["while it rings"] = d.busy
+        if answer == "voice":
+            assert "Snoozed" in c.answered("snooze", by="office")
+        elif answer == "wake word":
+            assert c.woke(by="office") and c.snooze_after_wake("snooze", by="office").startswith("Fine. Snoozed")
+        else:
+            assert "Snoozed" in c.snooze("phone")
+        now[0] += 20
+        await d.tick(room)
+        started["right after the snooze"] = d.busy
+        now[0] = at(2026, 11, 5, 7, 9) + 1
+        await c.tick()
+        assert c.ringing is not None
+        await d.tick(room)
+        started["while the snoozed alarm rings"] = d.busy
+        assert c.stop("phone") == "Alarm off."
+        now[0] = at(2026, 11, 5, 7, 10) + 1                                                            # (a one-off is gone from the list: the fixed 07:10 is the time left)
+        await d.tick(room)
+        started["once he has stopped it"] = d.busy
+        await finish(d, 15)
+    asyncio.run(go())
+    return started, link
+
+
+def test_a_snoozed_copy_that_has_rung_does_not_hold_the_briefing_when_its_id_goes_to_a_new_alarm(tmp_path):
+    """The clock remembers the snoozed copies it is waiting for by id; ids are handed out again (max + 1) once a one-off is deleted, so a copy that rang must not
+    stand for the next alarm that gets its id: the briefing would wait for an alarm that is no snooze, for ever."""
+    now = [at(2026, 11, 2, 6, 29)]
+    c, posted, played = make(tmp_path, now)
+    c.alarms.add("alarm", "06:30")
+    now[0] = at(2026, 11, 2, 6, 30)
+    run(c.tick())
+    assert c.alarms.items == [] and "Snoozed" in c.snooze("phone") and c.is_ringing()                      # waiting for nine minutes
+    now[0] += 9 * 60
+    run(c.tick())
+    assert c.ringing is not None and c.stop("phone") == "Alarm off."                                       # (is_ringing() is not asked between)
+    now[0] = at(2026, 11, 3, 5, 0)
+    c.alarms.add("alarm", "07:00", repeat="daily")
+    assert c.alarms.items[0].id == 1 and not c.is_ringing()                                                # the id of the copy is free again, and this is no snooze
+
+
+def test_a_briefing_that_missed_its_slot_never_starts_over_the_ring_in_the_snooze_he_asked_for_or_the_minutes_before_an_alarm(tmp_path):
+    """It started the instant the alarm was answered, 'snooze' included, with the Bedroom light coming up and the news nine minutes before the alarm he
+    asked for; and an alarm set at 06:55 for 07:00 started it at once, so the ring landed inside it (review of 2026-11-05)."""
+    for n, (answer, repeat) in enumerate((("voice", "daily"), ("wake word", "daily"), ("phone", "daily"), ("voice", "once"))):
+        started, link = briefing_that_could_not_start_in_time(tmp_path / str(n), answer, repeat)
+        assert started == {"before the alarm": False, "while it rings": False, "right after the snooze": False,
+                           "while the snoozed alarm rings": False, "once he has stopped it": True}, (answer, repeat)
+        assert link.spoken[0].startswith("Good morning, Captain. It's 7:10 AM")                        # (a late briefing, when he is up)
+
+
+class WaitPod(Pod):
+    """Remembers whether the clock handed it the stereo's ring to wait for (hub.Room.ring waits for it whenever it is handed one, quiet or not)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.handed = []
+
+    async def ring(self, tone, voice, text, quiet=False, wait=None):
+        self.handed.append(wait is not None)
+        await super().ring(tone, voice, text, quiet=quiet, wait=wait)
+
+
+def test_a_pod_whose_room_has_no_stereo_on_does_not_wait_for_another_rooms_stereo(tmp_path, monkeypatch):
+    """A reminder set in the office, with the vault's SATELLITE_ANNOUNCE_OUT=enclave, rings the Enclave upstairs AND the office pod. The pod was handed the Enclave's
+    ring to wait for, and rang only after the chime and words upstairs were over (5-10 s late, deaf meanwhile), though the Enclave is no speaker of its room."""
+    monkeypatch.setattr(alarm_clock, "LISTEN_AFTER_S", 0)
+    office, living = WaitPod(), WaitPod(stereo=["enclave"])
+    layout = house_layout.Layout({"floors": {"upstairs": {"rooms": ["living room"]}, "downstairs": {"rooms": ["office"]}},
+                                  "rooms": {"living room": {"pods": ["living"], "outputs": ["enclave"]}, "office": {"pods": ["office"]}}})
+    now = [at(2026, 11, 2, 6, 0)]
+    c, posted, played = make(tmp_path, now, rooms={"office": office, "living": living}, env={"SATELLITE_ANNOUNCE_OUT": "enclave"})
+    c.layout = layout
+    c.alarms.add("reminder", "06:30", "call the dentist", room="office")                      # no place: the room that set it, and the announcement outputs
+    c.alarms.add("alarm", "06:30", where="upstairs", room="living")
+    now[0] = at(2026, 11, 2, 6, 30)
+    run(c.tick())
+    assert c.ringing["alarm"].kind == "alarm" and played[-1][0] == ("enclave",)
+    assert office.handed == [False] and office.rang and living.handed == [True]               # the office rings at once; the living room's box still follows its own Enclave
+
+
+class TalkingPod(FloorPod):
+    """A pod that says an announcement the way hub.Room does: under its voice lock, which waits for whoever holds it, with no bound."""
+
+    async def announce(self, text):
+        async with self.voice:
+            self.said.append(text)
+
+
+def test_a_due_timer_never_holds_up_a_due_alarm_and_is_still_said_when_the_room_is_free(tmp_path, monkeypatch):
+    """The timers were said first, in tick(): a long reply holding the room's voice kept the timer's one line, and so the alarm behind it, waiting for as long
+    as it talked (the floor wait of a ring did not start until the line was said)."""
+    monkeypatch.setattr(alarm_clock, "FLOOR_WAIT_S", 0.6)
+    pod = TalkingPod()
+    now = [at(2026, 11, 2, 6, 0)]
+    c, posted, played = make(tmp_path, now, rooms={"kitchen": pod})
+    c.timers_for("kitchen").add(60, "pasta")
+    c.alarms.add("alarm", "06:30", where="upstairs")
+    now[0] = at(2026, 11, 2, 6, 30)
+    rang, state = [], {}
+
+    async def play(kinds, clips, gain):
+        rang.append(time.monotonic() - t0)
+        return True
+    c._play_outs = play
+
+    async def go():
+        await pod.voice.acquire()                                      # a long reply is being said, for 2.6 s
+        ticking = asyncio.ensure_future(c.tick())
+        await asyncio.sleep(2.0)
+        state["tick_done"] = ticking.done()
+        await asyncio.sleep(0.6)
+        pod.voice.release()
+        await ticking
+        await asyncio.sleep(0.2)                                       # the timer's line, queued behind the reply, is said now
+    t0 = time.monotonic()
+    run(go())
+    assert len(rang) == 1 and 0.5 < rang[0] < 0.95                    # the ring waited its floor (0.6 s) and nothing else: not the timer's line (another 0.6 s), not the reply
+    assert state["tick_done"]                                         # and the clock was not kept waiting for the room, for its next ring
+    assert pod.said == ["Your pasta timer is done."] and not c._bg    # the timer was not lost

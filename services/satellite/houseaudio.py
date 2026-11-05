@@ -8,22 +8,44 @@ Everything here is read-only and never raises: a radio that does not answer is a
 """
 from __future__ import annotations
 
+import threading
 import time
 
 KIND_WORDS = {"enclave": "the Enclave upstairs", "hdmi": "the Sony downstairs", "bt": "the Bluetooth stereo"}
 _STARTED: dict = {}                                                # who started the music that is queued now: {"by": "...", "at": wall clock}; this hub process only
+_LOCK = threading.Lock()                                           # every room's brain reads the note in its own thread while a tool's thread writes it
 
 
-def note_start(by: str, clock=time.time) -> None:
-    """The music was started by `by` ("his own request", "the homecoming routine"): so the chat can say why the Enclave is playing (2026-11-04: it played for fifty minutes "on its own")."""
-    _STARTED.update(by=str(by), at=float(clock()))
+def note_start(by: str, clock=time.time, ok: bool = True) -> None:
+    """The music was started by `by` ("his own request", "the homecoming routine"): so the chat can say why the Enclave is playing (2026-11-04: it played for fifty minutes "on its own").
+    `ok` False (the start failed or found nothing: the radio was away, "Nothing in his library matches ..."): nothing to remember, and the note of the start before it stays."""
+    if ok:
+        with _LOCK:
+            _STARTED.clear()
+            _STARTED.update(by=str(by), at=float(clock()))
 
 
-def started_line() -> str:
-    if not _STARTED:
-        return ""
-    when = time.strftime("%I:%M %p", time.localtime(_STARTED["at"])).lstrip("0")
-    return f"This music was started by {_STARTED['by']} at {when}."
+NOT_STARTED = ("The house radio is not answering", "The house radio could not do that", "Nothing in his library matches", "Nothing in his library to play")
+
+
+def start_ok(said: str) -> bool:
+    """Did a start (play_music, a resume) start something, going by the answer it got? The radio away, or 'Nothing in his library matches ...', started nothing: what hub.music_tools
+    hands to note_start(ok=). ('Nothing polka in his library, so here is the closest.' plays the closest, and is a start.)"""
+    return not str(said or "").lstrip().startswith(NOT_STARTED)
+
+
+def started_line(queue_len: int | None = None) -> str:
+    """'This music was started by the homecoming routine at 7:33 PM.' The note says who started the music QUEUED now, and a start from his phone, the car or the portal is never noted: so the
+    queue's length is kept when the note is first shown, and a different one means the queue was replaced (the review of 2026-11-05: 'started by the morning routine at 7:10' stayed all day)."""
+    with _LOCK:
+        if not _STARTED:
+            return ""
+        if queue_len is not None and _STARTED.setdefault("queue_len", queue_len) != queue_len:
+            _STARTED.clear()
+            return ""
+        by, at = _STARTED.get("by", ""), _STARTED.get("at", 0.0)
+    when = time.strftime("%I:%M %p", time.localtime(at)).lstrip("0")
+    return f"This music was started by {by} at {when}."
 
 
 def kind_words(kind: str) -> str:
@@ -78,12 +100,14 @@ def station_line(state: dict | None) -> str:
     level = st.get("level")
     volume = f" Volume is {round(float(level) * 10)} of 10." if isinstance(level, (int, float)) else ""
     queue = int(st.get("queue_len") or 0)
-    open_ = [k for k in (st.get("open") or st.get("speakers") or [])]
-    where = _list([kind_words(k) for k in open_]) or "no speaker that is on"
+    # `open` is the speakers that really have the stream. A radio that sends it empty says that nobody hears it, whatever `speakers` (the ones chosen) says: the line said "playing on the Enclave"
+    # beside "Switched off right now: the Enclave" (the review of 2026-11-05). A radio that sends no `open` at all (an older one) is read by the speakers it chose.
+    heard_by = st["open"] if isinstance(st.get("open"), (list, tuple)) else (st.get("speakers") or [])
+    where = _list([kind_words(k) for k in heard_by])
     tail = "" if kind == "book" else f"{queue} tracks are queued{', DJ mode is on' if st.get('dj') else ''}."
     held = st.get("held") if isinstance(st.get("held"), dict) else None
     if st.get("playing"):
-        line = f"Bilby is playing {what or 'music'} on {where}.{volume}" + (f" {tail}" if tail else "")
+        line = (f"Bilby is playing {what or 'music'} on {where}." if where else f"Bilby is playing {what or 'music'}, but no speaker is hearing it right now.") + volume + (f" {tail}" if tail else "")
     elif held and what and held.get("kind") == "car":
         line = f"Bilby has let go of {what}: he is listening to it in the car. 'Play my book' carries on from the car's place."
     elif held and what:
@@ -120,12 +144,35 @@ def recent_line(records: list[dict], limit: int = 8) -> str:
     return ("Recently: " + "; ".join(out[-limit:]) + ".") if out else ""
 
 
+MUSIC_TOOLS = {"play_music", "music", "speakers", "dj_mode", "spotify", "audiobook"}            # musicguard.MUSIC_TOOLS (a test keeps the two alike)
+MUSIC_ROUTINES = ("morning", "homecoming")                                                      # the routines (daily.py) that end in a music step; bedtime has none
+RECENT_RAW = 400                                                                                 # HouseLog.recent keeps the last N RAW records (wake and action events too) before the commands and routines are picked
+
+
+def music_happened(records: list[dict]) -> bool:
+    """Does the house log show a music tool (a command's tools, an action) or a routine's music (started, or left off because he said stop) in these records?"""
+    for r in records:
+        kind = r.get("kind")
+        if kind == "routine" and "music" in str(r.get("outcome") or ""):
+            return True
+        if kind in ("command", "action") and ({r.get("tool")} | {t for t in (r.get("tools") or []) if isinstance(t, str)}) & MUSIC_TOOLS:
+            return True
+    return False
+
+
 class Audio:
     """The hub's view of the house's audio. `radio` is a RadioClient (state(), playing): a book is an item of the radio's one stream, so it is all in there;
     `routines` the daily.Daily (run, busy); `hlog` the housemem.HouseLog (recent). All optional, all read defensively."""
 
     def __init__(self, radio, routines=None, hlog=None):
         self.radio, self.routines, self.hlog = radio, routines, hlog
+
+    def music_lately(self) -> bool:
+        """Did a music tool or a routine's music really run lately (the house log)? So 'Did you stop the music?' - 'Yes, at 7:31' is checked against it, not cut as a claim."""
+        try:
+            return self.hlog is not None and music_happened(self.hlog.recent(limit=RECENT_RAW))
+        except Exception:                                          # noqa: BLE001
+            return False
 
     def playing(self) -> bool:
         """Anything the house plays right now: a song, Spotify or a book."""
@@ -142,20 +189,30 @@ class Audio:
             pass
         return ""
 
+    def routine_line(self) -> str:
+        """The running routine, and (only if it has one) its music step: bedtime has none, and was said to start the library (the review of 2026-11-05)."""
+        name = self.routine()
+        if not name:
+            return ""
+        try:
+            steps = getattr(self.routines.run, "steps", None)
+            has_music = any(getattr(s, "title", "") == "music" for s in steps) if steps is not None else name in MUSIC_ROUTINES
+        except Exception:                                          # noqa: BLE001
+            has_music = name in MUSIC_ROUTINES
+        return f"The {name} routine is running right now" + ("; its music step starts the library unless he has already said stop." if has_music else ".")
+
     def status(self) -> str:
         """The lines for the end of the system prompt: the station, a book, a routine that may start the library."""
         try:
-            state = self.radio.state() if self.radio is not None and hasattr(self.radio, "state") else None
+            state = self.radio.state() if self.radio is not None and hasattr(self.radio, "state") and getattr(self.radio, "ok", True) else None      # (a radio that stopped answering keeps its last state: that is not how things stand)
         except Exception:                                          # noqa: BLE001
             state = None
         lines = [station_line(state)]
         if state and int(state.get("queue_len") or 0):
-            lines.append(started_line())
-        name = self.routine()
-        if name:
-            lines.append(f"The {name} routine is running right now; its music step starts the library unless he has already said stop.")
+            lines.append(started_line(int(state.get("queue_len") or 0)))
+        lines.append(self.routine_line())
         try:
-            lines.append(recent_line(self.hlog.recent()) if self.hlog is not None else "")
+            lines.append(recent_line(self.hlog.recent(limit=RECENT_RAW)) if self.hlog is not None else "")
         except Exception:                                          # noqa: BLE001
             pass
         return " ".join(x for x in lines if x)

@@ -5,7 +5,8 @@ me up in the morning"). ONE clock for the whole house, ticking on its own: an al
   (alarms.py's tools) or on the portal's Alarms page. Each rings in a place: where he said, else a morning alarm rings upstairs, where he
   sleeps (SATELLITE_WAKE_PLACE, default "upstairs"): the Enclave on skippy-core's aux, and the pods of the rooms up there once they exist.
 - Ringing: a chime, then "Good morning, it's 7:00 ...", once a minute, a little louder each time, until he answers or GIVE_UP_S goes by.
-  Unanswered for ALERT_AFTER_S, his phone hears it too (the portal's /home/alert: a Discord DM with the Alarms page's Stop and Snooze).
+  Everything that falls due together, or while one rings, rings as ONE (an alarm leads; a reminder's words and a second place follow it): a reminder
+  never silences an alarm. Unanswered for ALERT_AFTER_S, his phone hears it too (the portal's /home/alert: a Discord DM with the Alarms page's Stop and Snooze).
 - He answers with any word to a pod (alarms.Alarms.answered: "stop", "snooze"), or the Stop / Snooze keys on his phone (the portal queues
   them; this clock takes them on its next sync). Whatever comes first wins everywhere: the ringing is this one object's.
 - The portal hears the whole schedule every SYNC_S (every second while one rings), so when this hub is down at alarm time the portal
@@ -40,6 +41,7 @@ RING_WAIT_S = 45                    # the longest a silent box waits for the ste
 FLOOR_WAIT_S = 20                   # a ring waits this long for Skippy to finish what he is saying (a routine's line, an answer) before it speaks over it: an alarm must wake him
 GAINS = (0.45, 0.6, 0.75, 0.9, 1.0)  # each ring a little louder (the first never startles him out of bed)
 CHECK_AT = "21:30"                  # the evening check: an alarm tomorrow and the way it rings is broken -> his phone is told tonight
+WAKE_WINDOW = ("04:30", "11:00")    # an alarm in these hours is a wake-up: the morning briefing is planned around the first of them (wake_time, daily.Daily.morning_time)
 PORTAL_PAGE = "https://makerportal.live/alarms"
 
 
@@ -92,12 +94,14 @@ class AlarmClock:
         self.alarms = alarms_mod.Alarms(self.state / "alarms" / "house.json" if self.state else None, clock=clock, log=log, wake_place=self.wake_place)
         self._merge_old()
         self.timers: dict = {}                          # room -> timers.Timers
-        self.ringing: dict | None = None                # {"alarm", "key", "since", "rings", "next", "alerts"}
+        self.ringing: dict | None = None                # {"alarm", "key", "since", "rings", "next", "alerts", "also": [(alarm, key)]}: everything due together rings as one (_fire)
         self.fired: deque = deque(maxlen=30)            # what went off, and how it ended, for the portal
         self.done: list = []                            # command ids the portal sent, carried out (sent back on the next sync)
         self.changed = asyncio.Event() if _loop_running() else None
         self._checked = ""                              # the date of the last evening check
         self._ring_task: asyncio.Task | None = None     # the ring being rung now (an answer cancels it between its parts)
+        self._snoozed: dict[int, float] = {}            # snoozed copies still waiting to ring: id -> due (is_ringing: the morning briefing keeps quiet for them)
+        self._bg: set = set()                           # a timer's words waiting for a room's voice (_say_due)
         self.hub = None
 
     # ── the house's one list ──
@@ -194,21 +198,7 @@ class AlarmClock:
 
     async def tick(self) -> None:
         now = self.clock()
-        for room, timers in list(self.timers.items()):
-            for t in timers.due():
-                self.log(f"[{room}] timer done: {t.label}")
-                await self.say_in(room, f"Your {alarms_mod.timer_name(t.label)} timer is done.")
-                self.poke()
-        keys = {a.id: key_of(a) for a in self.alarms.items if a.due <= now}
-        fired = self.alarms.due()
-        self.alarms.ringing = None                      # the ringing is this clock's (alarms.Alarms' own is for a room without a clock)
-        for a in fired:
-            self.log(f"{a.kind} going off: {a.hhmm} {a.label} ({a.where or a.room or 'here'})")
-            self._end("replaced")
-            self.ringing = {"alarm": a, "key": keys.get(a.id, key_of(a)), "since": now, "rings": 0, "next": now, "alerts": 0}
-            self.fired.append({"key": self.ringing["key"], "id": a.id, "kind": a.kind, "label": a.label, "hhmm": a.hhmm, "at": round(now),
-                               "ended": None, "by": None})
-            self.poke()
+        self._fire(now)
         r = self.ringing
         if r is not None and now >= r["next"]:
             a = r["alarm"]
@@ -217,15 +207,46 @@ class AlarmClock:
                 self._end("gave_up")
                 if a.kind == "alarm":
                     await self.alert(f"⏰ Your {a.hhmm} alarm rang for {GIVE_UP_S // 60} minutes and nobody answered. I've stopped it.")
-                return
-            r["rings"] += 1
-            r["next"] = now + RING_GAP_S
-            await self._ring_once(a, r["rings"])
-            if a.kind == "alarm" and ((r["alerts"] == 0 and now - r["since"] >= ALERT_AFTER_S) or (r["alerts"] == 1 and now - r["since"] >= ALERT_AGAIN_S)):
-                r["alerts"] += 1
-                await self.alert(f"⏰ Your {a.hhmm} alarm is ringing" + (f" ({a.label})" if a.label else "") + f" and you haven't answered. "
-                                 f"Stop or snooze it: {PORTAL_PAGE}")
+            else:
+                r["rings"] += 1
+                r["next"] = now + RING_GAP_S
+                await self._ring_once(a, r["rings"], [m for m, _ in r.get("also") or []])
+                # (an answer that came in while it rang ended it between the parts: there is nothing left to tell his phone he hasn't answered)
+                if self.ringing is r and a.kind == "alarm" and ((r["alerts"] == 0 and now - r["since"] >= ALERT_AFTER_S)
+                                                                or (r["alerts"] == 1 and now - r["since"] >= ALERT_AGAIN_S)):
+                    r["alerts"] += 1
+                    await self.alert(f"⏰ Your {a.hhmm} alarm is ringing" + (f" ({a.label})" if a.label else "") + f" and you haven't answered. "
+                                     f"Stop or snooze it: {PORTAL_PAGE}")
+        await self._timers_due()                        # after the ring, never before it: a timer's line waits for the room's voice, a ring must not wait for that
         await self.evening_check()
+
+    def _fire(self, now: float) -> None:
+        """What has fallen due starts ringing. The house has ONE ringing, so everything due together, or falling due while something rings, rings as one: the
+        first alarm leads (an alarm is never dropped for a reminder), the others join it in `also` and ring in the same ring, each in its own place, with
+        their words after its own. (Until 2026-11-05 the LAST one due won and the rest ended as "replaced": a 'take the pills' reminder set after the wake
+        alarm for the same minute silenced the alarm, and a reminder that fell due while the alarm rang ended it.)"""
+        keys = {a.id: key_of(a) for a in self.alarms.items if a.due <= now}
+        fired = self.alarms.due()
+        self.alarms.ringing = None                      # the ringing is this clock's (alarms.Alarms' own is for a room without a clock)
+        if not fired:
+            return
+        new = []
+        for a in fired:
+            key = keys.get(a.id, key_of(a))
+            self.log(f"{a.kind} going off: {a.hhmm} {a.label} ({a.where or a.room or 'here'})")
+            self.fired.append({"key": key, "id": a.id, "kind": a.kind, "label": a.label, "hhmm": a.hhmm, "at": round(now), "ended": None, "by": None})
+            new.append((a, key))
+        cur = self.ringing
+        members = (([(cur["alarm"], cur["key"])] + list(cur.get("also") or [])) if cur is not None else []) + new
+        lead = next((m for m in members if m[0].kind == "alarm"), members[0])       # the alarm already ringing stays the one that leads
+        rest = [m for m in members if m is not lead]
+        if cur is not None and lead[1] == cur["key"]:
+            cur["also"], cur["next"] = rest, now        # the newcomer is heard at once, in a ring of the one that is going
+            if lead[0].kind != "alarm":
+                cur["rings"] = 0                        # a reminder rings twice: the one that joined it gets its two as well
+        else:
+            self.ringing = {"alarm": lead[0], "key": lead[1], "since": now, "rings": 0, "next": now, "alerts": 0, "also": rest}
+        self.poke()
 
     def _end(self, how: str, by: str = "") -> None:
         r, self.ringing = self.ringing, None
@@ -234,16 +255,44 @@ class AlarmClock:
         task = self._ring_task
         if task is not None and not task.done():
             task.cancel()                               # a ring is several parts one after the other: an answer stops the ones that have not begun
+        keys = {r["key"]} | {k for _, k in r.get("also") or []}
         for f in self.fired:
-            if f["key"] == r["key"] and f["ended"] is None:
-                f["ended"], f["by"], f["after_s"] = how, by or None, round(self.clock() - r["since"])
+            if f["key"] in keys and f["ended"] is None:
+                f["ended"], f["by"], f["after_s"] = how, by or None, round(self.clock() - (r["since"] if f["key"] == r["key"] else f["at"]))
         self.poke()
 
+    async def _timers_due(self) -> None:
+        """The rooms' timers that have run out are said in their rooms."""
+        for room, timers in list(self.timers.items()):
+            for t in timers.due():
+                self.log(f"[{room}] timer done: {t.label}")
+                await self._say_due(room, f"Your {alarms_mod.timer_name(t.label)} timer is done.")
+                self.poke()
+
+    async def _say_due(self, room: str, text: str) -> None:
+        """A timer's words in its room, waited for no longer than a ring waits for the floor (FLOOR_WAIT_S). The room's voice lock has no bound: a long reply or a
+        routine's part (daily SAY_LIMIT_S, 240 s) would hold this clock's next ring behind a timer's one line. If the room is still talking after that the words
+        are said when it is done, in the background, and the clock goes on."""
+        task = asyncio.ensure_future(self.say_in(room, text))
+        self._bg.add(task)
+        task.add_done_callback(self._said_due)
+        try:
+            await asyncio.wait_for(asyncio.shield(task), FLOOR_WAIT_S)
+        except asyncio.TimeoutError:
+            self.log(f"(alarm clock: {room} was still talking after {FLOOR_WAIT_S} s: the timer's words wait for it)")
+        except Exception:                               # noqa: BLE001 — _said_due says what went wrong; the clock goes on to its rings
+            pass
+
+    def _said_due(self, task) -> None:
+        self._bg.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            self.log(f"(alarm clock: a timer's words were not said: {type(task.exception()).__name__}: {task.exception()})")
+
     # ── ringing ──
-    async def _ring_once(self, a, n: int) -> None:
+    async def _ring_once(self, a, n: int, also=()) -> None:
         """One ring as a task of its own, so that an answer (`_end`) can stop it between its parts: the box, which rings after the Enclave has finished, never
         rings an alarm he has already stopped."""
-        task = self._ring_task = asyncio.ensure_future(self.ring(a, n))
+        task = self._ring_task = asyncio.ensure_future(self.ring(a, n, also))
         try:
             await task
         except asyncio.CancelledError:
@@ -255,11 +304,26 @@ class AlarmClock:
             if self._ring_task is task:
                 self._ring_task = None
 
-    async def ring(self, a, n: int) -> None:
-        """One ring: the chime (an alarm only) and the words, on the place's outputs and pods, each ring louder than the last."""
+    def _also_words(self, b) -> str:
+        """What another item due in the same ring adds to the leading one's words: a reminder's text, an alarm's name (an unnamed alarm adds nothing)."""
+        if b.kind == "reminder":
+            return self.alarms.spoken(b)
+        name = re.sub(r"\s*\balarm$", "", (b.label or "").strip(), flags=re.I)
+        return f"Your {name} alarm." if name else ""
+
+    async def ring(self, a, n: int, also=()) -> None:
+        """One ring: the chime (an alarm only) and the words, on the place's outputs and pods, each ring louder than the last. `also`: the others due in this
+        same ring (_fire): each rings in its own place too, and their words follow the leading one's."""
         gain = GAINS[min(n - 1, len(GAINS) - 1)]
         text = self.alarms.spoken(a) + ("" if a.kind == "reminder" else " Or tap Stop on your phone." if n == 1 else "")
         kinds, pods = self.place_of(a)
+        kinds, pods = list(kinds), list(pods)
+        for b in also:
+            extra, (more_kinds, more_pods) = self._also_words(b), self.place_of(b)
+            if extra and extra not in text:
+                text += " " + extra
+            kinds += [k for k in more_kinds if k not in kinds]
+            pods += [p for p in more_pods if p not in pods]
         tone = chime(gain, repeats=2 if n < 3 else 3) if a.kind == "alarm" else chime(gain * 0.7, repeats=1)
         voice = await self._voice(text)
         # The box's own speaker is the last resort (the Captain, 2026-11-04: "we never want to output to the hub speakers unless that house level's
@@ -267,7 +331,7 @@ class AlarmClock:
         # while the stereo rings for it, and speaks after all if that ring fails. The software cannot see the stereo's own switch or knob, so the
         # box joins the stereo when nobody has answered in two minutes (an alarm's third ring; a reminder rings twice, so its second).
         joins_at = POD_JOINS_AT_RING if a.kind == "alarm" else min(POD_JOINS_AT_RING, REMINDER_RINGS)
-        quiet, kinds = [], list(kinds)
+        quiet, kinds, with_stereo = [], list(kinds), set()
         for room in pods:
             r = (getattr(self.hub, "rooms", {}) or {}).get(self.hub_room(room))
             try:
@@ -276,6 +340,7 @@ class AlarmClock:
                 self.log(f"(alarm: could not look at {room}'s stereo: {type(e).__name__}: {e}: the box rings)")
                 outs = []
             if outs:
+                with_stereo.add(room)
                 kinds += [k for k in outs if k not in kinds]    # the room's stereo rings every time it is on: the box joins it, it never replaces it
                 if n < joins_at:
                     quiet.append(room)
@@ -284,7 +349,9 @@ class AlarmClock:
         async with self._floor():                       # one Skippy at a time: the ring waits for a routine's line to end, and nothing starts over the ring
             stereo = asyncio.ensure_future(self._play_outs(kinds, [tone, voice], gain)) if kinds else None
             jobs = [stereo] if stereo is not None else []
-            jobs += [self._ring_pod(room, tone, voice, text, quiet=room in quiet, wait=stereo) for room in pods]
+            # a box waits for the stereo's ring only when it has a stereo of its own to wait for (hub.Room.ring waits whenever it is handed one): the pod of a room with
+            # no stereo on rings at once, as before, not after the Enclave upstairs has finished its chime and words
+            jobs += [self._ring_pod(room, tone, voice, text, quiet=room in quiet, wait=stereo if room in with_stereo else None) for room in pods]
             await asyncio.gather(*jobs, return_exceptions=True)
 
     @contextlib.asynccontextmanager
@@ -367,11 +434,32 @@ class AlarmClock:
         if r is None:
             return None
         self.alarms.ringing = {"alarm": r["alarm"], "left": 0, "next": 0}
+        before = {x.id for x in self.alarms.items}
         reply = self.alarms.answered(words)
         if reply is None:
             return None
-        self._end("snoozed" if "Snoozed" in reply else "stopped", by=by)
+        snoozed = "Snoozed" in reply
+        if snoozed:
+            for x in self.alarms.items:                 # (alarms.Alarms.answered made the leading one's copy itself)
+                if x.id not in before:
+                    self._remember_snooze(x)
+            self._snooze_rest(r["alarm"], [m for m, _ in r.get("also") or []])
+        self._end("snoozed" if snoozed else "stopped", by=by)
         return reply
+
+    def _remember_snooze(self, s) -> None:
+        """A snoozed copy of an alarm, waiting: is_ringing() stays true until it has rung (the morning briefing does not start in the nine minutes he asked for)."""
+        if s.kind == "alarm":
+            self._snoozed[s.id] = s.due
+
+    def _snooze_rest(self, lead, also, minutes: int = alarms_mod.SNOOZE_S // 60) -> None:
+        """A ring with more than one alarm in it (_fire): a snooze brings every alarm back, each in its own place; the leading one's copy is made by the
+        caller. A second alarm for the same place is the same wake-up (one copy); a reminder in the ring was said, and is not asked again."""
+        places = {(lead.where, lead.room)} if lead.kind == "alarm" else set()
+        for b in also:
+            if b.kind == "alarm" and (b.where, b.room) not in places:
+                places.add((b.where, b.room))
+                self._remember_snooze(self.alarms.snooze(b, minutes))
 
     def stop(self, by: str = "phone") -> str:
         if self.ringing is None:
@@ -387,24 +475,26 @@ class AlarmClock:
         "snooze" in the next WOKE_SNOOZE_S still snoozes it (snooze_after_wake). True when something was ringing."""
         if self.ringing is None:
             return False
-        self._woke_stop = (self.ringing["alarm"], self.clock())
+        self._woke_stop = (self.ringing["alarm"], self.clock(), [m for m, _ in self.ringing.get("also") or []])
         self._end("stopped", by=f"wake word ({by})" if by else "wake word")
         return True
 
     def snooze_after_wake(self, words: str, by: str = "") -> str | None:
         """The words after the wake word that stopped an alarm: "snooze" puts it off nine minutes; anything else is for the brain (None)."""
-        a, at = getattr(self, "_woke_stop", (None, 0.0))
+        a, at, also = getattr(self, "_woke_stop", (None, 0.0, ()))
         w = (words or "").lower()
         if a is None or self.clock() - at > self.WOKE_SNOOZE_S:
             return None
         said = re.findall(r"[a-z']+", w)
         if said and all(t in alarms_mod.DISMISS for t in said):        # "Skippy, stop": already stopped by the wake word
-            self._woke_stop = (None, 0.0)
+            self._woke_stop = (None, 0.0, ())
             return "Alarm off." if a.kind == "alarm" else "Okay."
         if not alarms_mod.SNOOZE_RE.search(w):
             return None
-        self._woke_stop = (None, 0.0)
+        self._woke_stop = (None, 0.0, ())
         s = self.alarms.snooze(a)
+        self._remember_snooze(s)
+        self._snooze_rest(a, also)
         return f"Fine. Snoozed until {alarms_mod.say_when(s.due, self.clock())}. Nine minutes, not a second more."
 
     def snooze(self, by: str = "phone", minutes: int = alarms_mod.SNOOZE_S // 60) -> str:
@@ -412,6 +502,8 @@ class AlarmClock:
             return "Nothing is ringing."
         a = self.ringing["alarm"]
         s = self.alarms.snooze(a, minutes)
+        self._remember_snooze(s)
+        self._snooze_rest(a, [m for m, _ in self.ringing.get("also") or []], minutes)
         self._end("snoozed", by=by)
         return f"Snoozed until {alarms_mod.say_when(s.due, self.clock())}."
 
@@ -448,9 +540,18 @@ class AlarmClock:
             if op == "snooze":
                 return self.snooze("phone", int(cmd.get("minutes") or alarms_mod.SNOOZE_S // 60))
             if op == "cancel":
-                ok = self.alarms.cancel_id(int(cmd.get("alarm")))
-                if ok and self.ringing and self.ringing["alarm"].id == int(cmd.get("alarm")):
-                    self._end("cancelled", "phone")
+                gone = int(cmd.get("alarm"))
+                ok = self.alarms.cancel_id(gone)
+                r = self.ringing
+                if ok and r is not None:
+                    if r["alarm"].id == gone:
+                        self._end("cancelled", "phone")
+                    else:                               # one of the others in the ring: the ring goes on without it
+                        keys = {k for m, k in r.get("also") or [] if m.id == gone}
+                        r["also"] = [m for m in r.get("also") or [] if m[0].id != gone]
+                        for f in self.fired:
+                            if f["key"] in keys and f["ended"] is None:
+                                f["ended"], f["by"] = "cancelled", "phone"
                 return "Cancelled." if ok else "That one is already gone."
             if op == "add":
                 a = self.alarms.add(str(cmd.get("kind") or "alarm") if cmd.get("kind") in ("alarm", "reminder") else "alarm",
@@ -515,26 +616,50 @@ class AlarmClock:
 
     # ── the morning routine plans around the alarm (daily.Daily.morning_time) ──
     def wake_time(self, date: str) -> str | None:
-        """The first alarm (never a reminder) that rings on `date` ("2026-11-05"), as "HH:MM"; None when none does. Read from the schedule, not from
-        `due`: a repeating alarm's `due` is already next week's once it has rung, and the answer must not change then."""
+        """The first wake-up alarm (an alarm, never a reminder, in WAKE_WINDOW: 04:30-11:00) that rings on `date` ("2026-11-05"), as "HH:MM"; None when none does.
+        Read from the schedule, not from `due`: a repeating alarm's `due` is already next week's once it has rung, and the answer must not change then.
+        The window is applied to each alarm before the first is taken: a one-off at 03:30 for an early drive, or a snooze made at 23:56 that is due at 00:05,
+        must not hide the 07:00 alarm the morning is planned around."""
         try:
             weekday = alarms_mod.DAYS[time.strptime(date, "%Y-%m-%d").tm_wday]
         except ValueError:
             return None
+        now = self.clock()
         times = []
         for a in self.alarms.items:
             if a.kind != "alarm":
                 continue
             if a.days:
-                if weekday not in a.days:
+                if weekday not in a.days or (date == time.strftime("%Y-%m-%d", time.localtime(now)) and not self._rings_today(a, now)):
                     continue
             elif time.strftime("%Y-%m-%d", time.localtime(a.due)) != date:
                 continue
-            times.append(a.hhmm)
+            try:
+                h, m = alarms_mod.parse_hhmm(a.hhmm)    # (a hand-edited house.json can hold "0700" or "7")
+            except ValueError:
+                continue
+            hm = f"{h:02d}:{m:02d}"
+            if WAKE_WINDOW[0] <= hm < WAKE_WINDOW[1]:
+                times.append(hm)
         return min(times) if times else None
 
+    def _rings_today(self, a, now: float) -> bool:
+        """A repeating alarm on today's list rings today when its next going-off is still today, or when it already rang today (its `due` is tomorrow's, or next
+        week's, once it has). One set up after its time today ('wake me at 5:30 every day' at 06:00) first rings tomorrow: it is not part of today."""
+        today = time.strftime("%Y-%m-%d", time.localtime(now))
+        if time.strftime("%Y-%m-%d", time.localtime(a.due)) == today:
+            return True
+        return any(f["id"] == a.id and f["hhmm"] == a.hhmm and f["kind"] == "alarm" and time.strftime("%Y-%m-%d", time.localtime(f["at"])) == today
+                   for f in self.fired)
+
     def is_ringing(self) -> bool:
-        return self.ringing is not None
+        """Something rings now, or a snoozed alarm is waiting to ring again. The morning briefing (daily.Daily.tick) never starts while this is true: it would
+        talk over the ring, or start the moment he said 'snooze' with the Bedroom light coming up and the news, in the nine minutes he asked for."""
+        if self.ringing is not None:
+            return True
+        live = {a.id: a.due for a in self.alarms.items}
+        self._snoozed = {i: due for i, due in self._snoozed.items() if live.get(i) == due}   # one that has rung (a one-off is deleted as it fires) or was cancelled is no longer
+        return bool(self._snoozed)                                                              # waiting; (an id that was given to a new alarm since has another due)
 
     # ── the evening before ──
     def next_wake(self, within_s: float = 20 * 3600):

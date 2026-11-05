@@ -155,3 +155,61 @@ def test_a_brain_without_music_tools_asks_again_without_a_tools_list_instead_of_
     b, c, *_ = make([text("Playing heavy metal on the upstairs speakers now.")], [text("I was wrong. Nothing is playing.")])         # the plain test brain: timers only
     assert b.reply("Skippy, get some heavy metal going today.") == "I was wrong. Nothing is playing."
     assert "tools" not in c.calls[1]
+
+
+# ── 2026-11-05, the review of 7509b5c: what counts as a question about the house, and a true answer about the past ──────────────────────────────────────────────────────────────
+REQUESTS_WORDED_AS_QUESTIONS = [
+    ("how about some jazz upstairs?", "Jazz is now playing upstairs."), ("can I get some metal on the Enclave?", "Heavy metal is playing on the Enclave."),
+    ("could I have it louder?", "Volume is now at eight."), ("what about the Sony?", "The music is now on the Sony."), ("is it possible to get DJ mode on?", "DJ mode is on."),
+    ("why not put on some jazz?", "Jazz is playing now."), ("do you mind pausing it?", "Music paused."), ("when you get a chance, play some jazz", "Jazz is now playing upstairs."),
+    ("would you mind turning it down?", "Volume is now at three."), ("are you able to put the music on the Sony?", "The music is now on the Sony."),
+]
+
+
+def test_a_request_worded_as_a_question_is_no_question_about_the_house_so_a_false_state_claim_is_caught():
+    """'how about some jazz upstairs?' and the like were read as questions about how the house stands: the state patterns were dropped from the claim test and 'Jazz is now playing
+    upstairs.' (nothing played) was spoken. Before 7509b5c each was retracted."""
+    for heard, said in REQUESTS_WORDED_AS_QUESTIONS:
+        assert not g.describing(heard), heard
+        action, why = g.classify(heard, "", said, [])
+        assert why == "claim" and action in ("reask", "retract"), (heard, said, action, why)
+    for heard in ("why is the Enclave playing heavy metal?", "how loud is it", "is anything on", "what is the volume", "who started the music", "where is the music playing"):
+        assert g.describing(heard), heard                                                  # the real questions about the house still are
+
+
+def test_a_true_answer_about_the_past_is_not_cut_when_the_house_log_shows_it_happened():
+    """'Did you stop the music?' - 'Yes, I paused the music at 7:31.' was cut to 'I have not played, moved or changed any music.': a lie, said to a true yes."""
+    for heard, said in (("Did you stop the music?", "Yes, I paused the music at 7:31."),
+                        ("Why did the music start again?", "You told me to stop Bilby at 7:31 and I paused the music, but the homecoming routine shuffled the library again at 7:33."),
+                        ("What happened to the music?", "I stopped the music when you asked, then the routine started it again."),
+                        ("have you been changing the volume?", "Yes, I lowered the volume at 7:35 when you asked.")):
+        assert g.describing(heard) and g.history(heard), heard
+        assert g.classify(heard, "", said, [], happened=lambda: True) == (None, "history"), (heard, said)               # the log says a music tool ran: it is true
+        assert g.classify(heard, "", said, [], happened=lambda: False) == ("retract", "claim"), (heard, said)         # a made-up history is still cut
+        assert g.classify(heard, "", said, []) == ("retract", "claim"), (heard, said)                                  # nothing to check against: as before
+    for heard, said in (("Did you stop the music?", "Yes. Playing jazz now."), ("what time is it", "It is nine. I've put on some soft music."),
+                        ("how loud is it", "Loud. I raised the volume to nine just now.")):                          # a claim of NOW, or an answer to something else, is not excused by the log
+        assert g.classify(heard, "", said, [], happened=lambda: True)[0] in ("retract", "reask"), (heard, said)
+    assert g.classify("Did you stop the music?", "", "Yes, I paused the music.", [], happened=lambda: 1 / 0) == ("retract", "claim")      # a log that cannot be read excuses nothing
+
+
+def test_the_brain_checks_a_history_answer_against_the_house_log(tmp_path):
+    import time
+    import houseaudio
+    import housemem
+    from test_sat_brain import music_brain
+    now = [time.mktime((2026, 11, 4, 19, 31, 0, 0, 0, -1))]
+    log = housemem.HouseLog(tmp_path, clock=lambda: now[0])
+    b, c, ran = music_brain([text("Yes, I paused the music at 7:31.")])
+    b.audio = houseaudio.Audio(None, hlog=log)
+    now[0] += 540
+    assert b.reply("Did you stop the music?") == "I have not played, moved or changed any music." and b.guard == ("retract", "claim")        # the log is empty: nobody did
+    now[0] -= 540
+    log.event("command", words="stop the music", tools=["music"])
+    now[0] += 540
+    b, c, ran = music_brain([text("Yes, I paused the music at 7:31.")])
+    b.audio = houseaudio.Audio(None, hlog=log)
+    assert b.reply("Did you stop the music?") == "Yes, I paused the music at 7:31." and b.guard == (None, "history") and not ran and len(c.calls) == 1
+    b, c, ran = music_brain([text("It is nine. I've put on some soft music.")])
+    b.audio = houseaudio.Audio(None, hlog=log)
+    assert b.reply("what time is it") == "It is nine. I have not played, moved or changed any music."                                   # the log never excuses a claim of this turn

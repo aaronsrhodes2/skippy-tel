@@ -445,3 +445,28 @@ def test_a_probe_nobody_heard_is_said_again_by_the_pod():
     out.play = play
     asyncio.run(r._out("Good morning.", ("mp3", b"CLIP"), announce=True))
     assert out.played == [b"CLIP"] and r.link.spoken[-1] == ("announce", "Good morning.", ("mp3", b"CLIP"))
+
+
+def test_a_clip_whose_play_is_cancelled_is_taken_off_the_router_so_it_is_not_said_over(tmp_path):
+    """An answer cancels the alarm's ring (AlarmClock._end), but the clip the Enclave was already saying stayed on the router and played out: 'Alarm off.' was
+    said over its tail, two Skippys at once (review of 2026-11-05)."""
+    from test_sat_router import World, tone
+    w = World(present=("HDMI",))
+    router = rt.Router([("hdmi", "HDMI", 0.0)], find=w.find, stream_factory=w.factory, reinit=w.reinit, log=lambda *a: None, autostart=True)
+    out = speaker_out.RoutedOut(router, ["hdmi"], log=lambda *a: None, duck_others=False, decoder=lambda mp3, gain: tone(3.0), sole=True)
+
+    async def go():
+        playing = asyncio.ensure_future(out.play(b"x"))
+        await asyncio.sleep(0.4)                                          # the clip is on the router and sounding
+        on_it = len(router.plays)
+        playing.cancel()
+        try:
+            await playing
+        except asyncio.CancelledError:
+            pass
+        return on_it, len(router.plays)
+    try:
+        on_it, after = asyncio.run(go())
+    finally:
+        router.close()
+    assert on_it == 1 and after == 0                                      # cancelled: gone from the router at once, not 2.6 s later

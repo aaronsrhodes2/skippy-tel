@@ -27,7 +27,7 @@ import re
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 KM_TO_MI = 0.621371192237334            # Mentat convert_units 1 km -> mile (pint UnitRegistry), 2026-10-31
@@ -43,6 +43,7 @@ TALK_WAIT_S = 90                         # room talk (not to Skippy) holds the n
 HOME_NEAR_KM = 0.3                       # the car this close to home is home
 AWAY_KM = 1.0                            # ... and this far is away
 PRESENCE_WAIT_S = 45 * 60                # after the car gets home, the spoken part waits this long for him to be heard in the room
+BRIEFING_NEEDS_S = 7 * 60                # the morning briefing takes 3 to 7 minutes (the house log): it does not start when the day's first alarm is due sooner than this
 LEAVE_BUFFER_MIN = 10                    # leave-by: this much spare before the drive (SKIPPY_LEAVE_BUFFER_MIN)
 TIGHT_RANGE = 0.8                        # today's miles past this share of the car's range is "close" (rated range is optimistic)
 ONLINE_RE = re.compile(r"https?://|www\.|zoom|meet\.google|google meet|teams|webex|skype|facetime|\b(?:online|virtual|remote|phone|call|dial[- ]in|tbd|n/?a)\b", re.I)
@@ -150,6 +151,9 @@ class Daily:
         self.run: Run | None = None
         self.asking: dict | None = None                           # a timed bedtime, asked and waiting for his yes / no: {"room", "at"}
         self.arrived_at: float | None = None                      # the car got home: the spoken part waits for him to be heard
+        self.stops = 0                                            # his "stop the music" that claim() handled itself (the radio client counts only the music tool's)
+        self._arrival_stops: int | None = None                    # how many stops there had been when the car got home: one since then keeps the homecoming's music off
+        self._warned: dict[str, str] = {}                         # a problem the per-tick code met -> the day it was said (once a day, not twice a second)
         self._car_check = 0.0
         self.state = self._load()
 
@@ -221,6 +225,7 @@ class Daily:
         stereo = self.stereo() if self.stereo is not None else None
         if stereo is not None and not self.busy:                     # Bilby on the house stereo (the brain's music tool only knows the pod's)
             if stereo.playing and STEREO_STOP_RE.match(c):
+                self.stops += 1                                      # his stop, counted like the music tool's: it keeps a coming-home routine's music off (_stops)
                 await stereo.stop()
                 await self._reply(room, "Music off.", release=True)
                 return True
@@ -313,12 +318,13 @@ class Daily:
                 self.arrived_at = None
                 self.start("homecoming", room, lights=False)
             elif self.mono() - self.arrived_at > PRESENCE_WAIT_S:
-                self.arrived_at = None
+                self.arrived_at = self._arrival_stops = None
                 self.log(f"[{room.name}] (coming home: nobody heard in the room; the talking part is skipped)")
         await self._maybe_nightly(room, lt, today)
         when = self.morning_time(today)
         if (when and (lt.tm_hour, lt.tm_min) >= hm_of(when) and lt.tm_hour < 11 and self.state.get("last_morning") != today and not self.busy
-                and not self._alarm_ringing()):                       # an alarm that rings is answered first: the briefing never speaks over it
+                and not self._alarm_ringing()                         # an alarm that rings (or is snoozed) is answered first: the briefing never speaks over it
+                and not self._alarm_soon(now)):                       # nor starts when the ring would land inside it (it could not start in its own slot)
             self.state["last_morning"] = today
             self._save()
             if await asyncio.to_thread(self.is_home):
@@ -363,28 +369,72 @@ class Daily:
         return over or self.morning_at
 
     def _before_alarm(self, date: str) -> str | None:
-        """The briefing's time ahead of `date`'s first alarm, or None: no alarm that day, or none between 04:30 and 11:00 (the hours of a morning)."""
+        """The briefing's time ahead of `date`'s first alarm, or None: no alarm that day, or none between 04:30 and 11:00 (the hours of a morning). It runs on every
+        tick of every alarm day, so nothing in it may raise: a setting or an alarm time nobody can read leaves the morning at its fixed time."""
         fn = self.extras.get("wake_alarm")                              # alarm_clock.AlarmClock.wake_time: the day's first alarm, "HH:MM", or None
         try:
             alarm = fn(date) if fn is not None else None
-        except Exception:                                               # noqa: BLE001 — an alarm clock that cannot answer leaves the morning where it was
+            if not alarm or not ((4, 30) <= hm_of(alarm) < (11, 0)):
+                return None
+            h, m = hm_of(alarm)
+        except Exception as e:                                          # noqa: BLE001 — an alarm clock that cannot answer, or an alarm time that is no time, leaves the morning where it was
+            self._warn_once(f"first alarm {date}", f"(daily: the first alarm of {date} could not be read ({type(e).__name__}: {e}): the morning stays at its fixed time)")
             return None
-        if not alarm or not ((4, 30) <= hm_of(alarm) < (11, 0)):
-            return None
-        h, m = hm_of(alarm)
-        mins = max(4 * 60 + 30, h * 60 + m - int(float(self.env.get("SKIPPY_MORNING_BEFORE_ALARM_MIN", "10"))))
+        mins = max(4 * 60 + 30, h * 60 + m - self._lead_min())
         return f"{mins // 60:02d}:{mins % 60:02d}"
 
+    def _lead_min(self) -> int:
+        """SKIPPY_MORNING_BEFORE_ALARM_MIN: how long before the day's first alarm the briefing starts (ten). A blank or unreadable setting is the default."""
+        try:
+            return int(float(self.env.get("SKIPPY_MORNING_BEFORE_ALARM_MIN", "10")))
+        except (TypeError, ValueError, OverflowError):
+            self._warn_once("lead", "(daily: SKIPPY_MORNING_BEFORE_ALARM_MIN is not a number: ten minutes)")
+            return 10
+
+    def _warn_once(self, key: str, text: str) -> None:
+        """The code that runs on every tick (twice a second) says a problem once a day."""
+        today = time.strftime("%Y-%m-%d", time.localtime(self.clock()))
+        if self._warned.get(key) != today:
+            self._warned[key] = today
+            self.log(text)
+
     def _alarm_ringing(self) -> bool:
+        """An alarm rings, or a snoozed one waits to ring again (alarm_clock.AlarmClock.is_ringing): the morning briefing waits for him to answer."""
         fn = self.extras.get("alarm_ringing")
         try:
             return bool(fn()) if fn is not None else False
         except Exception:                                               # noqa: BLE001
             return False
 
+    def _alarm_soon(self, now: float) -> bool:
+        """Today's first alarm is due in less time than the briefing takes (BRIEFING_NEEDS_S), or has only just fallen due. A briefing that could not start in its
+        own slot (the box was off the Wi-Fi; an alarm set at 06:55 for 07:00) waits for the ring and his answer instead of starting with the ring minutes into it:
+        the ring would speak over its line (the Captain, 2026-11-05: "I don't generally want two skippys speaking at the same time"). A short lead (a setting)
+        is its own limit, so the briefing still starts in the slot it was planned for."""
+        fn = self.extras.get("wake_alarm")
+        lt = time.localtime(now)
+        try:
+            alarm = fn(time.strftime("%Y-%m-%d", lt)) if fn is not None else None
+            if not alarm or not ((4, 30) <= hm_of(alarm) < (11, 0)):
+                return False
+            h, m = hm_of(alarm)
+        except Exception:                                               # noqa: BLE001 — _before_alarm said what is wrong with it
+            return False
+        left = (h * 60 + m) * 60 - (lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec)
+        return -2 < left < min(BRIEFING_NEEDS_S, max(0, self._lead_min() * 60 - 60))
+
+    def _next_morning(self) -> str:
+        """The date of the morning a bedtime leads to ("2026-11-05"): tomorrow's, but a goodnight after midnight and before the first hour of a morning (04:30) is
+        for this very date, the one the alarm line names. Date arithmetic, not +86400 s: the night of a daylight-saving change is 23 or 25 hours long."""
+        lt = time.localtime(self.clock())
+        day = datetime(lt.tm_year, lt.tm_mon, lt.tm_mday)
+        if (lt.tm_hour, lt.tm_min) >= (4, 30):
+            day += timedelta(days=1)
+        return day.strftime("%Y-%m-%d")
+
     async def briefing_line(self) -> str | None:
         """Bedtime, after the alarm's line: when the briefing comes, so the morning holds no surprise (decide, say it)."""
-        tomorrow = time.strftime("%Y-%m-%d", time.localtime(self.clock() + 86400))
+        tomorrow = self._next_morning()
         if self._before_alarm(tomorrow) is None:
             return None
         at = time.mktime(time.strptime(f"{tomorrow} {self.morning_time(tomorrow)}", "%Y-%m-%d %H:%M"))
@@ -445,8 +495,9 @@ class Daily:
             if away >= self.away_h * 3600 and 11 <= lt.tm_hour < 23 and not self.busy:
                 self.log(f"[{room.name}] the car is home after {away / 3600:.1f} h away: coming-home routine")
                 self._record("routine", routine="homecoming", outcome="arrived")
+                stops = self._stops()                                 # a "stop the music" from here on keeps the routine's music off, started or not
                 await self.homecoming_lights()
-                self.arrived_at = self.mono()
+                self.arrived_at, self._arrival_stops = self.mono(), stops
 
     def _learn_home(self, pos: tuple[float, float]) -> None:
         nights = self.state.setdefault("nights", {})
@@ -463,6 +514,12 @@ class Daily:
         self._save()
 
     # ── running a routine ──
+    def _stops(self) -> int:
+        """How many times he has told the house to stop its music: the radio client's count (his stops through the music tool and the book's pause) and the
+        ones claim() handled itself."""
+        stereo = self.stereo() if self.stereo is not None else None
+        return getattr(stereo, "pauses", 0) + self.stops
+
     def start(self, name: str, room, **opts) -> None:
         if self.busy:
             self.run.cancelled = True
@@ -470,7 +527,14 @@ class Daily:
         self.news = getattr(room.brain, "news", None) or self.news
         steps = {"morning": self.morning_steps, "bedtime": self.bedtime_steps, "homecoming": self.homecoming_steps}[name](room, **opts)
         self.run = Run(name, steps, room)
-        self.run.pauses = getattr(self.stereo() if self.stereo is not None else None, "pauses", 0)
+        self.run.pauses = self._stops()
+        if name == "homecoming":
+            if self._arrival_stops is not None:                       # a stop between the car getting home and his being heard counts as well
+                self.run.pauses = min(self.run.pauses, self._arrival_stops)
+            self._arrival_stops = None
+        if name == "morning":                                         # run by hand ("good morning") or by the clock: the day has had its briefing, the scheduled one does not repeat it
+            self.state["last_morning"] = time.strftime("%Y-%m-%d", time.localtime(self.clock()))
+            self._save()
         self.run.task = asyncio.ensure_future(self._go(self.run))
         self._record("routine", routine=name, outcome="started")
         self.log(f"[{room.name}] routine: {name}")
@@ -1022,14 +1086,16 @@ class Daily:
         if self.extras.get("thermostat_night"):                     # the Nest (nest.py): where it stands, or SKIPPY_NIGHT_SETPOINT for the night
             steps.append(Step("", make=self.extras["thermostat_night"]))
         if self.extras.get("alarm_tomorrow"):                       # "Your alarm is set for 6:30." / "No alarm is set for tomorrow." (alarm_clock.py), and when the briefing comes
-            steps.append(Step("", make=self._join(self.extras["alarm_tomorrow"], self.briefing_line)))
+            # an act, not a make: a make is started with the routine, in parallel, so it quoted the briefing time from before plan_tomorrow (an act, in order) had stored
+            # an early event's override, and he heard two different times; an act is worked out when its turn comes, after it
+            steps.append(Step("", act=self._join(self.extras["alarm_tomorrow"], self.briefing_line)))
         return steps + [Step("", make=self.anything_else, last=True)]
 
     async def plan_tomorrow(self) -> str | None:
         """An early first event tomorrow moves tomorrow's morning earlier (SKIPPY_MORNING_LEAD_MIN before it, never before 04:30)."""
         fn = self.extras.get("first_tomorrow")
         ts = await fn() if fn is not None else None
-        tomorrow = time.strftime("%Y-%m-%d", time.localtime(self.clock() + 86400))
+        tomorrow = self._next_morning()
         over = self.state.setdefault("morning_override", {})
         for d in [d for d in over if d < time.strftime("%Y-%m-%d", time.localtime(self.clock()))]:
             over.pop(d)
@@ -1043,7 +1109,11 @@ class Daily:
             return None
         over[tomorrow] = f"{hm[0]:02d}:{hm[1]:02d}"
         self._save()
-        return f"Your first thing tomorrow is early, so the morning briefing comes at {clock_words(time.mktime(want))}."
+        real = self.morning_time(tomorrow)                          # the alarm's own briefing time may be earlier still: only the time that will be kept is said
+        if real != over[tomorrow]:
+            return None                                               # the early event changes nothing; the alarm line after this says when the briefing comes
+        at = time.mktime(time.strptime(f"{tomorrow} {real}", "%Y-%m-%d %H:%M"))
+        return f"Your first thing tomorrow is early, so the morning briefing comes at {clock_words(at)}."
 
     async def anything_else(self) -> str:
         return "Anything on your mind before you sleep? I'm listening. If not, goodnight, Captain."
@@ -1058,7 +1128,12 @@ class Daily:
 
     def _join(self, *fns):
         async def go():
-            parts = [await f() for f in fns]
+            parts = []
+            for f in fns:
+                try:
+                    parts.append(await f())
+                except Exception as e:                                # noqa: BLE001 — one part failing does not take the words of the others with it
+                    self.log(f"(routine: one part of a joined line failed: {type(e).__name__}: {e})")
             return " ".join(p for p in parts if p) or None
         return go
 
@@ -1067,7 +1142,7 @@ class Daily:
             stereo = self.stereo() if self.stereo is not None else None
             if stereo is None:
                 return None
-            if self.run is not None and getattr(stereo, "pauses", 0) > self.run.pauses:
+            if self.run is not None and self._stops() > self.run.pauses:
                 # He said stop after the routine began (2026-11-04: "stop the music" as he came in, and the homecoming routine's own shuffle started it again 90 s later and played for 50 minutes).
                 self.log(f"[{self.run.room.name}] routine {self.run.name}: the music stays off, he said stop")
                 self._record("routine", routine=self.run.name, outcome="left the music off: he said stop")

@@ -48,8 +48,29 @@ PRESENT_S = 20 * 60                                             # a voice heard 
 HUSH_S = 45                                                     # ... but not in the last this many seconds: never talk over people
 AFTER_TURN_S = 180                                              # nor this soon after he last spoke to Skippy
 STARTER_ANSWER_S = 180                                          # an offered starter still takes "Skippy, tell me more" this long
-# What Whisper writes for noise it cannot read (2026-11-04 08:12: "Thanks for watching!" was taken as a command): never a thing said to the house.
-ARTIFACT = re.compile(r"\b(?:thanks? for watching|thank you for watching|please subscribe|subtitles? by|amara\.org)\b", re.I)
+# What Whisper writes for noise it cannot read (2026-11-04 08:12: "Thanks for watching!" was taken as a command): never a thing said to the house. Only a sentence
+# that IS the phrase counts (the review of 2026-11-05): "Skippy, turn off the lights. Thanks for watching!" keeps its command, and a real sentence that merely holds
+# the words ("thank you for watching the kids", "please subscribe me to the weather alerts", "put the subtitles by default on the TV") reaches the house.
+_FOR_WATCHING = r"(?:and )?(?:thanks?|thank you)(?: (?:so|very) much)? for watching(?:[ ,]+(?:everyone|everybody|guys|folks|friends|y'all|you all))?"
+ARTIFACT = re.compile(rf"^\W*(?:{_FOR_WATCHING}|please subscribe(?: to (?:my|the|our|this) channel)?|subtitles? by(?! default)\b.*|.*amara\.org.*)\W*$", re.I)
+ARTIFACT_TAIL = re.compile(rf"[,;]?\s*\b{_FOR_WATCHING}\W*$", re.I)                  # ... or the end of a command that ran on into it: "turn off the lights, thank you for watching"
+
+
+def without_artifacts(text: str) -> tuple[str, list[str]]:
+    """(what is left of `text` when the sentences Whisper makes up for noise are taken out, the sentences taken out). Nothing left: the whole of it was noise."""
+    kept, dropped = [], []
+    for sentence in re.split(r"(?<=[.!?])\s+", (text or "").strip()):
+        if not sentence:
+            continue
+        if ARTIFACT.match(sentence):
+            dropped.append(sentence)
+            continue
+        trimmed = ARTIFACT_TAIL.sub("", sentence).strip()
+        if trimmed and trimmed != sentence:
+            dropped.append(sentence[len(trimmed):].strip(" ,;"))
+            sentence = trimmed
+        kept.append(sentence)
+    return " ".join(kept), dropped
 
 
 def parse_rooms(spec: str) -> list[tuple[str, str, str, int]]:
@@ -129,6 +150,81 @@ def split_for_voice(text: str, limit: int = 480) -> list[str]:
     return out or [text[:limit]]
 
 
+class TurnTiming:
+    """Where the time of one spoken turn went, from the end of his voice to Skippy's voice being ready (the Captain, 2026-11-05: "streamline it so it becomes snappy
+    like Amazon echo"; measured that day, heard -> said had a median of 8 s and a p90 of 24 s): wait (the silence the voice detector waited to be sure he had finished),
+    hear (the voice gate's Whisper), think (the brain, with its own split when it keeps one: brain.timing = {"route", "model_s": [...], "tools_s", "total_s"}) and voice
+    (the reply turned into audio). One log line per turn and a `timing` in the house log's command record. A typed turn has no wait and no hear. Nothing here raises: a
+    number that cannot be read is left out."""
+
+    def __init__(self, heard: dict | None = None, sink=None):
+        heard = heard if isinstance(heard, dict) else {}
+        self.wait, self.hear = heard.get("wait"), heard.get("hear")
+        self.think = self.voice = None
+        self.brain = None
+        self.sink, self._done = sink, False                     # sink(self) is called once: when the voice is ready, or when the turn ended without one
+
+    def thought(self, seconds: float, brain=None) -> None:
+        self.think, self.brain = seconds, brain
+
+    def voiced(self, seconds: float) -> None:
+        self.voice = seconds
+        self.finish()
+
+    def finish(self) -> None:
+        if self._done:
+            return
+        self._done = True
+        if self.sink is not None:
+            self.sink(self)
+
+    def _parts(self) -> list[tuple[str, float]]:
+        return [(name, float(v)) for name, v in (("wait", self.wait), ("hear", self.hear), ("think", self.think), ("voice", self.voice)) if isinstance(v, (int, float))]
+
+    def _split(self) -> tuple:
+        """(route, [seconds of each model call], seconds of tools) from the brain's own record of the reply, whatever of it there is."""
+        b = self.brain if isinstance(self.brain, dict) else {}
+        route = b.get("route")
+        model = [float(x) for x in (b.get("model_s") or []) if isinstance(x, (int, float))]
+        tools = b.get("tools_s") if isinstance(b.get("tools_s"), (int, float)) else None
+        return route, model, tools
+
+    def numbers(self) -> dict:
+        """Seconds to 0.1, for the house log's command record."""
+        out = {name: round(v, 1) for name, v in self._parts()}
+        out["total"] = round(sum(v for _, v in self._parts()), 1)
+        try:
+            route, model, tools = self._split()
+            if self.brain:
+                out["route"] = str(route) if route else "none"
+            if model:
+                out["model"] = [round(x, 1) for x in model]
+            if tools is not None:
+                out["tools"] = round(float(tools), 1)
+        except Exception:                                       # noqa: BLE001 — the brain's own numbers are a bonus
+            pass
+        return out
+
+    def line(self) -> str:
+        """(timing: wait 0.7s, hear 0.9s, think 3.4s [route none; model 2.1+1.3s; tools 0.2s], voice 1.1s = 6.1s)"""
+        bits = []
+        for name, v in self._parts():
+            text = f"{name} {v:.1f}s"
+            if name == "think" and self.brain:
+                try:
+                    route, model, tools = self._split()
+                    inner = [f"route {route if route else 'none'}"]
+                    if model:
+                        inner.append("model " + "+".join(f"{x:.1f}" for x in model) + "s")
+                    if tools is not None:
+                        inner.append(f"tools {float(tools):.1f}s")
+                    text += " [" + "; ".join(inner) + "]"
+                except Exception:                               # noqa: BLE001
+                    pass
+            bits.append(text)
+        return f"(timing: {', '.join(bits)} = {sum(v for _, v in self._parts()):.1f}s)"
+
+
 class Room:
     """One room: the audio its box streams in, what Skippy hears and decides, and what goes back through its `link`.
 
@@ -169,6 +265,7 @@ class Room:
         self.buf: list | None = None
         self._speech_t0 = self._shown_t = None                  # when the voice began; when he last perked up for something that may not be for him
         self._probed = False
+        self._heard = None                                      # {"wait": s, "hear": s}: what the utterance now being answered cost before the brain (handle() takes it for the timing line)
         self.t, self._carry = 0, []                             # t: milliseconds of audio heard on this connection (the room's own clock)
         self.mode, self.deadline = IDLE, 0
         self.recorder = None                                    # wakerec.Recorder: `hub.py --record` sends the room's audio there instead of listening
@@ -272,7 +369,7 @@ class Room:
                 self._probed = True
                 self._spawn(self._probe(list(self.buf)))
         elif event == "end" and self.buf is not None:
-            self._finish()
+            self._finish(getattr(self.vad, "waited_ms", None))
         self._tick()
 
     async def _probe(self, blocks) -> None:
@@ -319,18 +416,24 @@ class Room:
             if self.mode == LISTENING:                          # (a conversation that ends is no news; a name with nothing after it is what to tune from)
                 self.log(f"[{self.name}] (mic: nothing said; loudest {self._after_window():.3f}, the bar was {self.vad.start_bar():.3f}, the room {self.vad.quiet:.3f})")
             self.buf = None
-            if self.pending_starter is not None:                # offered, and nobody answered
-                self._starter_answer(self.pending_starter, "ignored", "")
-                self.pending_starter = None
-            self._resume(IDLE)                                  # the same way back to rest as every other: the detector is disarmed, the half-heard goes
-            self._spawn(self.link.released())                   # nothing said: the box goes back to waiting for its name
+            self._window_over()
+
+    def _window_over(self) -> None:
+        """A listening window ends with nothing said: the same way back to rest as every other (the detector is disarmed, the half-heard goes) and the box goes back
+        to waiting for its name."""
+        if self.pending_starter is not None:                    # offered, and nobody answered
+            self._starter_answer(self.pending_starter, "ignored", "")
+            self.pending_starter = None
+        self._resume(IDLE)
+        self._spawn(self.link.released())
 
     def _after_window(self) -> float:
         """The loudest 150 ms since the listening window opened (the name is not in it)."""
         n = max(0, int((self.t - self._window_t0) // BLOCK_MS))
         return loudest(list(self._levels)[-n:]) if n else 0.0
 
-    def _finish(self) -> None:
+    def _finish(self, waited_ms: float | None = None) -> None:
+        """`waited_ms`: the silence the voice detector waited before it found the end (the first part of the turn's timing line)."""
         utterance, self.buf = self.buf, None
         if len(utterance) * BLOCK_MS - self.vad.end_silence_ms < self.min_speech_ms:
             return                                              # a cough or a click is not worth sending
@@ -339,10 +442,10 @@ class Room:
         heard = loudest(list(self._levels)[-len(utterance):])
         if heard > 0:
             self._last_voice = heard                            # the next command starts from how loud he was this time
-        self.log(f"[{self.name}] (mic: a voice at {heard:.3f}, the bar was {self.vad.start_bar():.3f}, the room {self.vad.quiet:.3f})")
+        self.log(f"[{self.name}] (mic: a voice at {heard:.3f}, the bar was {getattr(self.vad, 'speech_bar', 0.0) or self.vad.start_bar():.3f}, the room {self.vad.quiet:.3f})")     # (the bar it cleared to begin: the arming may be over by now)
         was = self.mode
         self.mode = BUSY
-        self._spawn(self._utterance(was, [x for block in utterance for x in block]))
+        self._spawn(self._utterance(was, [x for block in utterance for x in block], None if waited_ms is None else waited_ms / 1000))
 
     def _spawn(self, coro) -> None:
         task = asyncio.ensure_future(coro)
@@ -350,7 +453,7 @@ class Room:
         task.add_done_callback(self.tasks.discard)
 
     # ── what was said ──
-    async def _utterance(self, was: str, samples) -> None:
+    async def _utterance(self, was: str, samples, waited_s: float | None = None) -> None:
         try:
             # No voice_stopped() here: it stops the box's microphone until an answer comes. "Skippy" and a pause is an utterance of just the name
             # (or Whisper refuses it): the room listens on for the command, and a box told to stop sent nothing more (2026-11-01: 8 s of silence,
@@ -362,11 +465,13 @@ class Room:
                     self.log(f"[{self.name}] (debug: kept {len(samples) / 16000:.1f} s of audio)")
                 except OSError:
                     pass
+            heard_at = time.monotonic()
             try:
                 text = await asyncio.to_thread(self.gate.stt, wav_bytes(samples))
             except GateError as e:
                 self.log(f"[{self.name}] (could not hear: {e})")
                 text = ""
+            hear_s = time.monotonic() - heard_at
             woke, rest = wake_split(text)
             if was == IDLE:                                     # no spotter: Whisper is the wake word
                 if not woke:
@@ -377,23 +482,37 @@ class Room:
                 self._alarm_hush("whisper")
                 self._record("wake", by="whisper")
                 await self.link.woke("skippy")
-                if not rest:
-                    self._resume(LISTENING, self.listen_ms)
-                    return
                 command = rest
             else:
                 command = rest if woke else text
-            if command and ARTIFACT.search(command):           # what Whisper writes for noise: not a word said to the house
-                self.log(f"[{self.name}] (not a command, only what Whisper makes of noise: {command!r})")
-                command = ""
+            if command:                                         # what Whisper writes for noise is not a word said to the house: the rest of the command is
+                command, dropped = without_artifacts(command)
+                if dropped:
+                    self.log(f"[{self.name}] (" + ("took out what Whisper makes of noise" if command else "not a command, only what Whisper makes of noise") + f": {dropped!r})")
             if not command:
-                self._resume(was, self.listen_ms if was == LISTENING else self.followup_ms)
+                await self._nothing_followed(was, woke)
                 return
+            self._heard = {"wait": waited_s, "hear": hear_s}    # what this utterance cost before the brain: the turn's timing line (handle() takes it)
             await self.handle(command)
         except Exception as e:                                  # noqa: BLE001 — one bad turn must not take the room down
             self.log(f"[{self.name}] (turn failed: {type(e).__name__}: {e})")
             self._resume(IDLE)
             await self.link.released()
+
+    async def _nothing_followed(self, was: str, woke: bool) -> None:
+        """An utterance with no command in it. The name alone ("Skippy." and a pause), or the name and only what Whisper makes of noise: the command is still to come,
+        so the window opens in full again. Noise with no name in it (a cough, the TV, a fan: at the lowered bar after the name they begin "speech" now and then) must not
+        do that. It used to open another full window each time, and a room that flickers kept it open for ever, a Whisper call and a "voice" for every flicker, with
+        whatever the TV said taken for his command (the review of 2026-11-05). Noise leaves the window as it was: it ends at its own deadline."""
+        if woke:                                                # (with no wake-word model it was Whisper that heard the name: was == IDLE, and a window opens as for any name)
+            self._resume(LISTENING if was == IDLE else was, self.followup_ms if was == FOLLOWUP else self.listen_ms)
+            return
+        left = self.deadline - self.t
+        if left > 0:
+            self._resume(was, left)
+            return
+        self.log(f"[{self.name}] (mic: only noise since the name: back to rest)")
+        self._window_over()
 
     def _emit(self, kind: str, **fields) -> None:
         """A turn event for the portal's Home chat: only ever called for words addressed to him or said by him; a deque append, never waits."""
@@ -569,7 +688,41 @@ class Room:
         mine = set(re.findall(r"[a-z']+", said.lower()))
         return sum(w in mine for w in words) >= 0.8 * len(words)
 
+    def _house_audio_playing(self) -> bool:
+        """Anything the house plays right now (a song, Spotify, a book: one stream), as the brain reads it for a bare "stop" (houseaudio.Audio)."""
+        audio = getattr(self.brain, "audio", None)
+        try:
+            return bool(audio.playing()) if audio is not None else False
+        except Exception:                                       # noqa: BLE001
+            return False
+
+    def _plain_audio_stop(self, command: str) -> bool:
+        """He said a plain "stop" / "enough" while the house audio plays: the words brain.stop_route reads as a stop. A routine that is running (daily.END_RE) and the sign-off
+        (wake.is_stop) take those words before the brain ever hears them, and the audio played on (the review of 2026-11-05); it is asked here, before either of them acts."""
+        if not self._house_audio_playing():
+            return False
+        try:
+            from brain import stop_route                        # noqa: PLC0415
+            return stop_route(command, True) is not None
+        except Exception:                                       # noqa: BLE001
+            return False
+
+    async def _also_stop_audio(self, command: str) -> list[str]:
+        """The word that ended a routine or signed off was a stop of the house audio too (Bilby is one stream, and "stop" means all of it): pause it through the music tool,
+        like the brain would have, so the stop is counted (a routine that has not started its music yet leaves it off) and in the house log. -> the tools that ran."""
+        run = getattr(self.brain, "run_tool", None)
+        if run is None or not self._house_audio_playing():      # (the routine's own "Music off." may have got there first)
+            return []
+        try:
+            said = await asyncio.to_thread(run, "music", {"action": "pause"})
+        except Exception as e:                                  # noqa: BLE001 — the word still did what it did
+            self.log(f"[{self.name}] (could not stop the house audio: {type(e).__name__}: {e})")
+            return []
+        self.log(f"[{self.name}] stopped the house audio too: {str(said)[:80]}")
+        return ["music"]
+
     async def handle(self, command: str, typed: bool = False, speak: bool = True) -> None:
+        heard, self._heard = getattr(self, "_heard", None), None
         if not typed and self.is_echo(command):
             self.log(f"[{self.name}] (heard my own voice back: ignored)")
             self._resume(FOLLOWUP if self.remote_wake and self.link.hub_follows_up else IDLE, self.followup_ms)
@@ -583,6 +736,7 @@ class Room:
                 done, command = await self._answer_starter(command)
                 if done:
                     return
+        audio_stop = not typed and self._plain_audio_stop(command)
         ringing = self.clock is not None and self.clock.ringing is not None
         snoozed = None if ringing or self.clock is None else self.clock.snooze_after_wake(command, by=self.name)   # the wake word stopped it; "snooze" said next
         if snoozed is not None or ringing or (self.clock is None and self.alarms is not None and self.alarms.ringing is not None):
@@ -597,6 +751,8 @@ class Room:
                     await self.link.released()
                 return
         if self.daily is not None and await self.daily.claim(self, command):
+            if audio_stop and await self._also_stop_audio(command):        # "stop" that ended a routine left the music it started playing: one stop is everything
+                self._record("command", words=command, tools=["music"], outcome="routine_stop")
             self._turn_at = time.monotonic()                    # a routine's words ("goodnight", "skip", "later"): the routine answers, not the brain
             if self.mode == BUSY and not typed:
                 self._resume(IDLE)
@@ -609,13 +765,15 @@ class Room:
             await self._decline(command)
             return
         if not typed and (is_goodbye(command) or is_stop(command)):
-            self._record("command", words=command, tools=[], outcome="sign_off")
+            stopped = await self._also_stop_audio(command) if audio_stop else []       # a plain "stop" while the house plays is the house's stop too, not only the end of the talk
+            self._record("command", words=command, tools=stopped, outcome="sign_off")
             self._resume(IDLE)
             await self._sign_off(command)
             await self.link.released()
             return
         self.log(f"[{self.name}] heard: {command}")
         started, outcome = time.time(), "ok"
+        turn, thought = TurnTiming(None if typed else heard), time.monotonic()
         try:
             work = asyncio.ensure_future(asyncio.to_thread(self.brain.reply, command))
             await self._cover_the_wait(work, command)
@@ -624,17 +782,30 @@ class Room:
             self.log(f"[{self.name}] (brain failed: {type(e).__name__})")
             outcome = "brain_failed"
             reply = "My brain is not answering. Typical."
+        turn.thought(time.monotonic() - thought, getattr(self.brain, "timing", None) if outcome == "ok" else None)     # (a failed reply has no split of its own: the last one's is not its)
         self.log(f"[{self.name}] said: {reply[:120]}")
         calls = list(getattr(self.brain, "actions", None) or [])
-        if self.hlog is not None:
-            self._record("command", words=command, tools=[c["tool"] for c in calls], outcome=outcome, reply=reply, seconds=round(time.time() - started, 1),
-                         guard=" ".join(x for x in (getattr(self.brain, "guard", None) or ()) if x) or None)      # claim_reasked etc.: the count of claims needs no log archaeology
-            self.hlog.actions(self.name, calls)
+        seconds = round(time.time() - started, 1)
+        guard = " ".join(x for x in (getattr(self.brain, "guard", None) or ()) if x) or None      # claim_reasked etc.: the count of claims needs no log archaeology
+
+        def note(t: TurnTiming) -> None:
+            """The command's record (with the timing) and the timing line: written when the reply's voice is ready, a moment after the reply, so the timing is whole."""
+            try:
+                if self.hlog is not None:
+                    self._record("command", words=command, tools=[c["tool"] for c in calls], outcome=outcome, reply=reply, seconds=seconds, guard=guard, timing=t.numbers())
+                    self.hlog.actions(self.name, calls)
+                self.log(f"[{self.name}] {t.line()}")
+            except Exception as e:                              # noqa: BLE001 — a log must never cost him his answer
+                self.log(f"[{self.name}] (could not log the turn: {type(e).__name__}: {e})")
+        turn.sink = note
         from housemem import DISPLAY, action_line               # noqa: PLC0415
         tools = [action_line(c) for c in calls if c.get("tool") in DISPLAY]
         if tools:
             self._emit("actions", tools=tools[:8])
-        await self.say(reply, follow_up=True, silent=not speak, typed=typed)
+        try:
+            await self.say(reply, follow_up=True, silent=not speak, typed=typed, timing=turn)
+        finally:
+            turn.finish()                                       # (a silent typed turn or a failed one never reaches the voice: the record is still written)
         if typed:
             return
         if outcome == "ok":
@@ -717,8 +888,9 @@ class Room:
         if show is not None:
             show(on)
 
-    async def say(self, text: str, follow_up: bool = False, announce: bool = False, silent: bool = False, typed: bool = False, voice=None) -> None:
-        """Skippy's voice in this room: the gate's local TTS (a summary when long), else the machine's own voice. Waits until it has played."""
+    async def say(self, text: str, follow_up: bool = False, announce: bool = False, silent: bool = False, typed: bool = False, voice=None, timing: TurnTiming | None = None) -> None:
+        """Skippy's voice in this room: the gate's local TTS (a summary when long), else the machine's own voice. Waits until it has played.
+        `timing`: the turn being answered; it is told how long the reply took to become audio (the last part of its timing line)."""
         said = text
         if looks_technical(text) or len(text) > self.summarize_over:       # only technical or very long output is boiled down: his voice and jokes are spoken whole
             try:
@@ -731,7 +903,10 @@ class Room:
             return                                              # "speak aloud" off: the answer only appears in the thread
         self._last_said = (said, time.monotonic())              # an echo of it is not the Captain talking (is_echo)
         async with self.voice:
+            made = time.monotonic()
             voice = voice if voice is not None and said == text else await self._voice(said)    # a clip made already (a starter) is used as it is
+            if timing is not None:
+                timing.voiced(time.monotonic() - made)
             await self.link.show(said)
             if self.stereo is not None:
                 self.stereo.duck(True, 90)                      # the house radio ducks under Skippy's voice, then comes back
@@ -856,19 +1031,29 @@ class Room:
                     return kinds
         return []
 
+    def _stereo_is_on(self) -> bool:
+        """This room has a stereo that can sound now (stereo_kinds). True when that cannot be told: waiting for a ring that is not this room's is only slow, speaking over
+        one that is would be two Skippys at once."""
+        try:
+            return bool(self.stereo_kinds())
+        except Exception:                                       # noqa: BLE001
+            return True
+
     async def ring(self, tone: bytes, voice, text: str, quiet: bool = False, wait=None, floor: bool = False) -> None:
         """One ring of the house's alarm clock on this pod (alarm_clock.py): the chime, then the words; then a plain "stop" needs no name.
-        `wait` is the room's stereo ringing for it (a task answering True when something sounded); `quiet`: the stereo rings for this box, which stays
+        `wait` is the house's stereo ringing (a task answering True when something sounded); `quiet`: the stereo rings for this box, which stays
         silent. The box shows the words and stays busy, deaf, until the stereo has finished and its echo has died away (its microphone would hear "Say
         stop" and the alarm would stop itself), then opens the "stop" window as after any ring. A box that is not quiet but has a stereo ringing (the
         alarm's third ring on) rings AFTER it, never with it: the same words from two speakers a moment apart are two Skippys at once (the Captain,
-        2026-11-05). If the stereo's ring failed or never finished, the box rings at once. `floor`: the alarm clock already holds this room's voice lock."""
+        2026-11-05). That is a box whose OWN room has a stereo on: a box in a room with none is not joining anything (the stereo's ring is somewhere else in the
+        house, and it is the only speaker he hears), so it rings at once. If the stereo's ring failed or never finished, the box rings at once.
+        `floor`: the alarm clock already holds this room's voice lock."""
         import alarm_clock                                      # noqa: PLC0415
         was, self.mode = self.mode, BUSY
         try:
             async with (contextlib.nullcontext() if floor else self.voice):
                 await self.link.show(text)
-                if wait is not None:
+                if wait is not None and (quiet or self._stereo_is_on()):
                     try:
                         sounded = await asyncio.wait_for(asyncio.shield(wait), alarm_clock.RING_WAIT_S) is not False     # False: nothing sounded on the stereo
                     except Exception as e:                      # noqa: BLE001 — it failed, or took too long: the box is the only speaker left
