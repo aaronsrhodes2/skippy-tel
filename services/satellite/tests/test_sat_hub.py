@@ -239,8 +239,25 @@ def test_a_name_that_nothing_followed_closes_the_window_instead_of_hanging():
         await box.stream(QUIET, 9000)                                   # longer than the listening window (8 s)
         await asyncio.sleep(0.1)
         assert made["room"].mode == "idle" and made["room"].buf is None
+        assert made["room"].vad._armed is None                          # back at rest the detector is disarmed like after every other way back (it used to stay armed)
         assert any("(mic: nothing said" in line for line in log)
         assert made["gate"].stt_calls == 0
+    run(body)
+
+
+def test_a_buffer_that_only_grows_is_cut_whatever_the_room_does(monkeypatch):
+    """A steady noise that holds the detector open used to grow the buffer for ever (25 KB a block)."""
+    import hub as hub_mod
+    monkeypatch.setattr(hub_mod, "MAX_UTTERANCE_BLOCKS", 100)
+    async def body(box, made, hub, log, start):
+        with_spotter(made)
+        await start()
+        await box.send("run-pipeline", {"start_stage": "wake", "end_stage": "tts"})
+        await box.stream(QUIET, 600)
+        await box.stream(VOICE, 12000)                                  # 12 s of a steady loud noise: no pause ever ends it
+        await asyncio.sleep(0.1)
+        assert any("without a pause: cut there" in line for line in log)
+        assert made["room"].buf is None or len(made["room"].buf) <= 100
     run(body)
 
 

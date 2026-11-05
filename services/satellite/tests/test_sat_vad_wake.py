@@ -92,6 +92,21 @@ def test_while_a_command_is_expected_a_soft_voice_cannot_raise_the_rooms_quiet_b
     assert vad.quiet < 0.02
 
 
+def test_arming_lapses_by_itself_so_a_louder_room_is_learned_again():
+    """A detector left armed (a window that closed with no command) learnt the room's quiet downward only: a TV turned on later held 'speech' open for ever."""
+    from vad import ARM_MS
+    vad = Vad(floor_min=0.015)
+    _, t = run_on(vad, [(0.004, 800)])
+    vad.arm(0.0)
+    assert vad.start_bar() < vad.bar()
+    _, t = run_on(vad, [(0.004, ARM_MS + 500)], t)
+    assert vad._armed is None and vad.start_bar() == vad.bar()
+    ev, t = run_on(vad, [(0.1, 6000)], t)                                                         # the room gets louder and stays: speech begins ...
+    assert [e[0] for e in ev] == ["speech"]
+    ev, _ = run_on(vad, [(0.1, 2000), (0.004, 3000)], t)                                          # ... and ends when it stops
+    assert [e[0] for e in ev] == ["end"]
+
+
 def test_loudest_is_how_loud_a_voice_was_not_how_loud_a_click_was():
     from vad import loudest
     assert loudest([]) == 0.0 and abs(loudest([0.1, 0.3]) - 0.2) < 1e-9

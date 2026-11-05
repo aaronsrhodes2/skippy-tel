@@ -18,6 +18,7 @@ import math
 ARM_VOICE = 0.35                # an expected command starts at this share of how loud the name was
 ARM_QUIET = 1.6                 # ... but never below this multiple of the room's quiet
 ARM_FLOOR = 1.2                 # ... or of the floor
+ARM_MS = 12000                  # arming lapses by itself after this long (a listening window is 8 s): a detector left armed in a noisy room could never learn that the room got louder
 
 
 def rms(samples) -> float:
@@ -55,17 +56,19 @@ class Vad:
         self._win_t = 0.0
         self._calib = math.inf
         self._armed: float | None = None
+        self._arm_t0: float | None = None
 
     def restart(self) -> None:
         """Forget a half-heard utterance (after Skippy spoke, or a new turn began) but keep what it learned about the room's quiet."""
         self.speaking, self._begun, self._above, self._quiet_since, self._last_t = False, False, 0.0, None, None
-        self._armed = None
+        self._armed = self._arm_t0 = None
 
     def arm(self, voice: float = 0.0) -> None:
         """A command is expected: lower the bar for its first words to ARM_VOICE of `voice` (how loud the name just was; 0 = not known), never below
-        ARM_QUIET times the room's quiet or ARM_FLOOR times the floor, and never above the normal bar. It holds until he begins or restart()."""
+        ARM_QUIET times the room's quiet or ARM_FLOOR times the floor, and never above the normal bar. It holds until restart() or ARM_MS has gone by."""
         low = max(self.floor_min * ARM_FLOOR, self.quiet * ARM_QUIET)
         self._armed = max(low, ARM_VOICE * voice) if voice > 0 else low
+        self._arm_t0 = None                                              # the clock starts with the next reading
 
     def bar(self) -> float:
         return max(self.floor_min * 2.2, self.quiet * self.ratio)
@@ -78,6 +81,11 @@ class Vad:
     def push(self, level: float, t: float) -> str | None:
         dt = 0.0 if self._last_t is None else t - self._last_t
         self._last_t = t
+        if self._armed is not None:                                      # armed for a window only: a stale arming would keep the quiet from ever rising again
+            if self._arm_t0 is None:
+                self._arm_t0 = t
+            elif t - self._arm_t0 > ARM_MS:
+                self._armed = self._arm_t0 = None
         if self._t0 is None:
             self._t0, self._win_t = t, t
         if t - self._t0 < self.cal_ms:                                   # calibrating: the quietest ~100 ms window is the room

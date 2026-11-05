@@ -39,6 +39,7 @@ ESPHOME_PORT = 6053                                             # ESPHome's nati
 RATE, WIDTH, CHANNELS = 16000, 2, 1                             # what the hub hears in (boxes are asked for this; others are converted)
 BLOCK = 800                                                     # 50 ms: what the Vad's numbers were tuned on (the same as ear.py)
 BLOCK_MS = 50
+MAX_UTTERANCE_BLOCKS = 1800                                     # 90 s: nothing he says to Skippy is longer, and a buffer that only grows is a leak
 CHUNK = 2048                                                    # samples per audio-chunk sent back over Wyoming
 IDLE, LISTENING, FOLLOWUP, BUSY = "idle", "listening", "followup", "busy"
 REST_SILENCE_S = 20                                             # a box streams all the time it rests (the hub hears its name): this long with no audio, it is asked to start again
@@ -252,6 +253,11 @@ class Room:
         event = self.vad.push(level, self.t)
         if self.buf is not None and event != "speech":
             self.buf.append(block)
+            if len(self.buf) > MAX_UTTERANCE_BLOCKS:            # a detector held open by a steady noise would grow this for ever (25 KB a block): cut it, whatever the mode
+                self.log(f"[{self.name}] (mic: {MAX_UTTERANCE_BLOCKS * BLOCK_MS // 1000} s without a pause: cut there)")
+                self._finish()
+                self.vad.restart()
+                event = None
         if event == "speech":
             self._voice_at = time.monotonic()
             self.buf = list(self.pre)
@@ -318,8 +324,7 @@ class Room:
             if self.pending_starter is not None:                # offered, and nobody answered
                 self._starter_answer(self.pending_starter, "ignored", "")
                 self.pending_starter = None
-            self.mode = IDLE
-            self._session(False)
+            self._resume(IDLE)                                  # the same way back to rest as every other: the detector is disarmed, the half-heard goes
             self._spawn(self.link.released())                   # nothing said: the box goes back to waiting for its name
 
     def _after_window(self) -> float:
