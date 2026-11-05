@@ -15,6 +15,7 @@ me up in the morning"). ONE clock for the whole house, ticking on its own: an al
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import json
 import math
@@ -36,6 +37,7 @@ REMINDER_RINGS = 2
 POD_JOINS_AT_RING = 3               # a box whose room has a stereo that is on rings by it alone until this ring (2 minutes unanswered), then joins
 LISTEN_AFTER_S = 1.2                # a silent box opens its "stop" window this long after the stereo went quiet: the Enclave's latency and the room's echo
 RING_WAIT_S = 45                    # the longest a silent box waits for the stereo's ring (a clip is seconds long) before it speaks after all
+FLOOR_WAIT_S = 20                   # a ring waits this long for Skippy to finish what he is saying (a routine's line, an answer) before it speaks over it: an alarm must wake him
 GAINS = (0.45, 0.6, 0.75, 0.9, 1.0)  # each ring a little louder (the first never startles him out of bed)
 CHECK_AT = "21:30"                  # the evening check: an alarm tomorrow and the way it rings is broken -> his phone is told tonight
 PORTAL_PAGE = "https://makerportal.live/alarms"
@@ -260,10 +262,33 @@ class AlarmClock:
                     quiet.append(room)
         self.log(f"ring {n} ({gain:.2f}): outputs {'+'.join(kinds) or 'none'}, pods {', '.join(pods) or 'none'}"
                  f"{' (silent: ' + ', '.join(quiet) + ')' if quiet else ''}: {text}")
-        stereo = asyncio.ensure_future(self._play_outs(kinds, [tone, voice], gain)) if kinds else None
-        jobs = [stereo] if stereo is not None else []
-        jobs += [self._ring_pod(room, tone, voice, text, quiet=room in quiet, wait=stereo) for room in pods]
-        await asyncio.gather(*jobs, return_exceptions=True)
+        async with self._floor():                       # one Skippy at a time: the ring waits for a routine's line to end, and nothing starts over the ring
+            stereo = asyncio.ensure_future(self._play_outs(kinds, [tone, voice], gain)) if kinds else None
+            jobs = [stereo] if stereo is not None else []
+            jobs += [self._ring_pod(room, tone, voice, text, quiet=room in quiet, wait=stereo) for room in pods]
+            await asyncio.gather(*jobs, return_exceptions=True)
+
+    @contextlib.asynccontextmanager
+    async def _floor(self):
+        """The house has one voice (the Captain, 2026-11-05: "I don't generally want two skippys speaking at the same time"; at 07:10 the alarm's rings were
+        spoken over the morning routine's lines, because only the box's part of a ring waited for a room's voice lock and the Enclave's did not). A ring
+        takes every room's voice lock, so a line already being said ends first and nothing new is said over the ring; the rooms' own ring (hub.Room.ring)
+        is then told it holds the floor. After FLOOR_WAIT_S the ring speaks anyway: a long line must never keep him asleep."""
+        held, deadline = [], time.monotonic() + FLOOR_WAIT_S
+        try:
+            for name, room in sorted((getattr(self.hub, "rooms", {}) or {}).items()):
+                lock = getattr(room, "voice", None)
+                if not isinstance(lock, asyncio.Lock):
+                    continue
+                try:
+                    await asyncio.wait_for(lock.acquire(), max(0.01, deadline - time.monotonic()))
+                    held.append(lock)
+                except asyncio.TimeoutError:
+                    self.log(f"(alarm: {name} was still talking after {FLOOR_WAIT_S} s: the ring speaks over it)")
+            yield held
+        finally:
+            for lock in held:
+                lock.release()
 
     async def _voice(self, text: str) -> bytes | None:
         """Skippy's voice (mp3), else the machine's (as WAV), else None: the chime still rings."""
@@ -300,10 +325,9 @@ class AlarmClock:
         r = (getattr(self.hub, "rooms", {}) or {}).get(self.hub_room(room))
         if r is None:
             return
-        if quiet:
-            await r.ring(tone, voice, text, quiet=True, wait=wait)
-        else:
-            await r.ring(tone, voice, text)
+        # a real room's voice lock is held by the ring (_floor), whether or not it was got in time; a room that has none (a test's stand-in) is rung as it always was
+        held = {"floor": True} if isinstance(getattr(r, "voice", None), asyncio.Lock) else {}
+        await r.ring(tone, voice, text, quiet=quiet, wait=wait, **held)
 
     async def say_in(self, room: str, text: str) -> None:
         """A timer's words in its room (its pod and the announcement outputs), or, its pod away, the announcement outputs alone."""
@@ -469,6 +493,29 @@ class AlarmClock:
         except Exception as e:                          # noqa: BLE001
             self.log(f"(alarm clock: the alert didn't reach the portal: {type(e).__name__}: {e})")
             return False
+
+    # ── the morning routine plans around the alarm (daily.Daily.morning_time) ──
+    def wake_time(self, date: str) -> str | None:
+        """The first alarm (never a reminder) that rings on `date` ("2026-11-05"), as "HH:MM"; None when none does. Read from the schedule, not from
+        `due`: a repeating alarm's `due` is already next week's once it has rung, and the answer must not change then."""
+        try:
+            weekday = alarms_mod.DAYS[time.strptime(date, "%Y-%m-%d").tm_wday]
+        except ValueError:
+            return None
+        times = []
+        for a in self.alarms.items:
+            if a.kind != "alarm":
+                continue
+            if a.days:
+                if weekday not in a.days:
+                    continue
+            elif time.strftime("%Y-%m-%d", time.localtime(a.due)) != date:
+                continue
+            times.append(a.hhmm)
+        return min(times) if times else None
+
+    def is_ringing(self) -> bool:
+        return self.ringing is not None
 
     # ── the evening before ──
     def next_wake(self, within_s: float = 20 * 3600):

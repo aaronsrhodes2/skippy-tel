@@ -457,6 +457,60 @@ def test_an_early_first_event_moves_tomorrows_morning(tmp_path):
     assert asyncio.run(d.plan_tomorrow()) is None and d.morning_time("2026-11-03") == "07:10"
 
 
+def test_the_morning_comes_before_the_days_first_alarm_and_waits_while_one_rings(tmp_path):
+    """The Captain, 2026-11-05: the 07:00 alarm began, the routine came at 07:10 and Skippy said the alarm over it: "move the routine to happen before the alarm"."""
+    now = [stamp("2026-11-05", "06:40")]
+    d, room, link, brain, house, posts, car = make(tmp_path, now, car=car_at(HOME))
+    ringing = [False]
+    d.extras["wake_alarm"] = {"2026-11-05": "07:00", "2026-11-03": "08:30", "2026-11-08": "11:30", "2026-11-09": "04:00", "2026-11-10": "04:35"}.get
+    d.extras["alarm_ringing"] = lambda: ringing[0]
+    assert d.morning_time("2026-11-05") == "06:50"                      # ten minutes ahead of the alarm: the briefing takes about six
+    assert d.morning_time("2026-11-03") == "08:20"                      # a later alarm moves it later: the briefing is for waking up to
+    assert d.morning_time("2026-11-06") == "07:10"                      # no alarm that day: the fixed time
+    assert d.morning_time("2026-11-08") == "07:10" and d.morning_time("2026-11-09") == "07:10"      # an alarm outside a morning's hours changes nothing
+    assert d.morning_time("2026-11-10") == "04:30"                      # never before 04:30
+    d.state["morning_override"] = {"2026-11-05": "05:30"}               # an early first event (plan_tomorrow) can only make it earlier
+    assert d.morning_time("2026-11-05") == "05:30"
+    d.state["morning_override"] = {"2026-11-05": "06:55"}
+    assert d.morning_time("2026-11-05") == "06:50"
+    d.state["morning_override"] = {}
+
+    async def go():
+        await d.tick(room)                                              # 06:40: not yet
+        assert not d.busy
+        now[0] = stamp("2026-11-05", "06:50")
+        ringing[0] = True
+        await d.tick(room)                                              # something rings: it is answered first, the briefing never speaks over it
+        assert not d.busy and d.state.get("last_morning") != "2026-11-05"
+        ringing[0] = False
+        await d.tick(room)
+        assert d.busy
+        await finish(d, 15)
+    asyncio.run(go())
+    assert d.state["last_morning"] == "2026-11-05" and link.spoken[0].startswith("Good morning, Captain.")
+
+
+def test_the_lead_before_the_alarm_is_a_setting_and_a_broken_alarm_clock_leaves_the_morning_alone(tmp_path):
+    now = [stamp("2026-11-04", "22:30")]
+    d, *_ = make(tmp_path, now, env={"SKIPPY_MORNING_BEFORE_ALARM_MIN": "15"})
+    d.extras["wake_alarm"] = {"2026-11-05": "07:00"}.get
+    assert d.morning_time("2026-11-05") == "06:45"
+
+    def broken(date):
+        raise RuntimeError("no clock")
+    d.extras["wake_alarm"] = broken
+    assert d.morning_time("2026-11-05") == "07:10" and asyncio.run(d.briefing_line()) is None
+
+
+def test_bedtime_says_when_the_briefing_comes_before_tomorrows_alarm(tmp_path):
+    now = [stamp("2026-11-04", "22:30")]
+    d, *_ = make(tmp_path, now)
+    d.extras["wake_alarm"] = {"2026-11-05": "07:00"}.get
+    assert asyncio.run(d.briefing_line()) == "The morning briefing comes at 6:50 AM, before it."
+    d.extras["wake_alarm"] = lambda date: None
+    assert asyncio.run(d.briefing_line()) is None                       # no alarm tomorrow: nothing to say
+
+
 def test_the_night_shift_starts_once_when_the_house_is_quiet_and_the_morning_reads_its_line(tmp_path):
     now = [stamp("2026-11-03", "01:40")]
     d, room, link, *_ = make(tmp_path, now)

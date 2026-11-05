@@ -20,6 +20,15 @@ Settings (the vault `.env`, or the environment): `SKIPPY_HOME_TOKEN`, `SKIPPY_CO
 `wakeword/README.md`: record him (`wakectl.py record`), train on the GPU (`bash wakeword/train.sh`), test and pick the threshold (`wakectl.py test`).
 With a model, room talk is never sent anywhere: only what follows "Skippy" reaches Whisper.
 
+**Commands after the name need no shouting (the Captain, 2026-11-05: "Skippy hears his wake word well, but the following commands I have to shout"):** the
+spotter fires on a soft voice, but the voice detector's bar (`vad.Vad`) is an absolute loudness, a multiple of the room's quiet. When the name is heard,
+`Vad.arm(voice)` lowers the bar for the first words of the command to 35% of how loud the name was (never below 1.6x the room's quiet or 1.2x
+`SATELLITE_FLOOR`, never above the normal bar); a dip between syllables keeps half of what was counted; while armed the room's quiet is learned downward
+only (a soft voice under the bar cannot raise it; the Enclave ducking under the name lowers it). A buffer seeded when the name was heard no longer keeps the
+window open for ever when the detector never hears him begin (`Room._tick`). Every command and every window that closes empty now writes one line to
+`state/hub.log` with the numbers: `(mic: a voice at 0.081, the bar was 0.024, the room 0.015)` / `(mic: nothing said; loudest 0.018, the bar was 0.024 ...)`.
+If he still has to shout, those lines say by how much. What Whisper writes for noise ("Thanks for watching!") is never taken as a command.
+
 ## Every room: the hub
 
     ./.venv/Scripts/python hub.py                                          # every room in SATELLITE_ROOMS
@@ -243,6 +252,14 @@ One clock for the house, ticking on its own (an alarm rings with every pod off t
   mid-ring, or the evening before when the hub has been silent 15 min. At 21:30 the hub checks the alarm's speaker; the bedtime routine
   says "Your alarm is set for 6:30." or "No alarm is set for tomorrow."
 - **Timers** stay per room (the brain sets them) and are rung by the clock too: one whose pod is away is still said upstairs.
+- **The morning routine comes before the alarm, and one Skippy speaks at a time (the Captain, 2026-11-05):** at 07:00 the alarm began and at 07:10 the
+  morning routine, and Skippy said "This is your alarm" over the routine's lines (and, from the third ring, the Enclave and the box said each ring a
+  moment apart). Now (1) `daily.Daily.morning_time` puts the briefing `SKIPPY_MORNING_BEFORE_ALARM_MIN` (10) minutes before the day's first alarm
+  (`AlarmClock.wake_time(date)`, read from the schedule; an alarm between 04:30 and 11:00; no alarm that day: `SKIPPY_MORNING_AT`; an early first event can
+  only move it earlier), waits while an alarm rings, and the bedtime line says when it comes. (2) A ring takes every room's voice lock (`AlarmClock._floor`):
+  it waits up to `FLOOR_WAIT_S` (20 s) for a line being said to end, nothing new is said over the ring, and after 20 s it rings anyway. (3) A box that joins
+  the stereo's ring (the third) rings after the Enclave has finished and its echo has died away (`Room.ring`), never with it. Tests:
+  `test_sat_alarm_clock.py`, `test_sat_one_voice.py`, `test_sat_daily.py`.
 
 ## Bilby's house radio: one station, the hubs are its remotes (`radio.py`, `station.py`, `radio_client.py`)
 
@@ -280,6 +297,11 @@ can change it, or add to it, but they are not the players."* Bilby's music no lo
   music (`houseaudio.note_start`). A question about the house ("why is the Enclave playing metal?") answered with how things stand is no claim
   (`musicguard.describing`). Tests: `tests/test_sat_stop_bilby.py`. Not yet one stream: an audiobook is still its own player (`audiobooks.py`) that
   pauses the station; the next step is the book as a queue item of the station and each device opting in or out of the one stream.
+* **The chat knows what it can reach, and is asked again when it denies it (the Captain, 2026-11-05: the house chat "still gets confused about what it has
+  access to"):** the prompt's "What you are" paragraph lists the real tool names and, in his words, what they are (`brain.CAPS`: the house, Bilby, audiobooks,
+  alarms, timers, lists, announcements, the news, a web search, the weather, his car, Mentat; a phrase only while its tool is here). A reply that says
+  "I cannot / I have no access / it isn't connected" with no tool called (`brain.DENIAL`) gets one more go with the real tool list in front of it
+  (`Brain._second_try_denied`); a tool that runs is its answer, otherwise the first reply stands (it may be true).
 
 ## The Enclave on skippy-core, and several outputs in one room (`router.py`, `sync_outputs.py`)
 

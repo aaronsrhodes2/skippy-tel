@@ -20,6 +20,7 @@ EsphomeLink in esphome_link.py).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import re
 import asyncio
@@ -29,7 +30,7 @@ from array import array
 from collections import deque
 from pathlib import Path
 
-from vad import Vad, rms
+from vad import Vad, loudest, rms
 from voicegate import BudgetSpent, GateError, wav_bytes
 from wake import is_decline, is_goodbye, is_stop, wake_split
 
@@ -45,6 +46,8 @@ PRESENT_S = 20 * 60                                             # a voice heard 
 HUSH_S = 45                                                     # ... but not in the last this many seconds: never talk over people
 AFTER_TURN_S = 180                                              # nor this soon after he last spoke to Skippy
 STARTER_ANSWER_S = 180                                          # an offered starter still takes "Skippy, tell me more" this long
+# What Whisper writes for noise it cannot read (2026-11-04 08:12: "Thanks for watching!" was taken as a command): never a thing said to the house.
+ARTIFACT = re.compile(r"\b(?:thanks? for watching|thank you for watching|please subscribe|subtitles? by|amara\.org)\b", re.I)
 
 
 def parse_rooms(spec: str) -> list[tuple[str, str, str, int]]:
@@ -160,6 +163,9 @@ class Room:
         self.voice = asyncio.Lock()                             # one thing said at a time (a timer waits for an answer to finish)
         self.vad = Vad(floor_min=floor)
         self.pre: deque = deque(maxlen=24)                      # 1.2 s before the voice was noticed: "Hey Skippy" is quieter than what follows, so the bar is crossed late
+        self._levels: deque = deque(maxlen=200)                 # the loudness of each block heard (10 s), beside `pre`: how loud he is, and what the voice detector saw
+        self._last_voice = 0.0                                  # how loud he was the last time (the name, or what he said after it): where the bar for his next command starts
+        self._window_t0 = 0                                     # when the listening window opened (the room's clock)
         self.buf: list | None = None
         self._speech_t0 = self._shown_t = None                  # when the voice began; when he last perked up for something that may not be for him
         self._probed = False
@@ -178,6 +184,7 @@ class Room:
         """Ready for the next thing said: the room's learned quiet level stays, everything half-heard goes."""
         self.vad.restart()
         self.pre.clear()
+        self._levels.clear()
         self.buf, self._carry = None, []
         if self.spotter is not None:
             self.spotter.reset()
@@ -191,6 +198,8 @@ class Room:
         elif not remote_wake:
             self._fresh()
             self.mode, self.deadline = LISTENING, self.t + self.listen_ms
+            self._window_t0 = self.t
+            self.vad.arm(self._last_voice)                      # the box heard the name itself: his first words start at the lower bar
             self.log(f"[{self.name}] listening (the box woke)")
         elif self.mode != BUSY:
             self._resume(IDLE if self.mode != FOLLOWUP else FOLLOWUP, max(0, self.deadline - self.t))
@@ -233,11 +242,14 @@ class Room:
             return                                              # thinking or talking: never answer our own voice
         if any(getattr(o, "talking_until", 0) > time.monotonic() for o in self.pc_outs):
             self.pre.clear()                                    # the PC outputs (the Sony) still say his last words, after the pod: deaf to them too
+            self._levels.clear()
             return
+        level = rms(block)
         self.pre.append(block)
+        self._levels.append(level)
         if self.mode == IDLE and self.spotter is not None and self.remote_wake and self.spotter.feed(block):
             self._woke(getattr(self.spotter, "name", "skippy"))
-        event = self.vad.push(rms(block), self.t)
+        event = self.vad.push(level, self.t)
         if self.buf is not None and event != "speech":
             self.buf.append(block)
         if event == "speech":
@@ -283,6 +295,12 @@ class Room:
         self._window_opened()
         if self.buf is None:
             self.buf = list(self.pre)[:-1]                      # "Skippy, lights off" in one breath: keep the whole sentence (this block is added below)
+        # How loud he is from where he stands is what the name just was (its loudest 150 ms): the first words of the command need only a share of that to
+        # begin, not the room's whole bar (the Captain, 2026-11-05: "the following commands I have to shout to get it to record my voice")
+        voice = loudest(list(self._levels)[-self.pre.maxlen:])
+        if voice > 0:
+            self._last_voice = voice
+        self.vad.arm(self._last_voice)
         self._spawn(self.link.woke(by))
 
     def _tick(self) -> None:
@@ -291,7 +309,12 @@ class Room:
             self._spawn(self.link.idle_face())
         elif self._shown_t is not None and self.mode != IDLE:
             self._shown_t = None
-        if self.mode in (LISTENING, FOLLOWUP) and self.t > self.deadline and self.buf is None:
+        if self.mode in (LISTENING, FOLLOWUP) and self.t > self.deadline and (self.buf is None or not self.vad.speaking):
+            # (a buffer seeded when the name was heard and a voice detector that never heard him begin used to hold the window open for ever: the room
+            # stayed "listening" until something loud enough came, which is how a soft command became a shouted one)
+            if self.mode == LISTENING:                          # (a conversation that ends is no news; a name with nothing after it is what to tune from)
+                self.log(f"[{self.name}] (mic: nothing said; loudest {self._after_window():.3f}, the bar was {self.vad.start_bar():.3f}, the room {self.vad.quiet:.3f})")
+            self.buf = None
             if self.pending_starter is not None:                # offered, and nobody answered
                 self._starter_answer(self.pending_starter, "ignored", "")
                 self.pending_starter = None
@@ -299,12 +322,21 @@ class Room:
             self._session(False)
             self._spawn(self.link.released())                   # nothing said: the box goes back to waiting for its name
 
+    def _after_window(self) -> float:
+        """The loudest 150 ms since the listening window opened (the name is not in it)."""
+        n = max(0, int((self.t - self._window_t0) // BLOCK_MS))
+        return loudest(list(self._levels)[-n:]) if n else 0.0
+
     def _finish(self) -> None:
         utterance, self.buf = self.buf, None
         if len(utterance) * BLOCK_MS - self.vad.end_silence_ms < self.min_speech_ms:
             return                                              # a cough or a click is not worth sending
         if self.mode == IDLE and self.spotter is not None:
             return                                              # room talk, and the spotter did not hear its name: gone, never sent
+        heard = loudest(list(self._levels)[-len(utterance):])
+        if heard > 0:
+            self._last_voice = heard                            # the next command starts from how loud he was this time
+        self.log(f"[{self.name}] (mic: a voice at {heard:.3f}, the bar was {self.vad.start_bar():.3f}, the room {self.vad.quiet:.3f})")
         was = self.mode
         self.mode = BUSY
         self._spawn(self._utterance(was, [x for block in utterance for x in block]))
@@ -348,6 +380,9 @@ class Room:
                 command = rest
             else:
                 command = rest if woke else text
+            if command and ARTIFACT.search(command):           # what Whisper writes for noise: not a word said to the house
+                self.log(f"[{self.name}] (not a command, only what Whisper makes of noise: {command!r})")
+                command = ""
             if not command:
                 self._resume(was, self.listen_ms if was == LISTENING else self.followup_ms)
                 return
@@ -647,12 +682,15 @@ class Room:
         self.mode, self.deadline = mode, self.t + window_ms
         if mode in (LISTENING, FOLLOWUP):
             self._window_opened()
+        if mode == LISTENING:
+            self.vad.arm(self._last_voice)                      # only the name was heard so far: the command still starts at the lower bar (not after a reply: its own echo)
         self._session(mode == FOLLOWUP)
 
     def _window_opened(self) -> None:
         """A listening window opens: the watchdog's 8 s count from now, not from the box's last audio (the pod saying something stops its
         microphone; it starts again a moment after, by which time the old count said 'no audio' and ended every routine's follow-up)."""
         self._last_audio = max(self._last_audio or 0.0, time.monotonic())
+        self._window_t0 = self.t
 
     async def _restart_box(self, why: str) -> None:
         """The box sends no audio when it should: ask it to start its stream again (a box that can; a Wyoming satellite reconnects by itself)."""
@@ -817,26 +855,30 @@ class Room:
                     return kinds
         return []
 
-    async def ring(self, tone: bytes, voice, text: str, quiet: bool = False, wait=None) -> None:
+    async def ring(self, tone: bytes, voice, text: str, quiet: bool = False, wait=None, floor: bool = False) -> None:
         """One ring of the house's alarm clock on this pod (alarm_clock.py): the chime, then the words; then a plain "stop" needs no name.
-        `quiet`: the room's stereo is ringing for it and `wait` is that ring (a task answering True when something sounded). The box shows the words
-        and stays busy, deaf, until the stereo has finished and its echo has died away (its microphone would hear "Say stop" and the alarm would stop
-        itself), then opens the "stop" window as after any ring. If the stereo's ring failed or never finished, the box rings after all."""
+        `wait` is the room's stereo ringing for it (a task answering True when something sounded); `quiet`: the stereo rings for this box, which stays
+        silent. The box shows the words and stays busy, deaf, until the stereo has finished and its echo has died away (its microphone would hear "Say
+        stop" and the alarm would stop itself), then opens the "stop" window as after any ring. A box that is not quiet but has a stereo ringing (the
+        alarm's third ring on) rings AFTER it, never with it: the same words from two speakers a moment apart are two Skippys at once (the Captain,
+        2026-11-05). If the stereo's ring failed or never finished, the box rings at once. `floor`: the alarm clock already holds this room's voice lock."""
         import alarm_clock                                      # noqa: PLC0415
         was, self.mode = self.mode, BUSY
         try:
-            async with self.voice:
+            async with (contextlib.nullcontext() if floor else self.voice):
                 await self.link.show(text)
-                if quiet and wait is not None:
+                if wait is not None:
                     try:
-                        if await asyncio.wait_for(asyncio.shield(wait), alarm_clock.RING_WAIT_S) is False:
-                            quiet = False                       # nothing sounded on the stereo
+                        sounded = await asyncio.wait_for(asyncio.shield(wait), alarm_clock.RING_WAIT_S) is not False     # False: nothing sounded on the stereo
                     except Exception as e:                      # noqa: BLE001 — it failed, or took too long: the box is the only speaker left
-                        self.log(f"[{self.name}] (the stereo's ring failed: {type(e).__name__}: the box rings)")
+                        if quiet:
+                            self.log(f"[{self.name}] (the stereo's ring failed: {type(e).__name__}: the box rings)")
+                        sounded = False
+                    if sounded:
+                        await asyncio.sleep(alarm_clock.LISTEN_AFTER_S)     # the Enclave's latency and the room's echo have to die away, whoever speaks next
+                    else:
                         quiet = False
-                if quiet:
-                    await asyncio.sleep(alarm_clock.LISTEN_AFTER_S)
-                else:
+                if not quiet:
                     await self.link.announce("", ("pcm", *alarm_clock.pcm_of(tone)))
                     if voice is not None:
                         clip = ("mp3", voice) if voice[:4] != b"RIFF" else ("pcm", *alarm_clock.pcm_of(voice))
@@ -1145,6 +1187,8 @@ def build_rooms(env: dict):
         async def alarm_tomorrow():
             return house_clock.tomorrow_line()
         routines.extras["alarm_tomorrow"] = alarm_tomorrow        # bedtime: "Your alarm is set for 6:30." (daily.py)
+        routines.extras["wake_alarm"] = house_clock.wake_time     # the morning briefing comes before the day's first alarm, never over it (daily.morning_time)
+        routines.extras["alarm_ringing"] = house_clock.is_ringing  # and waits while one rings
         nest = next((p for p in getattr(house, "parts", [house]) if type(p).__name__ == "Nest"), None)
         if nest is not None:
             async def thermostat_night():

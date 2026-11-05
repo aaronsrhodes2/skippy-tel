@@ -123,6 +123,35 @@ def test_a_reply_that_claims_an_alarm_with_no_tool_called_is_asked_again_and_nev
     assert b.reply("what time is it") == "It is seven o'clock, monkey." and len(c.calls) == 1
 
 
+def test_a_reply_that_says_it_cannot_with_no_tool_called_is_asked_again_with_the_tools_it_has():
+    """The Captain, 2026-11-04: "I do not have access to your car's systems" with the tool right there; "You are wrong, you DO have access. Missed tool call."
+    (2026-11-05: the house chat "still gets confused about what it has access to")."""
+    b, c, *_ = make([text("I have no access to your timers, Captain.")], [tool("list_timers")], [text("Nothing is running, monkey.")])
+    assert b.reply("what timers do I have") == "Nothing is running, monkey."
+    nudge = str(c.calls[1]["messages"])
+    assert "you DO have these" in nudge and "list_timers" in nudge and [a["tool"] for a in b.actions] == ["list_timers"] and b.guard == ("reask", "denial")
+    b, c, *_ = make([text("I cannot browse the stars from here.")], [text("Still no: I have no tool for that.")])
+    assert b.reply("take me to the stars") == "I cannot browse the stars from here." and len(c.calls) == 2         # no tool ran: the first reply stands, it may be true
+    b, c, *_ = make([text("I cannot believe it is already November, monkey.")])
+    assert b.reply("it's november") == "I cannot believe it is already November, monkey." and len(c.calls) == 1   # a figure of speech is no denial
+
+
+def test_the_second_try_never_touches_a_door_and_never_confirms_for_him():
+    """A real run, 2026-11-05: "Can you open the garage door?" was answered "it requires confirmation"; asked again, the model called home_control open with confirm=true."""
+    b, c, *_ = make([text("I cannot operate the garage door from this voice interface.")])
+    assert b.reply("can you open the garage door") == "I cannot operate the garage door from this voice interface." and len(c.calls) == 1      # not even asked again
+    b, c, *_ = make([text("I cannot do that.")], [tool("set_timer", seconds=60, confirm=True)], [text("A minute.")])
+    assert b.reply("set a one minute timer") == "A minute." and "confirm" not in b.actions[0]["args"] and b.actions[0]["args"]["seconds"] == 60
+
+
+def test_the_prompt_says_in_his_words_what_the_tools_are_and_only_while_they_exist():
+    b, *_ = make()
+    assert "In his words, you can: timers." in b.system()
+    b.extra_tools = [{"name": "audiobook", "description": "", "input_schema": {"type": "object", "properties": {}}}]
+    said = b.system()
+    assert "his audiobooks" in said and "Bilby" not in said.split("In his words, you can:")[1].split("Out of your reach")[0]
+
+
 def test_a_tool_call_written_as_text_is_run_and_annotations_are_never_spoken():
     b, c, timers, _ = make([text('[set_timer seconds="90" label="tea"]')], [text("Tea in ninety seconds. [SKIPPY_LEARN: {\"phrase\": \"tea\"}]")])
     assert b.reply("tea timer, ninety seconds") == "Tea in ninety seconds."

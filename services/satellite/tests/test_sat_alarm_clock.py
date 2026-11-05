@@ -378,6 +378,75 @@ def test_the_box_is_handed_the_stereos_own_ring_and_what_became_of_it(tmp_path, 
     assert pod.waited == [False] and events[-1] == "box done" and events.index("played") < events.index("box done")
 
 
+class FloorPod(Pod):
+    """A pod with a real voice lock, as hub.Room has: the clock takes it for the whole ring and says so (floor=True)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.voice = asyncio.Lock()
+        self.floors = []
+
+    async def ring(self, tone, voice, text, quiet=False, wait=None, floor=False):
+        self.floors.append((floor, self.voice.locked()))
+        await super().ring(tone, voice, text, quiet=quiet, wait=wait)
+
+
+def test_a_ring_waits_for_the_line_being_said_and_holds_the_floor_while_it_rings(tmp_path, monkeypatch):
+    """The Captain, 2026-11-05: at 07:10 the alarm's rings were spoken over the morning routine's lines, because only the box's part of a ring waited for
+    the room's voice lock and the Enclave's part did not."""
+    pod = FloorPod(stereo=["enclave"])
+    c, now, played, _ = upstairs_clock(tmp_path, monkeypatch, pod)
+    events = []
+
+    async def play(kinds, clips, gain):
+        events.append(("stereo", pod.voice.locked()))
+        return True
+    c._play_outs = play
+
+    async def go():
+        await pod.voice.acquire()                                       # a routine's line is being said
+        ring = asyncio.ensure_future(c.tick())
+        await asyncio.sleep(0.05)
+        over_it = list(events)
+        pod.voice.release()                                             # the line ends
+        await ring
+        return over_it
+    assert asyncio.run(go()) == []                                      # nothing rang over the line
+    assert events == [("stereo", True)] and pod.floors == [(True, True)] and not pod.voice.locked()       # then the stereo and the box rang holding the floor, and let it go
+
+
+def test_a_line_that_goes_on_too_long_is_rung_over_and_its_lock_is_left_alone(tmp_path, monkeypatch):
+    monkeypatch.setattr(alarm_clock, "FLOOR_WAIT_S", 0.05)
+    pod = FloorPod(stereo=["enclave"])
+    logged = []
+    c, now, played, _ = upstairs_clock(tmp_path, monkeypatch, pod)
+    c.log = logged.append
+
+    async def go():
+        await pod.voice.acquire()                                       # someone talks and talks
+        await c.tick()
+        return pod.voice.locked()
+    still_theirs = asyncio.run(go())
+    assert c.ringing is not None and [p[0] for p in played] == [("enclave",)]     # an alarm must wake him: it rang
+    assert still_theirs and any("still talking" in m for m in logged)             # and it let go of nothing it never held
+
+
+def test_the_days_first_alarm_comes_from_the_schedule_not_from_what_is_due(tmp_path):
+    """daily.Daily plans the morning briefing around it; a repeating alarm's `due` is next week's once it has rung, and a reminder is never the alarm."""
+    now = [at(2026, 11, 5, 6, 0)]                                       # a Thursday
+    c, _, _ = make(tmp_path, now)
+    c.alarms.add("alarm", "07:00", repeat="mon,wed,thu", where="upstairs")
+    c.alarms.add("alarm", "08:30", repeat="tue", where="upstairs")
+    c.alarms.add("reminder", "06:00", "take the pills", repeat="daily")
+    c.alarms.add("alarm", "09:15", date="2026-11-07", where="upstairs")
+    assert c.wake_time("2026-11-05") == "07:00" and c.wake_time("2026-11-03") == "08:30"
+    assert c.wake_time("2026-11-06") is None and c.wake_time("2026-11-07") == "09:15" and c.wake_time("garbage") is None
+    assert not c.is_ringing()
+    now[0] = at(2026, 11, 5, 7, 0)
+    run(c.tick())
+    assert c.is_ringing() and c.wake_time("2026-11-05") == "07:00"      # it has rung, and today's answer has not moved
+
+
 def test_a_stereo_that_cannot_be_looked_at_never_keeps_the_alarm_quiet(tmp_path, monkeypatch):
     class Broken(Pod):
         def stereo_kinds(self):

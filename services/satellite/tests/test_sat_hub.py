@@ -11,7 +11,7 @@ from timers import Timers
 from voicegate import BudgetSpent, GateError
 from wyoming.event import Event, async_read_event, async_write_event
 
-QUIET, VOICE = 0.004, 0.12
+QUIET, VOICE, SOFT = 0.004, 0.12, 0.03
 
 
 class FakeGate:
@@ -206,6 +206,58 @@ def test_with_the_spotter_skippy_and_the_command_in_one_breath_is_answered_in_th
         assert k.index("detection") < k.index("transcript") < k.index("synthesize") < k.index("audio-start") < k.index("audio-stop")
         assert box.texts("transcript") == ["turn the lights off."]
         assert any(e.type == "audio-chunk" and e.data["rate"] == 22050 for e in box.got)
+    run(body)
+
+
+def test_a_command_softer_than_the_normal_bar_is_heard_after_the_name_without_shouting():
+    """The Captain, 2026-11-05: "Skippy hears his wake word well, but the following commands I have to shout to get it to record my voice"."""
+    async def body(box, made, hub, log, start):
+        spot = with_spotter(made)
+        await start()
+        await box.send("run-pipeline", {"start_stage": "wake", "end_stage": "tts"})
+        await box.stream(QUIET, 600)
+        await box.stream(SOFT, 300)                                     # the name, spoken softly: under the normal bar (0.038), so the voice detector does not begin
+        spot.arm()                                                      # the spotter has heard it
+        made["gate"].said.append("turn the lights off")
+        await box.stream(SOFT, 1300)                                    # and the command as softly: over the lowered bar
+        await box.stream(QUIET, 1500)
+        await box.wait_for("audio-stop")
+        assert made["brain"].heard == ["turn the lights off"]
+        assert any("(mic: a voice at" in line for line in log)          # what the room heard and the bar it had to clear, for tuning from the log
+    run(body)
+
+
+def test_a_name_that_nothing_followed_closes_the_window_instead_of_hanging():
+    """A buffer seeded when the name was heard kept the window open for ever when the voice detector never heard him begin."""
+    async def body(box, made, hub, log, start):
+        spot = with_spotter(made)
+        await start()
+        await box.send("run-pipeline", {"start_stage": "wake", "end_stage": "tts"})
+        await box.stream(QUIET, 600)
+        await box.stream(SOFT, 300)                                     # the name, softly: the voice detector never begins
+        spot.arm()
+        await box.stream(QUIET, 9000)                                   # longer than the listening window (8 s)
+        await asyncio.sleep(0.1)
+        assert made["room"].mode == "idle" and made["room"].buf is None
+        assert any("(mic: nothing said" in line for line in log)
+        assert made["gate"].stt_calls == 0
+    run(body)
+
+
+def test_what_whisper_makes_of_noise_is_not_a_command():
+    async def body(box, made, hub, log, start):
+        spot = with_spotter(made)
+        await start()
+        await box.send("run-pipeline", {"start_stage": "wake", "end_stage": "tts"})
+        await box.stream(QUIET, 600)
+        spot.arm()
+        await box.stream(VOICE, 300)
+        made["gate"].said.append("Thanks for watching!")
+        await box.stream(VOICE, 1200)
+        await box.stream(QUIET, 1500)
+        await asyncio.sleep(0.3)
+        assert made["gate"].stt_calls >= 1 and made["brain"].heard == []
+        assert any("only what Whisper makes of noise" in line for line in log)
     run(body)
 
 

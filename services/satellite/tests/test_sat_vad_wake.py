@@ -37,6 +37,67 @@ def test_a_quiet_room_is_silence_a_steady_noisy_room_is_not_speech_and_a_click_i
     assert run(Vad(), [(0.004, 600), (0.2, 50), (0.004, 3000)]) == []
 
 
+def run_on(vad, levels, t=0):
+    """Like run(), but on a clock that carries on from `t`: returns (events, t)."""
+    events = []
+    for lv, ms in levels:
+        for _ in range(0, ms, 50):
+            t += 50
+            e = vad.push(lv, t)
+            if e:
+                events.append((e, t))
+    return events, t
+
+
+def test_an_armed_vad_starts_on_a_soft_command_the_normal_bar_misses():
+    """The Captain, 2026-11-05: "Skippy hears his wake word well, but the following commands I have to shout"."""
+    assert run(Vad(floor_min=0.015), [(0.004, 800), (0.04, 1500), (0.004, 2000)]) == []        # the normal bar is 0.048: nothing began
+    vad = Vad(floor_min=0.015)
+    _, t = run_on(vad, [(0.004, 800)])                                                          # the room's quiet is learned
+    vad.arm(0.04)                                                                               # and the name has just been said, about as softly
+    ev, _ = run_on(vad, [(0.04, 1500), (0.004, 2000)], t)
+    assert [e[0] for e in ev] == ["speech", "end"]
+
+
+def test_arming_never_raises_the_bar_and_a_restart_disarms():
+    vad = Vad(floor_min=0.015)
+    run_on(vad, [(0.004, 800)])
+    normal = vad.bar()
+    vad.arm(0.5)                                                                                # a shouted name: a share of it is above the normal bar
+    assert vad.start_bar() == normal
+    vad.arm(0.0)
+    assert vad.start_bar() < normal
+    vad.restart()
+    assert vad.start_bar() == normal
+
+
+def test_a_dip_between_syllables_no_longer_throws_away_what_was_counted():
+    vad = Vad(floor_min=0.015)
+    _, t = run_on(vad, [(0.004, 800)])
+    ev, _ = run_on(vad, [(0.1, 50), (0.004, 50)] * 12 + [(0.004, 2000)], t)                     # a voice that flickers across the bar
+    assert [e[0] for e in ev] == ["speech", "end"]
+    lone = Vad(floor_min=0.015)
+    _, t = run_on(lone, [(0.004, 800)])
+    ev, _ = run_on(lone, [(0.1, 50), (0.004, 400), (0.1, 50), (0.004, 400), (0.1, 50), (0.004, 2000)], t)
+    assert ev == []                                                                             # three separate clicks are still no voice
+
+
+def test_while_a_command_is_expected_a_soft_voice_cannot_raise_the_rooms_quiet_but_a_quieter_room_lowers_it():
+    vad = Vad(floor_min=0.012)
+    _, t = run_on(vad, [(0.03, 800)])                                                           # music in the room: its quiet is 0.03
+    vad.arm(0.0)
+    _, t = run_on(vad, [(0.04, 300)], t)                                                        # a soft voice under the armed bar
+    assert vad.quiet <= 0.03 + 1e-9
+    run_on(vad, [(0.012, 3000)], t)                                                             # the Enclave ducks under his name
+    assert vad.quiet < 0.02
+
+
+def test_loudest_is_how_loud_a_voice_was_not_how_loud_a_click_was():
+    from vad import loudest
+    assert loudest([]) == 0.0 and abs(loudest([0.1, 0.3]) - 0.2) < 1e-9
+    assert abs(loudest([0, 0, 0.9, 0, 0]) - 0.3) < 1e-9 and abs(loudest([0.1, 0.2, 0.3, 0.2, 0.1]) - 0.7 / 3) < 1e-9
+
+
 def test_wake_word_cases():
     cases = [("Hey Skippy, turn that down", "turn that down"), ("Skippy.", ""), ("OK Skippy", ""), ("um skippy what time is it", "what time is it"),
              ("Hi Skippie! play some music", "play some music"), ("skippy,   lights off", "lights off")]

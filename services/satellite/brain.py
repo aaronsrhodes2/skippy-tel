@@ -75,9 +75,34 @@ BILBY = (
 ABILITIES = (
     "\n\n## What you are, and what you can reach from here\n"
     "You are Skippy, running on skippy-pc in his house; your thinking is done by Skippy Core, the local model on skippy-core. From this voice you act ONLY through these tools: {names}. "
-    "Out of your reach from here: {gone}his files and code. {chat}Asked for something none of your tools does, say plainly that this voice cannot do it yet and where it can be done. "
+    "In his words, you can: {can}. Out of your reach from here: {gone}his files and code. {chat}Asked for something none of your tools does, say plainly that this voice cannot do it yet and where it can be done. "
     "Never claim you did what no tool did, and never claim you cannot do what a tool above does.\n"
 )
+# The tools in his words, for "what can you do?" and "can you ...?" (the Captain, 2026-11-05: the house chat "still gets confused about what it has access to"): each phrase
+# is said only while one of its tools is really here, so the list is never longer than the truth
+CAPS = (
+    ("the house: lights, plugs, the thermostat, covers, speakers and scenes", ("home_control", "home_state", "home_devices")),
+    ("Bilby: his music library, Spotify and the DJ mixing, on the Enclave, the Sony or both", ("play_music", "music", "speakers", "dj_mode", "spotify")),
+    ("his audiobooks", ("audiobook",)),
+    ("alarms and reminders", ("set_alarm", "set_reminder", "cancel_alarm", "list_alarms")),
+    ("timers", ("set_timer", "cancel_timers", "list_timers")),
+    ("his lists", ("list",)),
+    ("announcements to other rooms", ("announce",)),
+    ("the news", ("news",)),
+    ("a web search for anything else", ("web_search",)),
+    ("the weather", ("weather",)),
+    ("his car, read only", ("car_status",)),
+    ("physics, through Mentat", ("ask_mentat",)),
+)
+# A reply that says it cannot, with no tool called (2026-11-04: "I do not have access to your car's systems" with the tool right there, and "You are wrong, you DO have access.
+# Missed tool call."; 2026-11-01: "I cannot see the thermostat", "I cannot set alarms"). It gets one more go with the real tool list; the first reply stands unless a tool runs.
+DENIAL = re.compile(r"\bI (?:cannot|can't|can not)\b(?! believe| help| stress| wait)|\bI(?:'m| am) (?:not able|unable) to\b|\bI (?:do not|don't) have (?:access|the ability|a way|any way|a tool|the tools)\b"
+                    r"|\bI have no (?:access|way|ability|tool)\b|\b(?:not|isn't|aren't) (?:connected|wired|hooked up)\b|\bno such tool\b", re.I)
+DENIED = ("[The house: you said you cannot do that, but you called no tool, and you DO have these: {names}. Read his words again. If one of those tools does what he asked, call it "
+          "now and say what it answered. If none can, say plainly which part no tool covers. Never say you cannot do what one of them does.]")
+# The second try is never for what can hurt: a "no" about a lock, a door or the garage (a real run, 2026-11-05: "Can you open the garage door?" was answered "it requires confirmation", then
+# the asked-again model called home_control open with confirm=true on a question) stands, and whatever the second try calls runs WITHOUT its `confirm`: only he says yes, aloud.
+RISKY = re.compile(r"\b(?:garage|locks?|unlock|doors?|disarm|sentry|security|oven|stove)\b", re.I)
 # What is out of reach, said only while it is true (the Captain, 2026-11-04: "What is my car's charge level right now?" was answered "I do not have access to your car's systems";
 # "You are wrong, you DO have access. Missed tool call."). The car and Mentat are tools now (car.py, physics.py), so each is named as out of reach only while its tool is missing;
 # a tool added later shows in the list above by itself. tool -> (how it is said as out of reach, how it is said as what the portal chat has)
@@ -488,7 +513,8 @@ class Brain:
         gone = [said for tool, said in ELSEWHERE.items() if tool not in names]
         chat = (f"The Skippy chat on makerportal.live has {' and '.join(on for tool, (_, on) in ELSEWHERE.items() if tool not in names)}, and the private Skippy there writes code. "
                 if gone else "The private Skippy on makerportal.live writes code. ")
-        return ABILITIES.format(names=", ".join(sorted(names)), gone="".join(out for out, _ in gone), chat=chat)
+        can = "; ".join(phrase for phrase, tools in CAPS if names & set(tools)) or "set timers"
+        return ABILITIES.format(names=", ".join(sorted(names)), can=can, gone="".join(out for out, _ in gone), chat=chat)
 
     def live(self) -> str:
         """The house audio right now (houseaudio.Audio.status), last in the prompt: what is playing, where, a book, a routine about to start the library."""
@@ -666,6 +692,10 @@ class Brain:
             print(f"[brain] a physical figure with no Mentat call: {text[:80]!r}: Mentat asked now", flush=True)   # Core answered physics from memory, once as "Mentat" (2026-11-04)
             self.guard = ("force", "physics")
             text = self._ask_mentat_now(heard) or text                # a Mentat that cannot be reached is said, never a figure from memory
+        elif text and not self.actions and DENIAL.search(text) and not RISKY.search(heard):
+            print(f"[brain] said it cannot, and called no tool: {text[:80]!r}: asked again with the tools", flush=True)
+            self.guard = ("reask", "denial")
+            text = self._second_try_denied(text, messages)
         text = text or "Hm. I had nothing to say, which is unlike me."
         self.history += [{"role": "user", "content": heard}, {"role": "assistant", "content": text}]
         self.history = self.history[-2 * MEMORY_TURNS:]
@@ -676,6 +706,26 @@ class Brain:
 
     def music_tools(self) -> list[dict]:
         return [t for t in self.tools() if t["name"] in MUSIC_NAMES]
+
+    def _second_try_denied(self, text: str, messages: list) -> str:
+        """One more go after "I cannot ..." with no tool called, told the tools it really has. A tool that runs is its answer; if none does, the first reply stands (it may be true)."""
+        tools = self.tools()
+        messages += [{"role": "assistant", "content": text}, {"role": "user", "content": DENIED.format(names=", ".join(sorted(t["name"] for t in tools)))}]
+        new = ""
+        for _ in range(3):
+            try:
+                resp = self._create(need_words=True, model=self.model, max_tokens=600, system=self.system(), messages=messages, tools=tools)
+            except Dropped:
+                break
+            blocks = list(resp.content)
+            new = " ".join(b.text for b in blocks if getattr(b, "type", "") == "text").strip()
+            calls = [b for b in blocks if getattr(b, "type", "") == "tool_use"]
+            if not calls:
+                break
+            messages.append({"role": "assistant", "content": [self._dump(b) for b in blocks]})
+            messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": c.id,       # (never with the model's own `confirm`: that is his yes, aloud)
+                                                           "content": self.run_tool(c.name, {k: v for k, v in dict(c.input or {}).items() if k != "confirm"})} for c in calls]})
+        return (ANNOTATION.sub("", new).strip() or text) if self.actions else text
 
     def _ask_mentat_now(self, heard: str) -> str:
         """Mentat asked by the house, with his words as they were said, and Core only wording the answer (the routed flow: no tools to forget to call or to write as text)."""

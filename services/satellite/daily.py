@@ -1,6 +1,7 @@
 """Skippy's daily routines at home (the Captain, 2026-10-31): the MORNING briefing, COMING HOME from work, and BEDTIME.
 
-    morning     at SKIPPY_MORNING_AT (07:10) every day, only if he is home (the car is parked at home, or the house heard him last night):
+    morning     ten minutes (SKIPPY_MORNING_BEFORE_ALARM_MIN) before the day's first alarm, so it is over when the alarm rings; with no alarm
+                at SKIPPY_MORNING_AT (07:10). Every day, only if he is home (the car is parked at home, or the house heard him last night):
                 lights up gently, then weather and what to wear, the news (world, new science, software / AR / AI: sourced only), today's
                 calendar, the mail that matters, the car, a joke, a word of the day, a science fact, the overnight report, then Bilby's
                 library shuffled on the stereo. "Skippy, good morning" runs it by hand.
@@ -316,7 +317,8 @@ class Daily:
                 self.log(f"[{room.name}] (coming home: nobody heard in the room; the talking part is skipped)")
         await self._maybe_nightly(room, lt, today)
         when = self.morning_time(today)
-        if when and (lt.tm_hour, lt.tm_min) >= hm_of(when) and lt.tm_hour < 11 and self.state.get("last_morning") != today and not self.busy:
+        if (when and (lt.tm_hour, lt.tm_min) >= hm_of(when) and lt.tm_hour < 11 and self.state.get("last_morning") != today and not self.busy
+                and not self._alarm_ringing()):                       # an alarm that rings is answered first: the briefing never speaks over it
             self.state["last_morning"] = today
             self._save()
             if await asyncio.to_thread(self.is_home):
@@ -350,8 +352,43 @@ class Daily:
         self._record("routine", routine="nightly", outcome="started")
 
     def morning_time(self, date: str) -> str:
-        over = self.state.get("morning_override") or {}
-        return over.get(date) or self.morning_at
+        """When the morning routine starts on `date` ("HH:MM"). On a day with an alarm it is SKIPPY_MORNING_BEFORE_ALARM_MIN (ten) minutes BEFORE the
+        day's first alarm: the briefing takes about six, so it is over when the alarm rings (the Captain, 2026-11-05: at 07:00 the alarm began and at
+        07:10 the routine, and Skippy said his alarm over the routine: "move the routine to happen before the alarm"). Otherwise SKIPPY_MORNING_AT.
+        An early first event (plan_tomorrow) can only make it earlier."""
+        over = (self.state.get("morning_override") or {}).get(date)
+        before = self._before_alarm(date)
+        if before:
+            return min((t for t in (over, before) if t), key=hm_of)
+        return over or self.morning_at
+
+    def _before_alarm(self, date: str) -> str | None:
+        """The briefing's time ahead of `date`'s first alarm, or None: no alarm that day, or none between 04:30 and 11:00 (the hours of a morning)."""
+        fn = self.extras.get("wake_alarm")                              # alarm_clock.AlarmClock.wake_time: the day's first alarm, "HH:MM", or None
+        try:
+            alarm = fn(date) if fn is not None else None
+        except Exception:                                               # noqa: BLE001 — an alarm clock that cannot answer leaves the morning where it was
+            return None
+        if not alarm or not ((4, 30) <= hm_of(alarm) < (11, 0)):
+            return None
+        h, m = hm_of(alarm)
+        mins = max(4 * 60 + 30, h * 60 + m - int(float(self.env.get("SKIPPY_MORNING_BEFORE_ALARM_MIN", "10"))))
+        return f"{mins // 60:02d}:{mins % 60:02d}"
+
+    def _alarm_ringing(self) -> bool:
+        fn = self.extras.get("alarm_ringing")
+        try:
+            return bool(fn()) if fn is not None else False
+        except Exception:                                               # noqa: BLE001
+            return False
+
+    async def briefing_line(self) -> str | None:
+        """Bedtime, after the alarm's line: when the briefing comes, so the morning holds no surprise (decide, say it)."""
+        tomorrow = time.strftime("%Y-%m-%d", time.localtime(self.clock() + 86400))
+        if self._before_alarm(tomorrow) is None:
+            return None
+        at = time.mktime(time.strptime(f"{tomorrow} {self.morning_time(tomorrow)}", "%Y-%m-%d %H:%M"))
+        return f"The morning briefing comes at {clock_words(at)}, before it."
 
     def car(self) -> dict | None:
         try:
@@ -984,8 +1021,8 @@ class Daily:
                  Step("", act=self.plan_tomorrow)]
         if self.extras.get("thermostat_night"):                     # the Nest (nest.py): where it stands, or SKIPPY_NIGHT_SETPOINT for the night
             steps.append(Step("", make=self.extras["thermostat_night"]))
-        if self.extras.get("alarm_tomorrow"):                       # "Your alarm is set for 6:30." / "No alarm is set for tomorrow." (alarm_clock.py)
-            steps.append(Step("", make=self.extras["alarm_tomorrow"]))
+        if self.extras.get("alarm_tomorrow"):                       # "Your alarm is set for 6:30." / "No alarm is set for tomorrow." (alarm_clock.py), and when the briefing comes
+            steps.append(Step("", make=self._join(self.extras["alarm_tomorrow"], self.briefing_line)))
         return steps + [Step("", make=self.anything_else, last=True)]
 
     async def plan_tomorrow(self) -> str | None:

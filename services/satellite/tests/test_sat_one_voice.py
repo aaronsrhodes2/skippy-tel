@@ -225,6 +225,44 @@ def test_a_stereo_ring_that_failed_or_never_finished_means_the_box_rings_after_a
         assert r.mode == FOLLOWUP
 
 
+def test_a_box_that_joins_a_stereo_ring_rings_after_it_never_with_it(monkeypatch):
+    """The same words from the Enclave and from the box a moment apart are two Skippys at once (the Captain, 2026-11-05): from the third ring the
+    box rings once the stereo has finished and its echo has died away, not while it plays."""
+    import alarm_clock
+    monkeypatch.setattr(alarm_clock, "LISTEN_AFTER_S", 0)
+    out = Out()
+    out.kinds = {"enclave"}
+    r = room(out)
+
+    async def go():
+        stereo = asyncio.get_running_loop().create_future()
+        ring = asyncio.ensure_future(r.ring(alarm_clock.chime(0.5, repeats=1), b"VOICE", "Your alarm.", quiet=False, wait=stereo))
+        await asyncio.sleep(0.03)
+        while_it_plays = list(r.link.spoken)
+        stereo.set_result(True)
+        await ring
+        return while_it_plays
+    assert asyncio.run(go()) == []                                       # the stereo was still ringing: the box said nothing
+    assert [s[0] for s in r.link.spoken] == ["announce", "announce"] and r.mode == FOLLOWUP     # and then the chime and the words, and the "stop" window
+
+
+def test_a_ring_that_holds_the_floor_does_not_wait_for_the_rooms_voice_lock():
+    """The alarm clock takes the room's voice lock for the whole ring (it covers the stereo's part too): the room's own ring must not ask for it again."""
+    import alarm_clock
+    out = Out()
+    out.kinds = {"enclave"}
+    r = room(out)
+
+    async def go():
+        await r.voice.acquire()
+        try:
+            await asyncio.wait_for(r.ring(alarm_clock.chime(0.5, repeats=1), b"VOICE", "Your alarm.", floor=True), 1)
+        finally:
+            r.voice.release()
+    asyncio.run(go())
+    assert [s[0] for s in r.link.spoken] == ["announce", "announce"]
+
+
 def test_a_loud_ring_is_as_before_the_chime_the_words_and_then_listening():
     import alarm_clock
     out = Out()
