@@ -97,6 +97,7 @@ class AlarmClock:
         self.done: list = []                            # command ids the portal sent, carried out (sent back on the next sync)
         self.changed = asyncio.Event() if _loop_running() else None
         self._checked = ""                              # the date of the last evening check
+        self._ring_task: asyncio.Task | None = None     # the ring being rung now (an answer cancels it between its parts)
         self.hub = None
 
     # ── the house's one list ──
@@ -219,7 +220,7 @@ class AlarmClock:
                 return
             r["rings"] += 1
             r["next"] = now + RING_GAP_S
-            await self.ring(a, r["rings"])
+            await self._ring_once(a, r["rings"])
             if a.kind == "alarm" and ((r["alerts"] == 0 and now - r["since"] >= ALERT_AFTER_S) or (r["alerts"] == 1 and now - r["since"] >= ALERT_AGAIN_S)):
                 r["alerts"] += 1
                 await self.alert(f"⏰ Your {a.hhmm} alarm is ringing" + (f" ({a.label})" if a.label else "") + f" and you haven't answered. "
@@ -230,12 +231,30 @@ class AlarmClock:
         r, self.ringing = self.ringing, None
         if r is None:
             return
+        task = self._ring_task
+        if task is not None and not task.done():
+            task.cancel()                               # a ring is several parts one after the other: an answer stops the ones that have not begun
         for f in self.fired:
             if f["key"] == r["key"] and f["ended"] is None:
                 f["ended"], f["by"], f["after_s"] = how, by or None, round(self.clock() - r["since"])
         self.poke()
 
     # ── ringing ──
+    async def _ring_once(self, a, n: int) -> None:
+        """One ring as a task of its own, so that an answer (`_end`) can stop it between its parts: the box, which rings after the Enclave has finished, never
+        rings an alarm he has already stopped."""
+        task = self._ring_task = asyncio.ensure_future(self.ring(a, n))
+        try:
+            await task
+        except asyncio.CancelledError:
+            me = asyncio.current_task()
+            if task.cancelled() and (me is None or me.cancelling() == 0):
+                return                                  # stopped by an answer, not cancelled from outside
+            raise
+        finally:
+            if self._ring_task is task:
+                self._ring_task = None
+
     async def ring(self, a, n: int) -> None:
         """One ring: the chime (an alarm only) and the words, on the place's outputs and pods, each ring louder than the last."""
         gain = GAINS[min(n - 1, len(GAINS) - 1)]

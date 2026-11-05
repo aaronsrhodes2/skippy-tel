@@ -246,6 +246,37 @@ def test_a_box_that_joins_a_stereo_ring_rings_after_it_never_with_it(monkeypatch
     assert [s[0] for s in r.link.spoken] == ["announce", "announce"] and r.mode == FOLLOWUP     # and then the chime and the words, and the "stop" window
 
 
+def test_an_answer_stops_a_ring_between_its_parts_so_the_box_never_rings_a_stopped_alarm(tmp_path, monkeypatch):
+    """The box rings after the Enclave has finished, so "Skippy" or the phone's Stop can come in between: the box must not then ring an alarm that is off."""
+    import alarm_clock
+    from test_sat_alarm_clock import UPSTAIRS, at, make, run
+    monkeypatch.setattr(alarm_clock, "LISTEN_AFTER_S", 0)
+    out = Out()
+    out.kinds = {"enclave"}
+    r = Room("living", Link(), Gate(), object(), Timers(), log=lambda m: None, pc_outs=[out])
+    now = [at(2026, 11, 2, 6, 0)]
+    c, _, played = make(tmp_path, now, rooms={"living": r})
+    c.layout = UPSTAIRS
+    a = c.alarms.add("alarm", "06:30", where="upstairs", room="living")
+
+    async def slow(kinds, clips, gain):
+        await asyncio.sleep(0.2)                                       # the Enclave is still saying it
+        return True
+    c._play_outs = slow
+
+    async def go(stop):
+        c.ringing = {"alarm": a, "key": "k", "since": now[0], "rings": 3, "next": now[0] + 60, "alerts": 0}
+        ring = asyncio.ensure_future(c._ring_once(a, 3))               # the third ring: the box follows the Enclave
+        await asyncio.sleep(0.05)
+        if stop:
+            c.stop("phone")
+        await ring                                                     # (an answer is no error)
+    run(go(stop=True))
+    assert r.link.spoken == [] and not r.voice.locked() and c.ringing is None      # it never rang, and it let go of the floor
+    run(go(stop=False))
+    assert [s[0] for s in r.link.spoken] == ["announce", "announce"]   # unanswered, the box does follow the Enclave
+
+
 def test_a_ring_that_holds_the_floor_does_not_wait_for_the_rooms_voice_lock():
     """The alarm clock takes the room's voice lock for the whole ring (it covers the stereo's part too): the room's own ring must not ask for it again."""
     import alarm_clock
