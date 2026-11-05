@@ -328,3 +328,21 @@ def test_a_rooms_duck_is_posted_only_while_the_station_plays_and_names_the_room_
             break
         threading.Event().wait(0.01)
     assert sent == [("/duck", {"holder": "room:living", "kinds": ["enclave", "pod:living"], "on": True, "hold_s": 25.0})]
+
+
+def test_the_hubs_router_tells_the_radio_when_any_voice_begins_and_ends():
+    sent = []
+    c = radio_client.RadioClient("http://x", log=lambda *a: None, start=False, request=lambda m, p, b=None, t=0: sent.append((p, b)) or {})
+    r = rt.Router([("hdmi", "HDMI", 0.0)], find=lambda part: (len(part), part), stream_factory=lambda dev, cb: type("S", (), {"latency": 0.0, "alive": True, "close": lambda s: None})(),
+                  reinit=lambda: None, log=lambda *a: None, autostart=False)
+    r.voice_hook = c.duck_voice                                     # what hub.build_rooms does with the shared router
+    r.mix_once()
+    r.play(rt.ClipSource(np.full((rt.BLOCK, 2), 0.1, dtype="float32")), layer="voice", targets={"hdmi"})
+    for _ in range(6):
+        r.mix_once()
+    for _ in range(200):
+        if len(sent) >= 2:
+            break
+        threading.Event().wait(0.01)
+    assert sorted(sent, key=lambda x: not x[1]["on"]) == [("/duck", {"holder": "router", "kinds": [], "on": True, "hold_s": 90.0}),
+                                                          ("/duck", {"holder": "router", "kinds": [], "on": False, "hold_s": 90.0})]
