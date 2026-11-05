@@ -124,7 +124,12 @@
   // The mix takes home ~20 s to build the first time (then it keeps it 30 min): it is asked for as the page opens, kept here 25 min, and a
   // shuffle never waits for it: Bilby's songs start at once and the Spotify rows join the queue when the mix arrives (SP_WAIT_MS).
   const SP_WAIT_MS = 2500, SP_KEEP_MS = 25 * 60 * 1000, CAR_RETRY_MS = 10 * 60 * 1000;
+  // Off (drive.py SPOTIFY_IN_CAR, the Captain, 2026-11-05): the car plays Bilby's library alone. A Spotify row switches the Tesla's sound between the browser and its own
+  // Spotify app through the portal and skippy-pc; the mix is not even asked for, and S.sp.can stays false, so no Spotify row is ever playable here.
+  const SP_ON = cfg.spOn === "1";
+  const NO_SP = { liked: [], suggested: [] };
   function spotifyMix() {
+    if (!SP_ON) return Promise.resolve(NO_SP);
     if (S.sp.mix && Date.now() - S.sp.mixAt < SP_KEEP_MS) return S.sp.mix;
     S.sp.mixAt = Date.now();
     S.sp.mix = getJSON(cfg.spMix).then(m => {
@@ -134,7 +139,6 @@
     }, () => { S.sp.can = false; S.sp.mix = null; return { liked: [], suggested: [] }; });
     return S.sp.mix;
   }
-  const NO_SP = { liked: [], suggested: [] };
   async function shuffle(mode, first) {
     let lib, pool;
     stopCar();

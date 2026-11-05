@@ -106,6 +106,7 @@
          data-book-gate="{{ url_for('audiobooks.gate') }}" data-voice-gate="{{ url_for('chat.voice_gate') }}"
          data-send="{{ url_for('housechat.home_chat_send') }}" data-events="{{ url_for('housechat.home_chat_events') }}"
          data-ort="{{ url_for('static', filename='vendor/ort/') }}"
+         data-sp-on="{{ '1' if spotify_in_car else '0' }}"
          data-sp-mix="{{ url_for('drive.spotify_mix') }}" data-sp-car="{{ url_for('drive.spotify_car') }}"
          data-sp-play="{{ url_for('drive.spotify_play') }}" data-sp-pause="{{ url_for('drive.spotify_pause') }}"
          data-house="{{ url_for('drive.house') }}" data-last="{{ url_for('drive.last') }}" data-rooms="{{ url_for('audiobooks.rooms') }}" data-room-cmd="{{ url_for('audiobooks.command') }}" data-frames="{{ url_for('static', filename='skippy/face/') }}"

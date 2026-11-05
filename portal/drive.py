@@ -33,6 +33,12 @@ mimetypes.add_type("application/wasm", ".wasm")
 
 
 URI = re.compile(r"spotify:track:[A-Za-z0-9]{22}")
+# Spotify rows in the car's shuffle are OFF (the Captain, 2026-11-05: "I think the Spotify and local library mixing must be causing issues ... If we need to keep them
+# separated, that's okay"). A Spotify row hands the song to the car's own Spotify app, which switches the Tesla's sound from the browser (Bilby) to the app and back,
+# through the portal and skippy-pc (up to 25 s a hand-off, a poll every 4 s while it plays), on the one Spotify session the house radio shares; the radio log shows it
+# ("Spotify moved to Tesla Media Player" a minute or so after the stereo handed over to Spotify, both mornings). The car plays Bilby's library alone, one stream through the
+# music gate; Spotify plays where he asks for it. True brings the rows back (the routes below are all still here).
+SPOTIFY_IN_CAR = False
 # The house lamps (the Captain, 2026-11-01: "a house status light indicator, showing what in the house is up and reachable that we care about"):
 # id, glyph, name. Names are words only because a lamp that is out has to say which thing it is.
 LAMPS = (("pc", "server", "skippy-pc"), ("core", "core", "Skippy Core"), ("hub", "can", "the pods"), ("house", "home", "lights and plugs"),
@@ -154,6 +160,6 @@ def init_app(app, home) -> None:
     @bp.get("/drive")
     @auth.admin_required
     def page():
-        return render_template("drive.html", lamps=LAMPS)
+        return render_template("drive.html", lamps=LAMPS, spotify_in_car=SPOTIFY_IN_CAR)
 
     app.register_blueprint(bp)

@@ -62,6 +62,27 @@ def valid(key: bytes, token: str, now: float) -> bool:
     return hmac.compare_digest(sign(key, exp), token)
 
 
+def counted(resp: Response, rel: str, rng: str, ua: str, log=None, clock=time.monotonic) -> Response:
+    """One line in the log for each audio response, when it ends: the status, which song, the Range asked, the bytes the client actually took, how long it took, and
+    who asked (never the pass). The Captain, 2026-11-05: "Bilby was having throughput problems to the car, wondering why and if our song buffering is working"; this gate kept
+    no access log, so a bad drive left nothing to read. A song taken in a second is a good link, one taken in a minute is not, and a response that ends short is a client that
+    gave up (a stall: the player then asks again from byte 0)."""
+    started, sent, inner = clock(), [0], resp.response
+
+    def body():
+        try:
+            for chunk in inner:
+                sent[0] += len(chunk)
+                yield chunk
+        finally:
+            close = getattr(inner, "close", None)
+            if close is not None:
+                close()
+            (log or logging.info)("audio %s %s range=%s sent=%d of %s in %.1fs ua=%s", resp.status_code, Path(rel).name[:60], rng, sent[0], resp.content_length, clock() - started, ua)
+    resp.response = body()
+    return resp
+
+
 def create_app(library: Library, key: bytes, clock=time.time, lyrics: LyricsStore | None = None,
                thumbs: ThumbCache | None = None) -> Flask:
     app = Flask(__name__)
@@ -133,7 +154,8 @@ def create_app(library: Library, key: bytes, clock=time.time, lyrics: LyricsStor
         full = library.resolve(rel)
         if not full:
             abort(404)
-        return send_file(full, mimetype=AUDIO[full.suffix.lower()], conditional=True, max_age=86400)
+        resp = send_file(full, mimetype=AUDIO[full.suffix.lower()], conditional=True, max_age=86400)
+        return counted(resp, rel, request.headers.get("Range") or "-", (request.headers.get("User-Agent") or "-")[:40])
 
     @app.get("/t/<token>/art/<path:rel>")
     def art(token, rel):

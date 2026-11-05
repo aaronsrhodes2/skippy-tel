@@ -38,6 +38,23 @@ def test_drive_is_on_the_launcher_for_the_captain_only(env):
     assert modules.BY_ID["drive"].endpoint == "drive.page" and not modules.BY_ID["drive"].pane
 
 
+def test_the_car_plays_bilbys_library_alone_unless_spotify_rows_are_switched_on(env, monkeypatch):
+    """The Captain, 2026-11-05: "I think the Spotify and local library mixing must be causing issues ... If we need to keep them separated, that's okay"."""
+    import re
+    from pathlib import Path
+    import drive
+    client, _, _ = env
+    login(client, ADMIN)
+    assert drive.SPOTIFY_IN_CAR is False
+    for page in ("/drive", "/hud"):
+        assert 'data-sp-on="0"' in client.get(page).get_data(as_text=True), page
+    monkeypatch.setattr(drive, "SPOTIFY_IN_CAR", True)
+    for page in ("/drive", "/hud"):
+        assert 'data-sp-on="1"' in client.get(page).get_data(as_text=True), page
+    js = (Path(__file__).resolve().parents[1] / "static" / "drive-app.js").read_text(encoding="utf-8")
+    assert re.search(r'function spotifyMix\(\) \{\s*if \(!SP_ON\) return Promise\.resolve\(NO_SP\);', js)       # off: the mix is not even asked for, no row can be playable
+
+
 def test_spotify_rows_go_to_the_cars_spotify_through_home(env, monkeypatch):
     client, _, _ = env
     home = client.application.extensions["home"]

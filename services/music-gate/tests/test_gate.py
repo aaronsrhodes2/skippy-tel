@@ -138,6 +138,22 @@ def test_catalog_and_seeking(client):
     assert client.get(f"/t/{tok}/a/Artist%20A/Album%201/tagged.m4a").mimetype == "audio/mp4"
 
 
+def test_each_audio_response_leaves_one_line_with_what_the_client_took(client, monkeypatch):
+    """The Captain, 2026-11-05: throughput problems to the car, and nothing in the log to read."""
+    lines = []
+    monkeypatch.setattr(gate.logging, "info", lambda fmt, *a: lines.append(fmt % a))
+    tok = gate.sign(KEY, NOW + 3600)
+    song = "Artist%20A/Album%201/01%20-%20Artist%20A%20-%20Song%20One.mp3"
+    whole = client.get(f"/t/{tok}/a/{song}", headers={"User-Agent": "QtCarBrowser Tesla"})
+    assert len(whole.data) == 3 + 256 * 40 and whole.status_code == 200
+    part = client.get(f"/t/{tok}/a/{song}", headers={"Range": "bytes=10-19"})
+    assert part.status_code == 206 and len(part.data) == 10
+    assert len(lines) == 2
+    assert lines[0].startswith("audio 200 01 - Artist A - Song One.mp3 range=- sent=10243 of 10243 in ") and lines[0].endswith("ua=QtCarBrowser Tesla")
+    assert lines[1].startswith("audio 206 01 - Artist A - Song One.mp3 range=bytes=10-19 sent=10 of 10 in ")
+    assert all(tok not in line for line in lines)                      # the pass is the credential: never in a log
+
+
 @pytest.mark.parametrize("rel", ["../secret.mp3", "Artist%20A/../../secret.mp3", "Artist%20A/Album%201/lossless.flac",
                                  "Artist%20A/Album%201/old.wma", "nothing.mp3", "Artist%20A", "..%5Csecret.mp3"])
 def test_only_library_audio_is_served(client, rel):

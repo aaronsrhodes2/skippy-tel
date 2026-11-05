@@ -23,7 +23,7 @@ def init_app(app) -> None:
     def page():
         """The glasses view (and the phone's): Drive's keys, Skippy's face, purple Skippy as the brain behind the voice, a hands-off
         hub mode like the pods, and the apps one key away. Drive's own page and script, in its hud mode (templates/drive.html)."""
-        return render_template("hud.html", lamps=drive_mod.LAMPS, hud=True)
+        return render_template("hud.html", lamps=drive_mod.LAMPS, hud=True, spotify_in_car=drive_mod.SPOTIFY_IN_CAR)
 
     @bp.get("/hud/test")
     @auth.admin_required
