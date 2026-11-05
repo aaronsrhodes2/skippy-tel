@@ -251,7 +251,18 @@
       S.heard = it.path;
       postJSON(cfg.played, { track: it.path }).catch(() => {});
     }
+    if ((S.mode === "discovery" || S.mode === "library") && au.currentTime > 8) warmNext();
   });
+  // The next song is fetched whole while this one plays, at low priority (the Captain, 2026-11-05: "throughput problems to the car"): on a poor link a new song costs a new
+  // connection (seconds of handshake through a slow Funnel ingress) and a cold start; fetched ahead it is in the browser's cache, under the same address, when `ended` sets it
+  // as the source. Nothing about playing changes: a miss is just today's cold start. Once per song; a failure is not retried (the link is poor, the current song comes first).
+  let warmed = "";
+  function warmNext() {
+    const path = D.warmTarget(S.q, S.qi, S.sp.can);
+    if (!path || path === warmed || !S.music) return;
+    warmed = path;
+    fetch(mu("a", path), { priority: "low" }).then(r => (r.ok ? r.arrayBuffer() : null)).catch(() => {});
+  }
   document.addEventListener("visibilitychange", () => { if (document.hidden) saveBook(true); });
   addEventListener("pagehide", () => saveBook(true));
 

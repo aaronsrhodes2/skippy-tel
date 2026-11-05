@@ -89,6 +89,11 @@
     for (let i = Math.max(0, at); i < queue.length; i++) if (playable(queue[i], canSpotify)) return i;
     return -1;
   }
+  // The song to fetch ahead while this one plays (the Captain, 2026-11-05: throughput problems to the car): the next playable row's path when it is a Bilby file, else "".
+  function warmTarget(queue, at, canSpotify) {
+    const i = nextPlayable(queue, at + 1, canSpotify);
+    return i >= 0 && queue[i].kind === "bilby" ? queue[i].path : "";
+  }
   function playable(it, canSpotify) { return !!it && (it.kind === "bilby" || (it.kind === "spotify" && !!canSpotify)); }
 
   /* events: the Home chat's events since before the turn; seq: the send's own seq (the "heard" line). The first "said" after it, typed. */
@@ -176,5 +181,5 @@
   }
   function langName(code) { try { return new Intl.DisplayNames(["en"], { type: "language" }).of(code) || code; } catch (e) { return code; } }
 
-  return { captionFrames, captionHoldMs, heardNote, langName, yawDeg, pinOffset, FOV_DEG, battLevel, heatLevel, lampText, HOT_STATUS, CAPTION_STEP_MS, CAPTION_FADE_MS, shuffle, buildQueue, localFirst, handOff, nextPlayable, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
+  return { captionFrames, captionHoldMs, heardNote, langName, yawDeg, pinOffset, FOV_DEG, battLevel, heatLevel, lampText, HOT_STATUS, CAPTION_STEP_MS, CAPTION_FADE_MS, shuffle, buildQueue, localFirst, handOff, nextPlayable, warmTarget, playable, replyAfter, carDone, QUEUE_MAX, FAV_EVERY, SUGGEST_EVERY, CAR_MARGIN_MS };
 });

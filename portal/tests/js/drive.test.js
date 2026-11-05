@@ -231,3 +231,11 @@ test("pinned captions: the head's turn from the pose, the short way round, hidde
   assert.ok(wrap.show && Math.abs(wrap.dx - 2 * 1000 / D.FOV_DEG) < 1e-9);
   assert.deepEqual(D.pinOffset(null, 5, 1920), { dx: 0, show: true });                                              // no pose: the row stays where it is
 });
+
+test("the song to fetch ahead is the next playable Bilby row: never a Spotify row, never nothing", () => {
+  const q = [{ kind: "bilby", path: "a" }, { kind: "spotify", uri: "spotify:track:x" }, { kind: "bilby", path: "c" }];
+  assert.equal(D.warmTarget(q, 0, false), "c");        // Spotify rows are off in the car: the next song is c
+  assert.equal(D.warmTarget(q, 0, true), "");          // a Spotify row is next: it plays on the car's Spotify, there is nothing to fetch
+  assert.equal(D.warmTarget(q, 2, false), "");         // the end of the queue
+  assert.equal(D.warmTarget([], -1, false), "");
+});
