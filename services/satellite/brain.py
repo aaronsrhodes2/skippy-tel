@@ -916,7 +916,7 @@ def music_route(heard: str, playing: bool | None = None) -> dict | None:
     w = re.sub(r"\s+(?:please|now)$", "", re.sub(r"^(?:please|can you|could you)\s+", "", re.sub(r"^\W*(?:hey |ok |okay )?skippy\W*", "", (heard or "").lower()).strip(" ?!.,")))
     if got := _first(w, MUSIC_RX):
         return got
-    w = re.sub(r"\s+(?:a (?:bit|little|lot)|some|more)$", "", _peel(_words(heard))[0])
+    w = re.sub(r"\s+(?:a (?:bit|little|lot|notch|touch|tad)|one notch|some|more|slightly)$", "", _peel(_words(heard))[0])      # ("turn the music down a notch" went to the model: 2 of 24 live trials claimed it in words only, final5)
     # the last: with the places peeled off, as the commands above. What is left of "turn off the living room" is a bare "turn off" that has lost its object: only an audio word or a named Bilby
     # decides there, never "the house is playing" (the review of 2026-11-05: with the station playing, "turn off the theater" / "turn it off downstairs" paused Bilby and the lights stayed on)
     return _first(w, [*MUSIC_RX, *_MORE, ("quieter", _QUIETER)]) or stop_route(heard, playing) or stop_route(w, None)
@@ -2328,7 +2328,7 @@ class Brain:
     def _honest(self, new: str) -> bool:
         """Do the words of a second try take the claim back, or ask? A retraction (HONEST), a denial or a question, that says no music is done (music_claimed) and promises or claims nothing more (announces: 'Right, my mistake.
         Let me cancel that timer for you.' is an apology and a promise, not a retraction)."""
-        return bool(new) and not musicguard.music_claimed(new) and not announces(new) and (bool(HONEST.search(new)) or denies(new) or "?" in new)
+        return bool(new) and not musicguard.music_claimed(new) and not announces(new) and (bool(HONEST.search(QUIP_NEGATIONS.sub(" ", new))) or denies(new) or "?" in new)      # (less a quip's "try not to": "Quieter now. Try not to strain your ears." was spoken as an honest second try with nothing done, final5)
 
     def _needs_arguments(self, name: str) -> bool:
         """Does this tool mean nothing without arguments (its schema requires some, or has an `action` to choose), or do too much with none (RETRY_NEVER: cancel_alarm and cancel_timers with nothing named
@@ -2367,7 +2367,9 @@ class Brain:
         """The tools whose NAME opens a bracket of `text`, in the order written ("[set_timer 90 tea]", "[play_music: genre=jazz, speaker=living room]"): a call that was meant, whatever TEXT_CALL makes of its
         arguments. (An `action` word alone is not one: "[pause]" may be a stage direction. A closer is no call.) fix4:guards, the third review's core#6: nor is a stage direction that happens to open with the
         name of a tool that is an English word ("[music swells]", "[news anchor voice]", "[weather report voice]"): that one is a call only when what follows the name looks like arguments (a colon, an equals sign, a
-        digit, a parenthesis) or is nothing; a name that is an identifier (set_timer, play_music: it has an underscore) is a call whatever follows ("[play_music jazz]")."""
+        digit, a parenthesis) or is nothing; a name that is an identifier (set_timer, play_music: it has an underscore) is a call whatever follows ("[play_music jazz]"). The call written in PLAIN WORDS counts too
+        (review4:code, _says_an_action): a word of that tool's own `action` enum, or the word "action", anywhere in the bracket ("[music with quieter]", "[music louder]", "[list add milk]"); the price is a stage
+        direction that happens to hold such a word ("[music volume dips]", "[music next to him]"), which is asked about again instead of wiped (README, Left undone)."""
         if not text or "[" not in text or not names:
             return []
         found = re.findall(r"\[(" + "|".join(sorted(map(re.escape, names), key=len, reverse=True)) + r")\b([^\]\n]{0,160})\]", text)

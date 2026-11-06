@@ -441,7 +441,10 @@ this file says. CI (`core/ci/ci.py`) runs no `services/satellite/tests`, so run 
   (`[music with quieter]`, `[music] volume lowered.`, `[music tool: quieter]`, `[music with next]`; 6 of 12 forced re-asks were done, a stronger nudge made no difference, and `tool_choice: any`
   is ignored by Core). The reply is then the fixed line (`UNCLAIM_MUSIC`), or, when its words are not recognised as a claim ("Quieter now. Try not to strain your ears."), the claim itself.
   It needs a first reply that claims in words only (2 of 24 trials of "turn the music down a notch") for a phrasing the routes miss. Reading those brackets as calls was left: a bracket
-  that merely contains an action word ("[music next to him]") would then skip a track.
+  that merely contains an action word ("[music next to him]") would then skip a track. Two things were done about it: `music_route` strips the degree words "a notch", "a touch", "a tad",
+  "one notch" and "slightly" like "a bit" (so "turn the music down a notch" no longer reaches the model, the phrase these trials used; other phrasings the routes miss still can), and `_honest`
+  takes a quip's "try not to" out before it looks for a retraction ("Quieter now. Try not to strain your ears." was spoken as an honest second try with nothing done). A question mark still
+  makes a second try honest even when it claims after the question ("You want the music quieter? Fine. quieter. There.": 1 of 12 forced re-asks).
 * A call put back from the reasoning is judged by its own line and the words after it, not by the whole thought: a negation AFTER the call ("[set_alarm time=07:00] but no.") or on the
   line before it is not read, two different calls in one thought ("could be [music action=next] or [music action=quieter]") both run, and `_undoes` finds `remove` / `clear`
   anywhere in a call, so a meant `list add "clear tape"` is not put back. All seen in scripted replies only: no live reply carried reasoning on the day it was fixed. Two costs of the
