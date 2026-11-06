@@ -6,7 +6,11 @@ folder again. Now a name leaves the list only when its file is gone, its line is
 times and refused every time. A pass takes the whole list for itself, so the stores of a burst do not each go down it.
 
 Everything runs on real files in a temporary folder; only the failures (an unlink that is refused, a replace that is refused) are made up. The sibling file test_sat_fix_gate.py pins the
-retry of a refused unlink, the atomic write and the temp files, and stays as it is."""
+retry of a refused unlink, the atomic write and the temp files, and stays as it is.
+
+Nothing here may run for ever (the third review, 2026-11-05, code#3): this file is in CI's services job, which has no timeout. The two tests that loop DOOMED_TRIES times (one store
+per try) took their loop count from the constant itself, so DOOMED_TRIES = 10**9 (a name never given up) did not fail them, it kept them storing for ever. They now check first that the
+constant is a few (`tries()`), and the loop of the first one also has a deadline of its own (`LOOP_S`) that fails with a message instead of waiting."""
 import hashlib
 import logging
 import os
@@ -21,6 +25,22 @@ import gate  # noqa: E402
 
 def settle(voice, seconds=30):
     assert voice.wait(seconds), "the background stores did not finish"
+
+
+MOST_TRIES = 10          # "a few" (gate.py: a folder nothing can be removed from costs each store a few unlinks, not a growing list)
+LOOP_S = 60              # what a loop of stores below may take in all, on a slow disk: the real ones take a second or two
+
+
+def tries():
+    """gate.DOOMED_TRIES, after a check that it is a few. The tests below store once per try, so a constant of 10**9 (a file that would never be given up) must FAIL them here, at once and with
+    this message, not keep them storing for ever."""
+    assert 1 <= gate.DOOMED_TRIES <= MOST_TRIES, (f"gate.DOOMED_TRIES is {gate.DOOMED_TRIES}: a file that will not go must be given up after a few refusals (1 to {MOST_TRIES}), "
+                                                  f"or a folder nothing can be removed from costs every store a longer list for ever")
+    return gate.DOOMED_TRIES
+
+
+def test_fix3gate_g2_the_tries_a_file_is_given_before_it_is_left_for_a_restart_are_a_few():
+    assert 1 <= tries() <= MOST_TRIES
 
 
 def fill(folder, n):
@@ -77,17 +97,20 @@ def test_fix2gate_nothing_is_dropped_before_it_was_tried_and_a_name_is_given_up_
             raise PermissionError(13, "in use")
         return real(path, *a, **k)
     monkeypatch.setattr(os, "unlink", unlink)
+    n_tries = tries()                                                                    # (a few: this loop stores once per try)
+    began = time.monotonic()
     with caplog.at_level(logging.WARNING, logger="voice-gate"):
-        for n in range(gate.DOOMED_TRIES + 2):
+        for n in range(n_tries + 2):
+            assert time.monotonic() - began < LOOP_S, f"store {n}: the stores of this loop have taken {LOOP_S} s; a store that does not end, or a name that is never given up"
             refused.clear()
             voice.remember(f"skippy|store {n}", b"s")
-            settle(voice)
-            if n < gate.DOOMED_TRIES:
+            settle(voice, 15)
+            if n < n_tries:
                 # all 61 files over the cap (and one more each store) are tried at every one of the first DOOMED_TRIES stores: none of them was dropped untried
                 assert len(refused) >= 61 and len(set(refused)) >= 61, (n, len(refused))
             else:
-                assert len(refused) <= gate.DOOMED_TRIES, (n, len(refused))             # given up: they cost the stores nothing any more (the new evictions of the last stores only)
-    assert len(voice._doomed) < gate.DOOMED_TRIES
+                assert len(refused) <= n_tries, (n, len(refused))                        # given up: they cost the stores nothing any more (the new evictions of the last stores only)
+    assert len(voice._doomed) < n_tries
     assert sum("would not go" in r.getMessage() for r in caplog.records) >= 61          # and each give-up said so once
 
 
@@ -95,19 +118,20 @@ def test_fix2gate_a_file_that_goes_at_the_last_try_is_removed(tmp_path, monkeypa
     voice = gate.Voice(str(tmp_path), time.time, cache_keep=3)
     folder = tmp_path / "tts-cache"
     names = fill(folder, 3)
-    tries = {"n": 0}
+    refusals = {"n": 0}
     real = os.unlink
+    n_tries = tries()
 
     def unlink(path, *a, **k):
-        if os.path.basename(str(path)) == names[0] and tries["n"] < gate.DOOMED_TRIES - 1:
-            tries["n"] += 1
+        if os.path.basename(str(path)) == names[0] and refusals["n"] < n_tries - 1:
+            refusals["n"] += 1
             raise PermissionError(13, "in use")                                      # refused DOOMED_TRIES - 1 times ...
         return real(path, *a, **k)
     monkeypatch.setattr(os, "unlink", unlink)
-    for n in range(gate.DOOMED_TRIES):
+    for n in range(n_tries):
         voice.remember(f"skippy|line {n}", b"l")
-        settle(voice)
-    assert names[0] not in on_disk(folder) and tries["n"] == gate.DOOMED_TRIES - 1    # ... and then it went
+        settle(voice, 15)
+    assert names[0] not in on_disk(folder) and refusals["n"] == n_tries - 1    # ... and then it went
 
 
 # --- a store that fails leaves nothing unlisted --------------------------------------------------------------------------------------------------------

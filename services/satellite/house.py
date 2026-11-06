@@ -340,21 +340,59 @@ class Combined(House):
         return self._owner.get(eid)
 
 
-THERMO = r"(?:thermostat|heat(?:er|ing)?|furnace|a/?c|air conditioning)"
-SET_THERMO = re.compile(rf"\b(?:set|turn|put|make|change)\b.*\b{THERMO}\b.*?\b(?:to|at)\s+(\d{{2}})\b|\b{THERMO}\b.*?\b(?:to|at)\s+(\d{{2}})\b", re.I)
+THERMO = r"(?:thermostat|(?<!water )(?<!space )heat(?:er|ing)?|furnace|a/?c|air conditioning)"      # (a water heater and a space heater are not the thermostat: "set the water heater to 60")
+_ONES = r"(?:one|two|three|four|five|six|seven|eight|nine)"
+_TENS = r"(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)"
+DEGREES = rf"(\d{{2}}|{_TENS}(?:[\s-]+{_ONES})?+)\b"                    # "72" or "seventy two": two digits (350 is no thermostat setting) or twenty to ninety-nine in words (the ones are possessive: no backing off to "seventy")
+SET_THERMO = re.compile(rf"\b(?:set|turn|put|make|change)\b.*\b{THERMO}\b.*?\b(?:to|at)\s+{DEGREES}|\b{THERMO}\b.*?\b(?:to|at)\s+{DEGREES}", re.I)
+# The same request said about the TEMPERATURE, the house or "it" instead of a device (the third review, 2026-11-06: "set the temperature to 45" was answered with the forecast, "make the thermostat 70"
+# with a read of it): a plain command that names the degrees. A question, a condition, a choice ("68 or 70"), a change ("up 10 degrees") or a time of day ("at 10 pm") is not one: the model decides.
+_THE = r"(?:(?:the|my|our)\s+)?"
+_HERE = r"(?:in\s+here|inside|indoors|in\s+the\s+house|at\s+home)"
+_TO = r"(?:(?:(?:up|down)\s+)?(?:to|at)\s+)?"                            # ("to 72", "up to 72", "at 72", or nothing: "make the thermostat 72"; never "up 10": that is a change, not a setting)
+_AFTER = rf"(?!\s*(?:degrees?\s*)?(?:or\s+(?:\d|{_TENS})|[ap]\.?m\b|o'?clock|:\d|percent|%|minutes?|hours?|seconds?|days?|more|less|warmer|cooler|colder|hotter|higher|lower|up|down|above|below|over|under))"
+SET_TEMPERATURE = re.compile(
+    rf"\b(?:set|make|change|put|turn|bring|adjust|raise|lower|keep)\s+{_THE}(?:(?:house|home|indoor|inside|air|room)\s+)?(?:temperature|temp)\s+(?:{_HERE}\s+)?{_TO}{DEGREES}{_AFTER}"
+    rf"|\b(?:set|make|change|put|keep|get)\s+{_THE}thermostat\s+{DEGREES}{_AFTER}"
+    rf"|\b(?:set|make|change|put|keep|bring)\s+{_THE}(?:house|home)\s+(?:temperature\s+)?{_TO}{DEGREES}{_AFTER}", re.I)
+SET_IT = re.compile(rf"\b(?:make|set|get|keep|put)\s+it\s+(?:(?:to|at)\s+)?{DEGREES}(?:\s*(?:degrees?|°))?\s+{_HERE}\b", re.I)         # ("it" is any number: only a room temperature counts, 55 to 85, never a volume)
+NOT_NOW = re.compile(r"\b(?:should|shall|ought|whether|if|unless|until|when|whenever|while|because|why|who|whom|whose|which|better|rather)\b|\bhow\s+about\b|\bwhat\s+if\b|"
+                     r"\bo'?clock\b|\b\d{1,2}:\d\d\b|\b(?:\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*[ap]\.?m\b|"
+                     r"\b(?:and|then|also|plus)\s+(?:(?:please|also)\s+)?(?:turn|play|set|put|open|close|start|stop|pause|resume|dim|lock|unlock|cancel|add|remind|tell|read|make|switch|shut|call|text|send|announce|skip)\b", re.I)
 OFF_THERMO = re.compile(rf"\bturn\s+(?:off\s+(?:the\s+)?{THERMO}|(?:the\s+)?{THERMO}\s+off)\b", re.I)
 ON_THERMO = re.compile(rf"\bturn\s+(?:on\s+(?:the\s+)?(?:heat|heater|heating|furnace)|(?:the\s+)?(?:heat|heater|heating|furnace)\s+on)\b", re.I)
 ASK_THERMO = re.compile(r"\bthermostat\b|\bhow\s+(?:warm|cold|hot)\s+is\s+it\s+(?:in\s+here|inside|in\s+the\s+house|at\s+home)\b|"
-                        r"\b(?:temperature|temp)\s+(?:in\s+here|inside|in\s+the\s+house|at\s+home)\b|\bis\s+the\s+heat\s+on\b", re.I)
+                        r"\b(?:temperature|temp)\s+(?:in\s+here|inside|in\s+the\s+house|at\s+home|indoors?)\b|\bis\s+the\s+heat\s+on\b|"
+                        r"\b(?:what|whats|tell|check|read|give)\b[^?.!]{0,24}?\b(?:indoor|house)\s+(?:temperature|temp)\b", re.I)
+
+
+_TENS_VALUE = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+_ONES_VALUE = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
+
+
+def degrees(said: str) -> int:
+    """72 from "72", "seventy two", "seventy-two" or "seventy" (what DEGREES matched)."""
+    if said.isdigit():
+        return int(said)
+    words = re.split(r"[\s-]+", said.strip().lower())
+    return _TENS_VALUE[words[0]] + (_ONES_VALUE[words[1]] if len(words) > 1 else 0)
 
 
 def thermostat_route(heard: str) -> tuple[str, dict] | None:
-    """A plain thermostat request, straight to the house tool ("set the thermostat to 70", "turn the heat off", "how warm is it in here?");
-    None = the model decides. Left to itself, Core said "I cannot see the thermostat" with the tool right there (2026-11-01)."""
+    """A plain thermostat request, straight to the house tool ("set the thermostat to 70", "set the temperature to seventy two", "make it 70 in here", "turn the heat off", "how warm is it in here?");
+    None = the model decides. Left to itself, Core said "I cannot see the thermostat" with the tool right there (2026-11-01). A setting is looked at before a question, and the settings that name no device
+    (SET_TEMPERATURE, SET_IT) only when they are a plain command (NOT_NOW: a question, a condition, a time or a second command is the model's). Runs before the weather route, which would take the word "temperature"."""
     h = heard or ""
     m = SET_THERMO.search(h)
     if m:
-        return "home_control", {"name": "thermostat", "action": "set_temperature", "value": int(m.group(1) or m.group(2))}
+        return "home_control", {"name": "thermostat", "action": "set_temperature", "value": degrees(m.group(1) or m.group(2))}
+    if not NOT_NOW.search(h):
+        m = SET_TEMPERATURE.search(h)
+        if m:
+            return "home_control", {"name": "thermostat", "action": "set_temperature", "value": degrees(next(g for g in m.groups() if g))}
+        m = SET_IT.search(h)
+        if m and 55 <= degrees(m.group(1)) <= 85:
+            return "home_control", {"name": "thermostat", "action": "set_temperature", "value": degrees(m.group(1))}
     if OFF_THERMO.search(h):
         return "home_control", {"name": "thermostat", "action": "off"}
     if ON_THERMO.search(h):

@@ -767,7 +767,7 @@ def test_14b_the_watchdog_thread_checks_every_minute(monkeypatch):
     def fake_sleep(s):
         sleeps.append(s)
         t.now += s
-        if exits:
+        if exits or len(sleeps) > 1000:                            # (a watchdog that never fires would sleep for ever here: the run FAILS on exits == [3] below, it does not hang; an honest run sleeps 16 times)
             raise KeyboardInterrupt                                # leave the endless loop
 
     monkeypatch.setattr(reporter.time, "sleep", fake_sleep)

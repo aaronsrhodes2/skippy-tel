@@ -62,7 +62,8 @@ SPOKEN = (
     "nothing that cannot be said aloud; say numbers, times and units the way a person would. "
     "Be brief, and keep the Skippy in you in few words: a spoken answer is one or two short sentences unless he asks for more, and once a tool has done what he asked, the confirmation is a few words. "
     "You act ONLY through your tools: never say you did something (a light, a plug, a timer, an alarm, the music) in a turn where you called no tool for it. If you called no tool, nothing happened, "
-    "so call it first, then say what it answered. A plain request (a time, a light, a fact, a timer) gets just the answer, with a dig folded in only when it fits in a few words; a request for something made "
+    "so call it first, then say what it answered. Your own voice (its speed, pitch or loudness) is not something a tool changes: if he asks, say so in a few words and call no tool (the audiobook tool's speed is for a book only). "
+    "A plain request (a time, a light, a fact, a timer) gets just the answer, with a dig folded in only when it fits in a few words; a request for something made "
     "(a haiku, a joke, a limerick, a poem, a story, a recitation, an explanation) gets the WHOLE thing, performed, with a quip "
     "before or after it, in about a hundred words or fewer. Never describe the thing instead of giving it. Use your tools when one fits (timers{house}{music}): call them, never write a tool call as text, "
     "and never write [SKIPPY_LEARN] or [TTS_ADJUST] here (nothing strips them: they would be read aloud). "
@@ -161,13 +162,70 @@ ASKS_ABILITY = re.compile(r"\bwhat (?:else |all |exactly )?(?:can|could|can't|ca
                           r"|\bwhat (?:are|is) your (?:abilities|capabilities|tools|limits)\b|\byour (?:abilities|capabilities|tools)\b|\bwhat you (?:can|could) do\b", re.I)
 
 
+RETRY_GROUPS = re.compile(r"\b(?:plugs|outlets|switches|everything|appliances|devices)\b|\b(?:all|every|each)\s+(?:the\s+)?(?:plug|outlet|switch)\b", re.I)      # (a whole set of plugs is every plug on it: the fridge, the router ...)
+RETRY_GUARDED = re.compile(r"\b(?:garage|locks?|unlock|doors?|gates?|dead ?bolts?|locked|disarm|alarm system)\b", re.I)      # (what the HOUSE itself will not touch without his yes aloud: a second try may call them, with no `confirm`)
+
+# The spoken yes for a lock, a door or the garage (fix3:guards, the second review's core#2). house.House.control answers a call without `confirm=true` with "X needs him to confirm out loud first. Ask him, and
+# only call again with confirm set once he has said yes." but the `confirm` was the MODEL's to write, and it wrote it on the first call, with no yes said (the real Core, 5 of 6 sensitive orders: open and close the garage,
+# lock the front door, "can you open the garage" and "let my brother in, unlock the door"; fix3:guards' own run, 11 of 12; with this 0 of 18, and the two-turn flow below opened it 6 of 6). Only HE says yes:
+# Brain.run_tool drops the model's `confirm` from every home_control call unless (a) the last tool answer of
+# the exchange before this one was that very question (CONFIRM_ASKED) for the same thing and the same action, asked at most CONFIRM_FOR_S ago, and (b) his words now are a short yes and nothing else (says_yes).
+# One yes opens one door, once. (Latent while the vault leaves HASS_SENSITIVE unset: the lock and the garage are then invisible to the model. The garage-opener setup turns it on.)
+CONFIRM_ASKED = "needs him to confirm out loud first"
+CONFIRM_FOR_S = 120.0
+_YES_CORE = frozenset("yes yeah yep yup yea ya sure ok okay alright affirmative confirm confirmed absolutely definitely correct proceed ahead".split())
+_YES_FILLER = frozenset("please now then and just sir captain skippy hey thanks thank you i said that that's it for the a this them do go thing of course uh um er erm hmm well oh".split())      # (uh um er erm hmm well oh: what Whisper writes for a hesitation, fix4:guards. No "right": it is a yes-word only inside "that's right")
+_YES_PHRASE = re.compile(r"\b(?:do it|go ahead|go for it|please do|that'?s right|that is right|i confirm|of course)\b")
+_YES_THIS = frozenset("it that this them".split())
+# "yeah right", "yeah, sure", "sure, sure": in English usually a no in a yes's clothes (fix4:guards, the third review's code#5). When in doubt the house asks again: a false no costs one more word, a false yes opens the garage.
+_YES_SARCASM = re.compile(r"\b(?:yeah|yea|ya|yep|yup)\s+(?:right|sure)\b|\bsure\s+sure\b")
+
+
+def says_yes(heard: str, asked: dict | None = None) -> bool:
+    """Is what he said a plain yes and nothing else? Up to ten words, all of them yes-words ("yes", "yeah, go ahead", "do it", "sure, thanks", "I said yes") or the words of the very thing the house asked about
+    (`asked` = {"name", "action"} of the call: "yes, open the garage door", "open it"), with at least one that says yes. A "no", a "but", a different door ("yes, open the front door"), another order ("yes, and
+    turn off the lights") or nothing but "please" is not one."""
+    words = re.findall(r"[a-z']+", ORDER_ADDRESS.sub("", (heard or "").strip()).lower())
+    if not words or len(words) > 10:
+        return False
+    said = " ".join(words)
+    if _YES_SARCASM.search(said):
+        return False
+    words = re.sub(r"\bthat's right\b", "that's", said).split()           # ("right" is a yes-word only in "that's right")
+    thing = set(re.findall(r"[a-z']+", f"{(asked or {}).get('name') or ''} {(asked or {}).get('action') or ''}".lower())) - {"the", "a", "my", "our"}
+    if any(w not in _YES_CORE and w not in _YES_FILLER and w not in thing for w in words):
+        return False
+    action = {w for w in re.findall(r"[a-z']+", str((asked or {}).get("action") or "").lower())}
+    return bool(_YES_CORE & set(words) or _YES_PHRASE.search(said) or (action & set(words) and _YES_THIS & set(words)))
+
+
+def _same_thing(a, b) -> bool:
+    """Is the thing `a` names (the call he is about to make) the thing `b` names (what he was asked about)? All of b's words (less the small ones) are in a's: "Garage Door" and "the garage door" for "garage door", and
+    "garage door" for "garage". The other way round it is NOT: "door" for "front door", "garage" for "garage door" is a vaguer name, and the house settles a vague name by itself (it could land on another door or lock);
+    his yes is for what he was asked, so the house asks again (fix4:guards, the third review's code#3 C16: a false no costs one more word, a false yes opens the garage)."""
+    wa, wb = (set(re.findall(r"[a-z0-9]+", str(x or "").lower())) - {"the", "a", "my", "our"} for x in (a, b))
+    return bool(wa) and bool(wb) and wb <= wa
+
+
+def is_read(name: str, args: dict | None) -> bool:
+    """Does this tool call only LOOK (RETRY_READS, or an `action` of RETRY_READ_ACTIONS)? A look changes nothing."""
+    action = str((args or {}).get("action") or "").strip().lower()
+    return name in RETRY_READS or action in RETRY_READ_ACTIONS.get(name, ())
+
+
 def retry_may(name: str, args: dict, ordered: bool) -> bool:
-    """May the second try after a denial run this call? Looking always, changing only when his words are an order, undoing or announcing never."""
+    """May a second try (after a denial, a bare acknowledgement or a claim) run this call? Looking always, changing only when his words are an order, undoing or announcing never, and never a thing that
+    has to keep running or can burn (RISKY_THING: the router, the fridge, a pump, a CPAP, the oven ... fix3:guards, 2026-11-05: 8 of 8 were switched off by a second try) or a whole set of plugs. A lock, a door or the
+    garage is not refused here: the call runs without its `confirm` and the house itself asks him to say yes aloud (Brain.run_tool)."""
     action = str((args or {}).get("action") or "").strip().lower()
     if name in RETRY_NEVER or action in RETRY_NEVER_ACTIONS.get(name, ()):
         return False
-    if name in RETRY_READS or action in RETRY_READ_ACTIONS.get(name, ()):
+    if is_read(name, args):
         return True
+    if name == "home_control":
+        target = str((args or {}).get("name") or "")
+        if (RISKY_THING.search(target) and not RETRY_GUARDED.search(target)) or RETRY_GROUPS.search(target):
+            return False
     return ordered
 
 
@@ -235,14 +293,20 @@ HONEST = re.compile(r"\b(?:not|never|nothing|no|wrong|mistake|sorry|apologi[sz]e
 BARE_ACK = re.compile(r"^\W*(?:(?:okay|ok|alright|all right|sure|fine|well|so|and|now|right)[.,!]*\s+)*(?:done|handled|got it|on it|will do|you got it|consider it done|right away|already (?:done|on|off|set)"
                       r"|no (?:problem|trouble)(?: at all)?|there(?: you go)?(?=\W|$)(?!\s+(?:is|are|was|were|will|would|has|have)\b)|all set|as you wish|coming right up|certainly|of course|absolutely|okay|ok|sure|alright|all right|fine"
                       r"|(?:off|on|up|down) it goes|(?:off|on)(?=[.!,]|$)"
-                      r"|roger(?: that)?|aye(?: aye)?|you bet|gladly|affirmative|understood|yep|yup|yes|very well|no worries|your wish is my command)\b", re.I)       # (fix2:guards: a few more ways to say it)
+                      r"|roger(?: that)?|aye(?: aye)?|you bet|gladly|affirmative|understood|yep|yup|yes|very well|no worries|your wish is my command"       # (fix2:guards: a few more ways to say it)
+                      r"|(?:added|removed|cleared|set|paused|resumed|skipped|stopped|muted|unmuted|dimmed|brightened|lowered|raised|queued|cancel+ed|started)(?=\W|$)"      # (fix3:guards: the verb of the order, said as done: "Added, Captain.", "Paused.")
+                      r"|\w+ it is(?=\W|$))\b", re.I)                                                                                                            # ("Louder it is.", "Upstairs it is.")
 BARE_WORDS = 14                 # (a quip before the "Done." makes the reply longer than "Done, Captain. The kitchen lights are on.")
+BARE_NAMING_WORDS = 25          # (fix3:guards) ... and a reply this long counts too when it NAMES the thing he ordered: "Fine, I'll switch on the kitchen lights for you. There. All done. You're welcome." is 15 words and was no "Done."
+# The words of a service, said where no tool did one: "You're welcome" (nobody thanked it for nothing) and "as you wish" / "as you asked". In any sentence of a reply to an order, with nothing taken back.
+ACK_TAIL = re.compile(r"\byou(?:'re| are) welcome\b|\bas you (?:like|wish|wanted|asked|requested|ordered|commanded)\b|\bas (?:requested|ordered)\b", re.I)
 ORDER_CUES = (                  # (the tools that do it, the words of an order for it): the cue counts only while one of the tools is really here
     (("home_control",), re.compile(r"\b(?:lights?|lamps?|plugs?|outlets?|fans?|thermostat|heat(?:er|ing)?|brightness|brighter|brighten|dim(?:mer)?|percent|degrees|scenes?)\b"
                                    r"|\b(?:turn|switch|power|shut|cut|kill|put)\b[^.!?]*\b(?:on|off|out)\b", re.I)),            # (or any thing by its name: "turn the coffee maker on")
     (("set_timer", "cancel_timers"), re.compile(r"\btimers?\b", re.I)),
     (("set_alarm", "set_reminder", "cancel_alarm"), re.compile(r"\b(?:alarms?|remind(?:er|ers| me)?|wake me)\b", re.I)),
-    (("play_music", "music", "speakers", "dj_mode", "spotify"), re.compile(r"\b(?:music|songs?|tracks?|volume|louder|quieter|play|pause|resume|skip|shuffle|playlist|album|stereo|speakers?|spotify|bilby|radio|dj|mute)\b", re.I)),
+    (("play_music", "music", "speakers", "dj_mode", "spotify"), re.compile(r"\b(?:music|songs?|tracks?|volume|louder|quieter|play|pause|resume|skip|shuffle|playlist|album|stereo|speakers?|spotify|bilby|radio|dj|mute)\b"
+                                                                            r"|\bturn\s+(?:it|that|this)\s+(?:up|down)\b", re.I)),            # ("turn it down a little": the volume, though no word of the music is in it)
     (("list",), re.compile(r"\blists?\b", re.I)),
     (("announce",), re.compile(r"\b(?:announce|broadcast)\b", re.I)),
 )
@@ -252,41 +316,119 @@ ORDER_CUES = (                  # (the tools that do it, the words of an order f
 # (no stage direction), counts an acknowledgement in the first OR the last sentence of a short reply (a quip before the "Done."), and a plain claim of state to an order for the lights.
 ORDER_VERBS = ("turn switch flip toggle put set start stop cancel kill cut shut dim brighten darken raise lower increase decrease bump crank make get let leave keep "
                "play pause resume continue skip shuffle queue mute unmute replay rewind add remove delete clear erase read show tell announce broadcast wake remind snooze schedule create take "
-               "activate open close quiet silence list").split()
+               "activate open close quiet silence list bring have give send move enable disable").split()               # (fix3:guards: "please bring the volume down a little" was no order; nor "have the music play in the kitchen", "give me a timer ...")
 # (a verb that is also a noun or a word of an idiom opens an order only in the forms people order with: "light up", "power off", "end the timer"; not in "keep in mind", "get this", "let me think", "put simply")
 _ORDER_VERB = "(?:" + "|".join(ORDER_VERBS) + r"|light up|power (?:on|off|down|up)|end (?:the|that|this|my|all|it))"
-_ORDER_IDIOM = r"(?!get this\b|keep in mind\b|tell you what\b|put (?:simply|differently|it this way)\b|make (?:sense|a difference)\b|let me (?:think|see|know|say|explain|tell|check|ask|finish|try)\b)"
+_ORDER_IDIOM = (r"(?!get this\b|keep in mind\b|tell you what\b|put (?:simply|differently|it this way)\b|make (?:sense|a difference)\b|let me (?:think|see|know|say|explain|tell|check|ask|finish|try)\b"
+                r"|cut (?:costs?|corners|class)\b|play (?:it by ear|along|dead|ball|fair|safe|hooky|house|dates?|time|lists?|buttons?|menus?|mode|school|ground|room)\b|kill (?:time|the mood)\b)")        # (fix3:guards: "cut costs on the lights", "play it by ear", "kill time with a list")
 _ORDER_FILLERS = r"(?:(?:and|so|but|well|then|now|also|just|ok|okay|alright|all right|yeah|yes|oh|um|uh|hmm|hey|right|kindly|please|go ahead and)\W+)*"
 ORDER_ADDRESS = re.compile(r"^\W*(?:(?:hey|ok|okay)\s+)?(?:skippy|bilby)\b\W*", re.I)
 ORDER_CLAUSES = re.compile(r"[.;!?,:]+\s*|\s+(?:and then|then)\s+", re.I)
 ORDER_FRAME = re.compile(r"^(?:(?:can|could|would|will) you (?:please )?" + _ORDER_VERB + r"\b|(?:would|do) you mind\b|i(?:'d| would) like\b|i want\b|i need\b|we (?:want|need)\b|let'?s\b|how about\b)", re.I)
 ORDER_NOT_FRAME = re.compile(r"^(?:i (?:want|need|would like|'d like) to (?:know|ask|say|understand|learn|find out|talk|tell|be|think|check|figure|go|sleep|leave|eat|rest|relax|work|study|call|shower|focus)\b"
                              r"|i need (?:to )?(?:a break|sleep|rest|coffee)\b)", re.I)                # (his own plans and needs; "I want to hear some jazz" is still a way to ask for it)
+# fix3:guards (the second review, core#5 and code#6: "we need a new thermostat someday", "dim lighting makes me sleepy", "lights out at ten is the rule at camp", "turn signals are on the left",
+# "play time is over" took a bare "Okay." for the answer to an order and were asked again; "please bring the volume down a little" was missed). A wish, a need or a liking followed by "to" and a verb that
+# is no order verb ("I would like to thank you", "we need to talk about the thermostat", "I want to apologize for the timer") is a remark; so is "how about that music last night".
+ORDER_TO_OTHER = re.compile(r"^(?:i|we)(?:'d| would)? (?:want|need|like) to (?!(?:" + "|".join(ORDER_VERBS) + r"|hear|listen)\b)", re.I)
+ORDER_REMARK = re.compile(r"^how about that\b.*\b(?:last (?:night|week|time)|yesterday|earlier|ago)\b", re.I)
+ORDER_WISH = re.compile(r"^(?:i|we)(?:'d| would)? (?:want|need|like)\b(.*)$", re.I)
+ORDER_ABILITY_START = re.compile(r"^(?:can|could|would|will) you (?:please )?" + _ORDER_VERB + r"\b", re.I)
+# Words that make "can you set X" an order for something particular: a determiner, a number, a place. Without them ("can you set timers", "can you turn on lights") it asks whether it can.
+_ORDER_PARTICULAR = frozenset("the a an my our your his her their this that these those some any all every each both another one two three four five six seven eight nine ten eleven twelve twenty thirty "
+                              "forty fifty sixty half quarter kitchen bedroom bathroom living dining office theater hall hallway garage porch deck attic basement study den laundry guest master front back "
+                              "desk bed ceiling floor table upstairs downstairs everywhere here there it them me us".split())
+# The verbs of a statement, said right after the noun an "order" begins with: "turn signals ARE on the left", "play time IS over", "set top boxes MAKE the lamp flicker". Not when a pronoun comes before it:
+# "play the song we WERE listening to", "turn off the lights that ARE on" are orders with a clause in them.
+_ORDER_PREDICATE = frozenset("is are was were am has have had does did make makes keep keeps need needs cost costs looks sounds seems feels means gets goes comes runs stays takes burns lasts".split())      # (not the bare "go", "stay",
+#                            "get": "let the lights STAY on", "set the timer to GO off" are orders)
+_ORDER_PRONOUN = frozenset("i we you they he she it that which who there this what and or but then also please just to".split())      # (and "and": "play some music and MAKE it loud" is two orders; "to": "set an alarm to MAKE noise")
+_ORDER_FREE_TEXT = frozenset("play queue replay".split())                                                        # (what follows is a TITLE, any words at all: "play is this love", "play take on me"; the idioms in _ORDER_IDIOM are the statements)
+_ORDER_CLAUSE_WORDS = frozenset("that if when while because since until so as whether how what which who where".split())      # ("turn off the lights if the kids ARE asleep": a clause inside the order)
+_ORDER_TAKES_CLAUSE = frozenset("announce broadcast tell remind ensure".split()) | _ORDER_FREE_TEXT                    # (verbs that are followed by a sentence: "tell everyone dinner IS ready", or a title)
+_ORDER_PARTICLES = frozenset("on off up down out in back over away".split())
 ORDER_VERB_FIRST = re.compile(r"^" + _ORDER_FILLERS + _ORDER_IDIOM + _ORDER_VERB + r"\b", re.I)
 ORDER_PLEASE = re.compile(r"\bplease\W*$", re.I)
 _ORDER_DET = r"(?!\s+(?:the|a|an|my|our|your|his|her|their|this|that|these|those)\b)"
 _ORDER_PLACE = (r"(?:kitchen|bedroom|bathroom|living room|living|dining room|dining|office|theater|hall|hallway|garage|porch|deck|attic|basement|study|den|laundry|guest|master|front|back|desk|bed|ceiling|floor|table|"
                 r"reading|track|stove|upstairs|downstairs|all|every|both|each|these|those|everything|the|my|our|room|lights?|lamps?)")
-ORDER_CURT = re.compile(rf"^(?:{_ORDER_PLACE}\s+){{0,3}}(?:lights?|lamps?|plugs?|outlets?|fans?|speakers?|stereo|music|volume)\s+(?:on|off|out|up|down|louder|quieter|softer)\b{_ORDER_DET}"       # "lights off in the bedroom"
-                        r"|\b(?:needs?|has|have|ought)\s+to\s+be\s+(?:on|off)\b|\bmust\s+be\s+(?:on|off)\b"                                                                                       # "the bedroom light needs to be on"
+ORDER_CURT_DIR = re.compile(rf"^(?:{_ORDER_PLACE}\s+){{0,3}}(?:lights?|lamps?|plugs?|outlets?|fans?|speakers?|stereo|music|volume)\s+(?:on|off|out|up|down|louder|quieter|softer)\b{_ORDER_DET}", re.I)     # "lights off in the bedroom"
+ORDER_CURT = re.compile(r"\b(?:needs?|has|have|ought)\s+to\s+be\s+(?:on|off)\b|\bmust\s+be\s+(?:on|off)\b"                                                                                       # "the bedroom light needs to be on"
                         r"|^(?:next|previous|last)\s+(?:song|track)\b", re.I)                                                                                                                    # "next track"
-ORDER_NEGATED = re.compile(r"\b(?:don'?t|do not|never|not|no longer|without|except|instead of|unless|nobody|nothing)\b|n't\b", re.I)
+# What a clause says about a time or a rule rather than about now: "we want the lights on a dimmer eventually", "lights off at nine is the rule for the kids", "dim lighting makes me sleepy" (fix3:guards).
+ORDER_NEGATED = re.compile(r"\b(?:don'?t|do not|never|not|no longer|without|except|instead of|unless|nobody|nothing|someday|sometime|eventually|usually|normally|typically|generally|often|sometimes|always|whenever"
+                           r"|rules?|makes)\b|n't\b", re.I)
 
 
 def order_shaped(heard: str) -> bool:
     """Is what he said an ORDER in shape, not a statement that happens to name a light or a timer? Some clause of it (split at punctuation and "and then") opens with a verb ("turn off ...", "play ...",
     after "so", "please", "okay" ...), or with can / could / would you + a verb, would you mind, I want / I need / I would like, let's, how about, or is the curt "lights off in the bedroom" / "the
     bedroom light needs to be on"; or his words end with "please". A clause that says not / don't / never / except is no order ("please don't turn off the lights"); neither is "I want to know ...".
-    "the lights are off", "my timer went off already", "I do not need the alarm on sunday", "someone turned the music up" are statements: a bare "Okay." to one is the right answer."""
+    "the lights are off", "my timer went off already", "I do not need the alarm on sunday", "someone turned the music up" are statements: a bare "Okay." to one is the right answer.
+    fix3:guards: nor is a clause that defers or describes ("someday", "usually", "makes", "the rule"), a wish for something that is no tool's ("I would like to thank you", "we want a new stereo for
+    christmas"), a question whether it can ("can you set timers"), or a noun phrase that only begins like an order, because a verb of a statement follows it ("turn signals ARE on the left",
+    "play time IS over": _statement_after) or it is an idiom ("cut costs", "play it by ear")."""
     words = ORDER_ADDRESS.sub("", (heard or "").strip())
     for clause in ORDER_CLAUSES.split(words):
         c = clause.strip()
         c = c if ORDER_FRAME.match(c) else re.sub(r"^" + _ORDER_FILLERS, "", c, flags=re.I).strip()
-        if not c or ORDER_NEGATED.search(c) or ORDER_NOT_FRAME.match(c):
+        if not c or ORDER_NEGATED.search(c) or ORDER_NOT_FRAME.match(c) or ORDER_TO_OTHER.match(c):
             continue
-        if ORDER_FRAME.match(c) or ORDER_VERB_FIRST.match(c) or ORDER_CURT.search(c):
+        if ORDER_FRAME.match(c) and not (ORDER_REMARK.match(c) or _asks_ability(c) or _wish_off_topic(c)):
+            return True
+        m = ORDER_VERB_FIRST.match(c)
+        if m and not _statement_after(c, m.end()):
+            return True
+        m = ORDER_CURT_DIR.search(c)
+        if (m and not _statement_after(c, m.end())) or ORDER_CURT.search(c):
             return True
     return bool(ORDER_PLEASE.search(words)) and not ORDER_NEGATED.search(words)
+
+
+def _statement_after(clause: str, end: int) -> bool:
+    """Does a verb of a STATEMENT follow within a few words of where an order's verb (or the curt "lights off") ended in `clause`? "turn signals ARE on the left", "play time IS over", "set top boxes MAKE the
+    lamp flicker", "fans on high MAKE the whole room cold": an order's verb is followed by what to do it to and where, not by another verb. A pronoun in front of it ("play the song we WERE listening to", "turn
+    off the lights that ARE on") or "make sure" makes it an order with a clause in it."""
+    verb = (re.findall(r"[a-z']+", clause[:end].lower()) or [""])[-1]
+    if verb in _ORDER_TAKES_CLAUSE or re.match(r"(?:make|be) sure\b|see (?:to it|that)\b", clause, re.I):
+        return False                                                  # ("announce that dinner is ready", "tell everyone the timer is done", "make sure the lights are off")
+    words = re.findall(r"[a-z']+", clause[end:].lower())
+    if words and words[0] in _ORDER_PARTICLES:
+        words = words[1:]
+    for i, w in enumerate(words[:6]):
+        if w in _ORDER_PREDICATE:
+            return i == 0 or (words[i - 1] not in _ORDER_PRONOUN and not _ORDER_CLAUSE_WORDS & set(words[:i]))
+    return False
+
+
+def _wish_off_topic(clause: str) -> bool:
+    """"I want / I need / I would like ..." is an order only for something a tool does: a cue of ORDER_CUES within the first eight words of what he wants, not counting what he compares it with ("I need a
+    vacation more than a timer" wants a vacation). "I would like to hear ..." is the way he asks for music."""
+    m = ORDER_WISH.match(clause)
+    if not m or re.match(r"\s*to (?:hear|listen)\b", m.group(1), re.I):
+        return False
+    if re.match(r"\s*(?:a|an|some|another|more)\s+(?:new|better|nicer|bigger|smaller|cheaper|quieter|louder)\b", m.group(1), re.I):
+        return True                                                   # ("we want a new stereo for christmas", "I want a quieter fan": a thing to have, not something done)
+    near = " ".join(re.findall(r"[a-z']+", m.group(1).lower())[:8]).split(" than ")[0]
+    return not any(rx.search(near) for _, rx in ORDER_CUES)
+
+
+def _asks_ability(clause: str) -> bool:
+    """"can you set timers", "could you turn on lights": whether it can, not an order. After the verb comes a bare plural noun (one or two words, the last ending in -s) and nothing particular: no determiner,
+    number, place or pronoun ("can you set a timer", "can you set timers for ten minutes", "can you set kitchen timers", "can you play music" are orders)."""
+    m = ORDER_ABILITY_START.match(clause)
+    if not m:
+        return False
+    rest = re.findall(r"[a-z']+|\d+", clause[m.end():].lower())
+    if rest and rest[0] in _ORDER_PARTICLES:
+        rest = rest[1:]
+    if rest[-2:] in (["for", "me"], ["for", "us"]):
+        rest = rest[:-2]
+    if rest and rest[-1] == "please":
+        rest = rest[:-1]
+    if not rest or len(rest) > 2 or any(w in _ORDER_PARTICULAR or w.isdigit() for w in rest):
+        return False
+    return len(rest[-1]) > 3 and rest[-1].endswith("s") and not rest[-1].endswith(("ss", "us", "is"))
 
 
 ACK_SENTENCES = re.compile(r"(?<=[.!?])\s+|\n+")
@@ -297,32 +439,124 @@ STATE_CLAIM = re.compile(r"\b(?:lights?|lamps?|plugs?|outlets?|fans?|switch(?:es
                          + r"|^(?:the\s+)?(?:[\w']+\s+){0,2}(?:lights?|lamps?|plugs?|outlets?|fans?)\s+(?:on|off|out)\b" + _STATE_DET
                          + r"|\b(?:(?:i|we)(?:'ve| have)?\s+)?(?:turned|switched|flipped|dimmed|brightened|powered)\b[^.!?]{0,40}\b(?:on|off|out|up|down)\b"
                          + r"|^(?:turning|switching|flipping|dimming|brightening|lighting|powering)\b[^.!?]{0,40}\b(?:on|off|up|down|out)\b", re.I)
+# The same for the other tools (fix3:guards, the second review's core#8: the real Core answered "I need a pasta timer for ten minutes" with "Setting a timer for ten minutes." and called no tool): a sentence that
+# says the thing is being done or was done, judged only against an order for it. The key is the first tool of the ORDER_CUES group. (A claim of music with a name in it is musicguard's.)
+DONE_CLAIMS = {
+    "home_control": STATE_CLAIM,
+    "set_timer": re.compile(r"(?<!can )(?<!could )(?<!to )(?<!would )(?<!should )(?<!must )(?<!may )(?<!might )\b(?:set(?:ting)?|start(?:ed|ing)?|creat(?:ed|ing)|cancel+(?:ed|ing)|clear(?:ed|ing)|stopp(?:ed|ing))\b[^.!?]{0,40}\btimers?\b"
+                            r"|\btimers?\b[^.!?]{0,20}\b(?:started|running|ticking|going)\b", re.I),             # (not "I can SET a timer", "to SET one": an offer is no claim)
+    "set_alarm": re.compile(r"(?<!can )(?<!could )(?<!to )(?<!would )(?<!should )(?<!must )(?<!may )(?<!might )\b(?:set(?:ting)?|schedul(?:ed|ing)|creat(?:ed|ing)|cancel+(?:ed|ing))\b[^.!?]{0,40}\b(?:alarms?|reminders?)\b"
+                            r"|\bi(?:'ll| will) (?:wake|remind) you\b", re.I),
+    "list": re.compile(r"(?<!can )(?<!could )(?<!to )(?<!would )(?<!should )(?<!must )(?<!may )(?<!might )\b(?:add(?:ed|ing)|put(?:ting)?|remov(?:ed|ing)|clear(?:ed|ing)|cross(?:ed|ing)|tak(?:en|ing)|took)\b[^.!?]{0,40}\blists?\b", re.I),
+    "announce": re.compile(r"\bannounc(?:ed|ing)\b", re.I),
+}                                                                    # (no entry for the music: "Playing along: autumn moon ..." answers "play me a haiku"; what is claimed of the music is musicguard's, and BARE_ACK / the bank have "Paused.")
+
+
+def bank_phrase(sentence: str) -> bool:
+    """Is this sentence one of the closed bank the house says itself after a tool worked (fixed_phrases(): "Paused.", "Next.", "Volume five.", "Timer set for ten minutes.")? Said with no tool called it is a claim."""
+    return sentence.strip().rstrip(".!").lower() in {p.rstrip(".").lower() for p in fixed_phrases()}
+
+
+# A reply that says sorry and then still PROMISES or CLAIMS an action (fix4:guards, the third review's core#4; 3 of about 35 real second tries: "Right, my mistake. Let me cancel that timer for you.", "My mistake. Calling home_control
+# to turn off everything now."): "mistake" and "sorry" in HONEST are apologies, not a retraction, so that was spoken as the answer with nothing done. announces() says it: a promise (let me ..., calling, I'll, I will, going to), a claim
+# (I've cancelled ..., CLAIMED, DONE_CLAIMS) in a sentence that does not say not / never / nothing / cannot. A sentence with a condition or an offer ("Say it again and I'll do it") promises nothing (musicguard.sentences).
+ANNOUNCES = re.compile(r"\blet me (?!know\b|explain\b|see\b|think\b|say\b|check\b|tell\b|finish\b|try\b|guess\b|be\b|ask\b|correct\b|clarify\b|apologi[sz]e\b)\w+|\bcalling\b|\bi(?:'ll| will)\b|\b(?:going to|gonna)\b"
+                       r"|\bi(?:'ve| have| just| already)?\s+(?:cancel\w*|remov\w*|delet\w*|clear\w*|turned|switched|set|started|stopped|paused|skipped|added|announced|put|took|taken|done|fixed|changed|handled|played|queued|muted|dimmed)\b"
+                       r"|^\W*(?:(?:alright|okay|ok|fine|right|well|so|now|and)\W+)*(?:done|handled|all set)\b|\bconsider it done\b"      # ("all set" opens a sentence: "The seven o'clock alarm is all set." is the answer of a look, review4:seams)
+                       r"|^\W*(?:(?:alright|okay|ok|fine|right|well|so|now|and)\W+)*(?:cancell?ed|cleared|removed|deleted|announced)[.!\s]*$"      # (a sentence that is only "Cancelled." claims like "Done.": "Right. Cancelled. What alarm was it?" was spoken with both alarms set, review4:core)
+                       r"|(?:^\W*(?:(?:alright|okay|ok|fine|sorry|right|well|so|now|and|oh|whoops|oops)\W+)*|\bi(?:'m| am) (?:now |just )?)[a-z]+ing\s+\S[^.!?]{0,40}?\b(?:now|right away|immediately|this (?:very )?(?:second|moment))\b", re.I)
+#                      ("Setting that up now.", "I'm switching it off at this moment.": a sentence that BEGINS with the gerund, or is "I'm ...ing"; not "Gasoline is playing now." and not "Playing now: Gasoline.", the answers of a look)
+_SAYS_NOT = re.compile(r"\b(?:not|no|never|nothing|nobody|cannot|unable|neither|nor|still)\b|n't\b", re.I)      # ("still": 'the timer is still running' says nothing was changed)
+_NO_IDIOM = re.compile(r"\b(?:no|not a) (?:problem|worries|worry|trouble|bother|need|doubt|wonder)\b", re.I)         # ("No problem, I've turned them off." is no "no")
+
+
+_ASKING = re.compile(r"\b(?:want|wanted|wish|need|needs|should|would|could|can|may|might|shall|please|which)\b", re.I)      # (a request or a question is no claim: 'the alarm you want cancelled', measured on the real Core)
+
+
+def announces(words: str, claims: bool = True) -> bool:
+    """Does this reply still promise or claim an action, in a sentence that does not take it back with a not / no / never / nothing / cannot / n't / still? A promise or a perfect claim (ANNOUNCES) anywhere; with `claims`,
+    also a claim of what is done (CLAIMED, a DONE_CLAIMS rule) in a sentence that is no question and no request ('Please say which alarm you want cancelled.' is both an honest answer and a CLAIMED match). Without
+    `claims` only what the house says in the first person counts: a read answer is full of 'the alarm is set' and 'is on'."""
+    for s in musicguard.sentences((words or "").translate(_PLAIN_QUOTES)):
+        if "?" in s or _SAYS_NOT.search(_NO_IDIOM.sub(" ", s)):          # (a question promises and claims nothing: "Which alarm should I cancel?", "What time should I set it for?" are honest, review4:seams)
+            continue
+        if ANNOUNCES.search(s) or (claims and "?" not in s and not _ASKING.search(s) and (CLAIMED.search(s) or any(rx.search(s) for rx in DONE_CLAIMS.values()))):
+            return True
+    return False
+
+
 # What a quip says that is not a retraction ("Try not to trip over the furniture, monkey." has a "not" in it): taken out before HONEST looks for a retraction of the claim.
 QUIP_NEGATIONS = re.compile(r"\b(?:try|trying|careful|remember|sure|please|make sure)\s+not\s+to\b|\bno need\b|\bnothing (?:better|else|more) to do\b|\bnot that\b|\bnever fear\b|\bno wonder\b", re.I)
 # The backstop's nudge: the same words as ASK_AGAIN, naming only the tools its second try may use (retry_tools: the safe part of the list, see RETRY_NEVER).
 ASK_AGAIN_ONLY = ("[The house: you said that, but you called no tool, so NOTHING was done. If he asked for it, call the right tool now (you may use: {names}), then say what it answered; "
                   "if he did not, say plainly what you meant.]")
-# A tool call written as text that the house could not read (TEXT_CALL / _bare_action): it is never run with no arguments (production's music answers "I cannot do that to the music."), the model is asked again.
+# A tool call written as text that the house could not read (TEXT_CALL / _bare_action, or a bracket that starts with a tool's name and that TEXT_CALL cannot read at all, "[set_timer 90 tea]"): it is never run with no
+# arguments (production's music answers "I cannot do that to the music."), the model is asked again.
 TEXT_AGAIN = ("[The house: you wrote a tool call as text{named} and the house could not read it, so NOTHING was done. If he asked for it, call the tool itself now (the tool, not words about it), "
               "then say in one sentence what it answered; if he did not, say plainly what you meant.]")
 BARE_FILLERS = {"with", "using", "action", "the", "a", "an", "to", "do", "please", "is", "as", "of", "value", "tool", "call", "now"}                  # words around the one enum word of "[music] with action \"next\""
 # The persona is shared with flask-api, whose chat strips [SKIPPY_LEARN: {...}] / [TTS_ADJUST: {...}]; here they would be read aloud. Worse
 # (2026-11-01): one such line in the memory and Core wrote every tool call after it as text, "[list action="read" list="shopping"]".
-ANNOTATION = re.compile(r"\[(?:SKIPPY_LEARN|TTS_ADJUST):\s*\{.*?\}\s*\]", re.S)
+# Three shapes, none of them ever spoken (fix3:text, the second review's problem 1): the whole annotation (its JSON and the closing bracket); a bracket of the tag with no JSON in it; and one the token limit CUT
+# (3 of the 6 real ones were cut by the 160-token cap), from its bracket to the END of the words. The cut one has no closing bracket, which the first pattern needed, and the cut-back to a whole sentence
+# (whole_sentences) then landed INSIDE its text ("... Adds items. Reads lists.") and the rest of it was spoken: Brain._spoken strips it BEFORE that cut-back (strip_model_markup).
+ANNOTATION = re.compile(r"\[(?:SKIPPY_LEARN|TTS_ADJUST)(?::\s*\{.*?\}\s*\]|\b[^\]{}]*\]|\b.*\Z)", re.S | re.I)
 # Also "[play_music: what=everything, speaker=everywhere]" (a colon after the name, commas between: 2026-11-01, said "Done" and played nothing)
 # (fix2:guards: also "[music with action=quieter]", and a closer right after it, "[music action=next][/music]")
 TEXT_CALL = re.compile(r"\[(\w+):?(?:[\s,]+with)?((?:[\s,]+\w+=(?:\"[^\"]*\"|'[^']*'|[^\s,\]]+))*)\s*\](?:[ \t]*\[/\1\])?")
 TEXT_ARG = re.compile(r"(\w+)=(?:\"([^\"]*)\"|'([^']*)'|([^\s,\]]+))")
 TEXT_LINE = re.compile(r"(\w+)\s*[:=]\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s,\]]+))")        # one `key: value` line after a call written as "[music]" (Brain._call_lines); must be the whole line (fullmatch)
 # A call written as words where no tool is on offer (a routed answer, 2026-11-04: Core, handed a Mentat answer that missed, wrote "[ask_mentat: What is the half-life of carbon-14?]"
-# as its whole reply): it is never spoken, and the plain apology stands in.
-PHANTOM = re.compile(r"\[(?:ask_mentat|car_status)\b[^\]]*\]", re.I)
+# as its whole reply): it is never spoken, and the plain apology stands in. It knew two tools only (fix3:text, the second review's problem 7): Brain._phantom takes the name of ANY tool the brain has.
+def phantom_pattern(names) -> re.Pattern:
+    """A bracket that starts with the name of one of `names` ("[ask_mentat: What is ...]", "[set_timer seconds=90]"): a tool call written as words. Nothing matches when there are no names."""
+    names = sorted(map(re.escape, names), key=len, reverse=True)
+    return re.compile(r"\[(?:" + "|".join(names) + r")\b[^\]]*\]", re.I) if names else re.compile(r"(?!)")
+
+
+PHANTOM = phantom_pattern(("ask_mentat", "car_status"))
+# A tool call written in one of Core's OTHER dialects (fix4:guards, the third review's core#2; the real Core, "turn everything off": a code fence "```tool_call::home_control|name=everything|action=off```", and in a second reply
+# "[call: cancel_timers(label="pasta")]", "[Calling cancel_timers with label pasta]", "[tool_call cancel_timers]"). Nothing RUNS these and TOOL_MARKUP knows XML only, so they were spoken. A code fence (to its closing fence, else
+# to the end of the words), a bracket that OPENS with the verb of a call (call, calling, tool_call, use, run, invoke ...), a line from "tool_call" on. Ordinary speech has none of it ("[sighs]", "the tool was great", "I am calling it a night").
+CALL_DIALECT = re.compile(r"`{3}.*?(?:`{3}|\Z)"
+                          r"|\[\s*(?:tool[_ -]?calls?|function[_ -]?calls?|calls?|calling|called|invok(?:e|es|ed|ing)|us(?:e|es|ing)|run(?:s|ning)?|execut(?:e|es|ed|ing))\b[^\]\n]{0,200}\]"
+                          r"|\btool_calls?\b[^\n]*", re.I | re.S)
+
+
+def strip_call_dialects(words: str) -> str:
+    """`words` without a tool call written as text in one of Core's other dialects (CALL_DIALECT). Words with none of it are returned as they are, byte for byte."""
+    if not words or ("`" not in words and "[" not in words and "tool_call" not in words.lower()):
+        return words
+    out = CALL_DIALECT.sub(" ", words)
+    return words if out == words else re.sub(r"\s+([.,!?;:])", r"\1", re.sub(r"\s{2,}", " ", out)).strip()
 # Skippy Core's own tool-call markup, written into its words ("<tool_call><function=weather><parameter=query>Gold Canyon</parameter></function></tool_call>", the review of 2026-11-05: what a call with no tools on
 # offer answered after four routed commands, 6 of 8 times). Never spoken, never kept: a call to the end (or to the end of the words, when the model ran out of room inside it), a lone function or
 # parameter, a stray tag. Brain._spoken strips it from every model reply, so no path can say it or store it. (Nothing RUNS it: only a structured call, or a bracket TEXT_CALL knows, does.)
 # Also the picture sentinel of the persona file it shares with the portal chat, "[IMAGE: <prompt>]" (3 of 117 worded replies on the real Core ended with one, and it was read aloud): there is no picture here.
-TOOL_MARKUP = re.compile(r"<tool_call\b.*?(?:</tool_call\s*>|\Z)|<function=.*?(?:</function\s*>|\Z)|<parameter=.*?(?:</parameter\s*>|\Z)|</?(?:tool_call|function|parameter)\b[^>]*>|\[IMAGE:[^\]]*(?:\]|\Z)",
-                         re.I | re.S)
+_TOOL_BLOCKS = r"<tool_call\b.*?(?:</tool_call\s*>|\Z)|<function=.*?(?:</function\s*>|\Z)|<parameter=.*?(?:</parameter\s*>|\Z)"
+_TOOL_IMAGE = r"\[IMAGE:[^\]]*(?:\]|\Z)"
+# (a stray tag, "</function>": its ">" never coming, it ran to the end of the text, and a scan from each of thousands of them was quadratic: _tool_markup cleans what is inside it with _TOOL_MARKUP_FLAT, which has no stray tags, since none can match there)
+TOOL_MARKUP = re.compile(_TOOL_BLOCKS + r"|(?P<tag></?(?:tool_call|function|parameter)\b[^>]*(?:>|\Z))|" + _TOOL_IMAGE, re.I | re.S)
+_TOOL_MARKUP_FLAT = re.compile(_TOOL_BLOCKS + "|" + _TOOL_IMAGE, re.I | re.S)
+# Skippy Core's reasoning, when the server leaves it in the words (fix3:text, the second review's problem 6: 2 of 20 real text-call replies held a lone "</think>", "[music]\nnext\n</think>\n\n[music]\nnext"):
+# a whole block; a closing tag whose opening was never written (everything before it is the reasoning); an opening tag the model ran out of room after (to the end). Never spoken, never kept. A tool call the model wrote
+# as text INSIDE it is still the call it meant, though: "[music]" and the line "music(action='quieter')" (the real Core, 1 of 16 for "turn the music down a notch"; the text-call rescue ran it before the reasoning was cut,
+# the third review's core#1). strip_model_markup puts such a call back in front of the words (_reasoned_calls).
+# Each of these ends in an alternative for the end of the text, as TOOL_MARKUP's blocks do (fix4:text, the third review's core#10): a scan that finds no closing ends there, instead of starting again at every opening after it
+# (quadratic: '<think>x' * 20000 took 11.5 s). What a match that ran to the end of the text covered is left as it was (_sweep cuts only a match with a `cut` group): the patterns that needed their closing matched nothing there.
+THINK = re.compile(r"<think\b[^>]*(?:>.*?(?:(?P<cut></think\s*>)|\Z)|\Z)", re.I | re.S)
+THINK_CLOSE = re.compile(r"\A(?P<cut>).*</think\s*>", re.I | re.S)
+THINK_OPEN = re.compile(r"<think\b[^>]*(?:(?P<cut>>.*\Z)|\Z)", re.I | re.S)
+# The note that starts his message, copied into a reply and cut by the token limit (NOTE_ECHO needs its closing bracket), and the words that END inside the name of a bracket tag the persona writes ("... [SKIPPY_LE"):
+# neither is words. (strip_model_markup)
+NOTE_CUT = re.compile(r"\[Right now:[^\]]*(?:\]|(?P<cut>\Z))")
+CUT_TAGS = ("SKIPPY_LEARN", "TTS_ADJUST", "IMAGE")
+CUT_TAIL = re.compile(r"\[([A-Za-z_]{0,12})\Z")
+# The same for the NAME of one of Core's XML tags ("Sure thing <func", "</param") and for the start of the clock note ("[Right no"): a reply the token limit cut there, with no sentence end before it for whole_sentences to cut
+# back to, spoke the stub (fix4:text, the third review's code3#7).
+CUT_XML = ("think", "tool_call", "function", "parameter")
+CUT_XML_TAIL = re.compile(r"</?([A-Za-z_]{0,9})\Z")
+NOTE_STUB = re.compile("(?:" + "|".join(re.escape("[Right now:"[:n]) for n in range(10, 1, -1)) + r")\Z")
 
 
 _PLACE = r"(?P<place>everywhere|everyone|everybody|the whole house|the house|upstairs|downstairs|(?:the |in the )?(?:living room|kitchen|bedroom|theater|office))"
@@ -694,7 +928,17 @@ _EXAMPLE = re.compile(r"\n+Q: [^\n]*\nA: [^\n]*(?:\n[ \t]+[^\n]*)*")
 _SAYS_NO = re.compile(r"\bI (?:cannot|can't|can not|do not|don't)\b", re.I)
 
 
+# Nor does it keep the persona's ANNOTATION sections (the Captain's decision, 2026-11-06, the third review's core3#9): "Keyword Memory" teaches the model to end a reply with [SKIPPY_LEARN: {...}] and "TTS Voice
+# Adjustment" with [TTS_ADJUST: {...}] (and, at its end, a nickname example in SKIPPY_LEARN again). Only flask-api's chat and the portal read those; the house has no consumer, strips them and keeps
+# nothing: on the real Core 12 of 18 provoked replies carried one and 6 of 18 were nothing else ("remember that the throne light is the bedroom lamp" -> "Hm. I had nothing to say, which is unlike me.").
+# So the house voice leaves out every "## " section of the file that names one of the two tags: the whole section, found by its heading and never by line numbers (flask-api keeps the file as it is).
+_ANNOTATED = re.compile(r"\b(?:SKIPPY_LEARN|TTS_ADJUST)\b", re.I)
+_SECTION = re.compile(r"(?m)^(?=## )")
+
+
 def house_persona(text: str) -> str:
+    sections = _SECTION.split(text)                                   # (what comes before the first heading, then one part per "## " section, each from its heading to the next one)
+    text = "".join(s for i, s in enumerate(sections) if i == 0 or not _ANNOTATED.search(s))
     return _EXAMPLE.sub(lambda m: "" if _SAYS_NO.search(m.group(0)) else m.group(0), text)
 
 
@@ -880,7 +1124,7 @@ def _direction(span: str) -> bool:
                 or (re.search(r"(?:s|ing|ed)$", first) and first not in _NOT_ACTIONS and "'" not in first))      # (no action has an apostrophe in it: "tomorrow's", "it's")
 
 
-NOTE_ECHO = re.compile(r"\[Right now:[^\]]*\]\s*")                  # Brain.context(), copied into a reply
+NOTE_ECHO = re.compile(r"\[Right now:[^\]]*(?:(?P<cut>\]\s*)|\Z)")  # Brain.context(), copied into a reply (a copy cut by the token limit is NOTE_CUT's; this one ends at the end of the text, as THINK does)
 
 
 def strip_stage_directions(text: str) -> str:
@@ -898,6 +1142,178 @@ def whole_sentences(text: str) -> str:
     """`text` cut back to its last whole sentence: a reply the model ran out of room on must not stop in the middle of a word. Unchanged when it has no sentence end at all."""
     ends = list(re.finditer(r"[.!?]+[\"')\]]*(?=\s|$)", text or ""))
     return text[:ends[-1].end()].strip() if ends else text
+
+
+def _sweep(rx: re.Pattern, text: str, cut: list | None = None, gone: str = " ") -> str:
+    """`text` with the matches of `rx` that have a `cut` group cut out (`gone` takes their place, the pieces cut are added to `cut`). The other matches (they ran to the end of the text without finding their closing, see
+    THINK) stay as they were."""
+    def one(m: re.Match) -> str:
+        if m.group("cut") is None:
+            return m.group(0)
+        if cut is not None:
+            cut.append(m.group(0))
+        return gone
+    return rx.sub(one, text)
+
+
+def _tool_markup(m: re.Match) -> str:
+    """What takes the place of a match of TOOL_MARKUP: a space; for a stray tag that never found its ">" (it covers the rest of the text) the rest cleaned of the markup that can still be in it."""
+    tag = m.group("tag")
+    return _TOOL_MARKUP_FLAT.sub(" ", tag) if tag is not None and ">" not in tag else " "
+
+
+# A tool call the model wrote as text inside its reasoning, as strip_model_markup puts it back (fix4:text, the third review's core#1): a bracket that starts with the name of one of the brain's tools ("[music action=quieter]",
+# "[list_timers]") and, when nothing is inside the bracket, what gives its arguments: the rest of its line and up to two lines after it that LOOK like arguments (_arg_kind), never words (Brain._text_calls reads the same shapes).
+_CALL_AT = re.compile(r"\[([A-Za-z_]\w*)")                                                # (the name first; the rest of the bracket is looked at only for a name that is a tool's: _CALL_END)
+_CALL_END = re.compile(r"([^\]\n]{0,160})\]")
+_ARG_KV = re.compile(r"\w+\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,\]]+)")                  # "action: next", 'action: "next"', "level=5"
+_ARG_CALL = re.compile(r"\w+\s*\([^()\n]*\)\s*;?")                                         # "music(action='quieter')"
+_ARG_PLAIN = re.compile(r"[A-Za-z_\"'\s:>→.-]*")                                           # the words of a bare action: "next", 'with action "next"', "→ next"
+_ARG_FILLERS = frozenset("with using action the a an to do please is as of value tool call now".split())
+_THINK_TAG = re.compile(r"</?think\b[^<>]*>", re.I)                                        # (no "<" inside: a tag that never closes stops at the next one, so many of them cost no more than one)
+
+
+def _arg_kind(line: str, tool: str, names=(), plain=None) -> str | None:
+    """What a line after a bracket is, when it can be part of the call: "kv" ("action: next"), "one" (the one word an action is: "next", 'with action "next"', "[next]", "music(action='quieter')"), "end" (the closer
+    "[/music]"); None for anything else, which is words, and for a bracket that is a call of its own: "[cancel_alarm]" under "[list_timers]" is another call (the one that would never be restored), not an argument.
+    `plain` (review4:seams): when given, a line of plain words is the word of an action only if that word is one of `plain` (the actions the tools have), so "Okay." under a bracket stays what it is: words."""
+    line = line.strip()
+    if not line or len(line) > 80:
+        return None
+    if re.fullmatch(r"\[/\w+\]|/\w+", line):
+        return "end"
+    body = re.sub(r"\s*\[/\w+\]$", "", line)                       # ("action: next [/music]")
+    if _ARG_KV.fullmatch(body):
+        return "kv"
+    if (word := re.fullmatch(r"\[(\w+)\]", body)) is not None:
+        return None if word.group(1) in names else "one"
+    if _ARG_CALL.fullmatch(body):
+        return "one"
+    if _ARG_PLAIN.fullmatch(body):
+        left = [w for w in re.findall(r"[A-Za-z_]+", body.lower()) if w not in _ARG_FILLERS and w != tool.lower()]
+        return "one" if len(left) == 1 and (plain is None or left[0] in plain) else None
+    return None
+
+
+def _call_extent(text: str, start: int, tool: str, tail: re.Match, names=(), plain=None) -> tuple[str, int]:
+    """(the call written in `text` from `start`, where it ends): `tool`'s bracket (`tail` its end) and, when nothing is inside it, the arguments that follow it, as written ("[music]" + "music(action='quieter')";
+    "[music] action: next"; "[music]" + "action: next" + "level: null"): the rest of its line and the next two lines, those that look like arguments and stop at the first that does not."""
+    call, kinds, end = text[start:tail.end()], [], tail.end()
+    if tail.group(1).strip():
+        return call, end                                           # (its arguments are inside it: "[music action=quieter]")
+    pos = tail.end()
+    for i, line in enumerate(text[pos:pos + 400].split("\n")[:3]):
+        here, pos = pos, pos + len(line) + 1
+        if not line.strip():
+            continue
+        kind = _arg_kind(line, tool, names, plain)
+        if kind is None or (kinds and (kinds[-1] == "end" or (kinds[-1] == "one" and kind != "end") or (kinds[-1] == "kv" and kind not in ("kv", "end")))):
+            break
+        kinds.append(kind)
+        call += (" " if i == 0 else "\n") + line.strip()
+        end = here + len(line)
+    return call, end
+
+
+def _call_text(text: str, start: int, tool: str, tail: re.Match, names=()) -> str:
+    """The call written in `text` from `start` (the bracket of `tool`, `tail` its end) and the arguments that follow it (_call_extent)."""
+    return _call_extent(text, start, tool, tail, names)[0]
+
+
+def _cut_calls(text: str, names, plain=frozenset()) -> str:
+    """`text` with every call written in it cut out: a bracket that starts with the name of one of `names` and, when nothing is inside it, the argument lines after it that _call_extent reads ("[music]" + "action: next",
+    + "next", + "/music"). A wiper that took only the bracket left those lines to be SPOKEN (review4:seams: the REASK_MUSIC second try, an unreadable "[music]" + "speaker: kitchen", a reply whose model went away after a
+    structured call, all with a call put back from the reasoning). Plain words under a bracket go only when they are an action of the tools (`plain`)."""
+    out, pos = [], 0
+    while m := _CALL_AT.search(text, pos):
+        if m.group(1) in names and (tail := _CALL_END.match(text, m.end())):
+            out += [text[pos:m.start()], " "]
+            pos = _call_extent(text, m.start(), m.group(1), tail, names, plain)[1]
+        else:
+            out.append(text[pos:m.end()])
+            pos = m.end()
+    out.append(text[pos:])
+    return "".join(out)
+
+
+def _written_calls(text: str, names, lead: bool = False) -> list[tuple]:
+    """[(tool, call)] for every call written as text in `text` with the name of one of `names` (_call_text); with `lead`, [(tool, call, the text of its line before it)]."""
+    out, pos = [], 0
+    while m := _CALL_AT.search(text, pos):
+        pos = m.end()
+        if m.group(1) in names and (tail := _CALL_END.match(text, pos)):
+            call = _call_text(text, m.start(), m.group(1), tail, names)
+            out.append((m.group(1), call, text[text.rfind("\n", 0, m.start()) + 1:m.start()]) if lead else (m.group(1), call))
+            pos = tail.end()
+    return out
+
+
+def _call_key(call: str) -> str:
+    """A call to compare with another: the white space, the quotes and the case make no difference."""
+    return re.sub(r"\s+", " ", call.replace('"', "").replace("'", "")).strip().lower()
+
+
+def _undoes(tool: str, call: str) -> bool:
+    """Does this call undo or announce (RETRY_NEVER; RETRY_NEVER_ACTIONS: a list's remove and clear)? A call the model merely CONSIDERED in its reasoning must not cancel an alarm, clear a list or speak in every room."""
+    return tool in RETRY_NEVER or any(re.search(rf"\b{re.escape(action)}\b", call, re.I) for action in RETRY_NEVER_ACTIONS.get(tool, ()))
+
+
+_RETRACTS = re.compile(r"\b(?:did not|didn['’]t|have not|haven['’]t|could not|couldn['’]t|cannot|can['’]t|unable to|nothing was|not done|sorry|apologi[sz]e|my mistake)\b", re.I)
+# A negation just before the call, on its line ("nothing is playing, so I should not call [music action=next]", "no need to call [list_timers]", "instead of [music action=next]"): the model ruled that call out (review4:core).
+_NOT_MEANT = re.compile(r"(?:\bnot\b|n't\b|\bnever\b|\bno need to\b|\binstead of\b|\brather than\b|\bavoid\b)\s+(?:[\w']+\s+){0,3}$", re.I)
+
+
+def _reasoned_calls(spans: list[str], names, kept: str) -> str:
+    """The tool calls the model wrote as text inside its reasoning (`spans`, the pieces cut), one per line, as Brain._text_calls reads them: only those that begin with the name of a tool the brain has (`names`: "[speak]" and
+    "[sighs]" are not calls), never one that undoes or announces (_undoes), never one a negation just before it rules out (_NOT_MEANT), never one the words (`kept`) hold themselves or contradict, and each call once.
+    Nothing when there is no such call."""
+    names = frozenset(names)
+    found = [(tool, call) for span in spans for tool, call, lead in _written_calls(_THINK_TAG.sub("\n", span), names, lead=True) if not _undoes(tool, call) and not _NOT_MEANT.search(lead)]       # (the tags are line ends: "[music]</think>" is a bracket alone on its line)
+    if not found:
+        return ""                                                  # (the usual case: the words are not even looked at)
+    # review4:seams: the words after the reasoning are the model's last word. A call of their own is its decision (the reasoning's was a draft: "[music action=quieter]" and then "[music action=louder]" ran both), and so are
+    # a denial, a retraction and a question: a call it weighed and then refused is no call ("[home_control name=fridge action=off]", "I cannot do that." switched the fridge off).
+    own = _written_calls(kept, names)
+    if own or denies(kept) or "?" in kept or _RETRACTS.search(kept):
+        return ""
+    seen, out = set(), []
+    for tool, call in found:
+        if tool == "home_control" and ((RISKY_THING.search(call) and not RETRY_GUARDED.search(call)) or RETRY_GROUPS.search(call)):
+            continue                                               # (what has to keep running, a whole set of plugs: never from a thought, as a second try never touches them)
+        if (key := _call_key(call)) not in seen and len(out) < 3:     # (three calls at most: a reasoning that loops through drafts is no list of orders)
+            seen.add(key)
+            out.append(call)
+    return "\n".join(out)
+
+
+def _model_markup(words: str, names=None) -> tuple[str, str]:
+    """(the tool calls the model wrote as text inside its reasoning, the words): strip_model_markup in its two parts, for Brain._spoken, which cuts the words back to a whole sentence and must not touch the calls."""
+    words = _sweep(NOTE_ECHO, words or "", gone="").strip()
+    if "<" not in words and "[" not in words:
+        return "", words
+    out, spans = words, []
+    if "think" in out.lower():
+        out = _sweep(THINK_OPEN, _sweep(THINK_CLOSE, _sweep(THINK, out, spans), spans), spans)
+    out = ANNOTATION.sub(" ", _sweep(NOTE_CUT, TOOL_MARKUP.sub(_tool_markup, out)))
+    if (cut := CUT_TAIL.search(out)) and any(tag.startswith(cut.group(1).upper()) for tag in CUT_TAGS):
+        out = out[:cut.start()]
+    elif (cut := CUT_XML_TAIL.search(out)) and any(tag.startswith(cut.group(1).lower()) for tag in CUT_XML):
+        out = out[:cut.start()]
+    elif cut := NOTE_STUB.search(out):
+        out = out[:cut.start()]
+    kept = re.sub(r"\s{2,}", " ", out).strip() if out != words else words
+    return (_reasoned_calls(spans, names, kept) if names and spans else ""), kept
+
+
+def strip_model_markup(words: str, names=None) -> str:
+    """What a model wrote, without what is not words: the ONE cleaning of everything the house says that Core wrote, for Brain._spoken (every reply of the brain) and Daily.word (the routines). Never in speech or
+    in the memory: the note that starts his message (copied into a reply, cut or not), Core's reasoning (a block, a lone "</think>" and all before it, an unclosed "<think>" and all after it), its tool-call markup
+    and the picture sentinel (TOOL_MARKUP), and the persona's annotations (ANNOTATION: whole, without JSON, or CUT by the token limit, from the bracket to the end; and the words that end inside the name of one,
+    "... [SKIPPY_LE"). It comes BEFORE the cut-back to a whole sentence (whole_sentences), which would otherwise land inside an annotation's text. Words with none of it are returned as they are.
+    `names` (the brain's tool names; the routines have no tools and pass none): a tool call the model wrote as text INSIDE its reasoning ("[music]" and the line "music(action='quieter')") is not lost with it but put back, one
+    per line, in front of the words, so that the text-call rescue (Brain._text_calls) sees it as if the model had written it in its words (fix4:text, core#1; _reasoned_calls says which)."""
+    calls, kept = _model_markup(words, names)
+    return f"{calls}\n{kept}" if calls and kept else calls or kept
 
 
 # ── a length of time, the way he says it ("five minutes", "an hour and a half", "half an hour", "ninety seconds") ───────────────────────────────────────────────────────────────────────
@@ -1253,6 +1669,7 @@ class Brain:
         self._warm_done = threading.Event()                           # set whenever no warm-up is in flight: a reply that began during one waits for it (WARM_WAIT_S)
         self._warm_done.set()
         self._acks = 0                                                # how many confirmations were picked from the closed banks: the next one is the next phrase (no randomness: the tests)
+        self._confirm: dict | None = None                             # the home_control call his spoken yes confirms in the reply in progress ({"name", "action"}), else None (_confirm_given, run_tool)
 
     def _lap(self, key: str, seconds: float) -> None:
         """Add to the last reply's timing. Never raises: a number for the log is not worth a reply."""
@@ -1394,15 +1811,26 @@ class Brain:
         except Exception:                                             # noqa: BLE001
             return None
 
-    @staticmethod
-    def _spoken(resp) -> str:
+    def _spoken(self, resp=None, restore: bool = True) -> str:
         """The words of a model reply. One the model ran out of room on (stop_reason max_tokens) is cut back to its last whole sentence: a spoken answer never stops in the middle of a word. The
         note that starts his message ("[Right now: ...]") is context for the model: should it copy the note into its reply, the copy is never spoken. Nor is Skippy Core's own tool-call markup
-        (TOOL_MARKUP): every path takes its words from here, so none can say it, summarise it or keep it in the memory."""
-        words = NOTE_ECHO.sub("", " ".join(b.text for b in list(resp.content) if getattr(b, "type", "") == "text")).strip()
-        if ("<" in words or "[" in words) and (bare := TOOL_MARKUP.sub(" ", words)) != words:
-            words = re.sub(r"\s{2,}", " ", bare).strip()
-        return whole_sentences(words) if getattr(resp, "stop_reason", None) in ("max_tokens", "length") else words
+        (TOOL_MARKUP): every path takes its words from here, so none can say it, summarise it or keep it in the memory. The same for the persona's annotations (ANNOTATION), whole or CUT by the token limit, and for
+        Core's reasoning (THINK): strip_model_markup takes them out BEFORE the cut-back to a whole sentence, which would land inside an annotation's text (fix3:text).
+        A tool call the model wrote as text INSIDE its reasoning is put back in front of the words (strip_model_markup; the text-call rescue runs it as it ran it when the reasoning was still in the words, fix4:text, core#1), but
+        only while NOTHING has run in this reply: that is when _text_calls reads these words. The others (the wording of a routed answer, of Mentat's, of a call that ran) are cleaned with the wipers of a call, which would leave the
+        lines of such a call behind. Called on the class (`Brain._spoken(resp)`, no brain), it restores none. `restore=False` for a caller that does not hand the words to _text_calls (review4:code: the music re-ask,
+        _second_try with no gate, spoke the lines of a restored call, "action: next", with its words): it restores none either."""
+        brain, resp = (self, resp) if resp is not None else (None, self)
+        names = None
+        if brain is not None and restore and not getattr(brain, "actions", True):
+            try:
+                names = {t["name"] for t in brain.tools()}
+            except Exception:                                         # noqa: BLE001 — the names of the tools are not worth a reply
+                names = None
+        calls, words = _model_markup(" ".join(b.text for b in list(resp.content) if getattr(b, "type", "") == "text"), names)
+        if getattr(resp, "stop_reason", None) in ("max_tokens", "length"):
+            words = whole_sentences(words)
+        return f"{calls}\n{words}" if calls and words else calls or words
 
     def _ack(self, bank: tuple) -> str:
         """The next phrase of a closed bank, in turn: the same commands in the same order are said the same way (no randomness: the tests), and no two in a row alike."""
@@ -1487,8 +1915,35 @@ class Brain:
         self._keep([{"role": "user", "content": "(Nobody spoke: you bring something up yourself.)"}, {"role": "assistant", "content": text}])
         self.offered = {"note": note, "at": now}
 
+    def _confirm_given(self, heard: str, now: float) -> dict | None:
+        """The call his spoken yes confirms in the reply that begins now, else None (see CONFIRM_ASKED): the last tool answer of the exchange before this one was the house asking him to confirm a call of
+        home_control, that was at most CONFIRM_FOR_S ago, and his words now are a short yes (says_yes). Read from the memory, so a conversation that was forgotten, an offer made since, a quiet gap or any other
+        exchange in between has already lost it."""
+        try:
+            if not self._turns or now - self._last > CONFIRM_FOR_S:
+                return None
+            turn = self._turns[-1]
+            use, answer = turn[-3]["content"][0], turn[-2]["content"][0]
+            if use.get("type") != "tool_use" or use.get("name") != "home_control" or answer.get("type") != "tool_result" or CONFIRM_ASKED not in str(answer.get("content")):
+                return None
+            asked = {"name": str((use.get("input") or {}).get("name") or ""), "action": str((use.get("input") or {}).get("action") or "")}
+            return asked if says_yes(heard, asked) else None
+        except (IndexError, KeyError, TypeError, AttributeError):
+            return None
+
+    def _checked_confirm(self, args: dict) -> dict:
+        """The args of a home_control call with the model's own `confirm` taken out, unless it is the call his yes just confirmed (the same thing, the same action): then it stays, once."""
+        said = self._confirm
+        if said and args.get("confirm") is True and _same_thing(args.get("name"), said["name"]) \
+                and str(args.get("action") or "").strip().lower().replace(" ", "_") == said["action"].strip().lower().replace(" ", "_"):
+            self._confirm = None                                         # (one yes, one door: asked again, it asks again)
+            return args
+        return {k: v for k, v in args.items() if k != "confirm"}
+
     def run_tool(self, name: str, args: dict) -> str:
         args = args if isinstance(args, dict) else {}
+        if name == "home_control" and "confirm" in args:               # the ONE place a house call runs: only he says yes (a second try, a call written as text and a route all come through here)
+            args = self._checked_confirm(args)
         began = time.monotonic()
         try:
             out = self._run_tool(name, args)
@@ -1639,6 +2094,7 @@ class Brain:
 
     def _reply(self, heard: str) -> str:
         now = self.clock()
+        self._confirm = self._confirm_given(heard, now)               # (before the memory and the quiet clock move on: his yes is read against the exchange before this one)
         self.actions = []
         self._ran = []
         self.guard = (None, None)
@@ -1694,7 +2150,7 @@ class Brain:
                 text = self._spoken(resp)
             except Exception:                                         # noqa: BLE001 — it happened (and stayed away): say it plainly
                 text = ""
-            text = strip_stage_directions(ANNOTATION.sub("", PHANTOM.sub("", text)).strip())       # (an annotation of the persona's would be read aloud, as on every other path)
+            text = strip_stage_directions(ANNOTATION.sub("", self._wipe_calls(self._phantom(text))).strip())       # (an annotation of the persona's would be read aloud, as on every other path; nor is a call in another dialect: review4:seams)
             text = text or (result.split(") ", 1)[-1] if tool == "audiobook" else UNWORDED.get(tool) or own_answer(result) or TRIED)       # (nothing to say: the tool's own short answer, else a plain line)
             self._remember(heard, text)
             return text
@@ -1713,7 +2169,9 @@ class Brain:
             messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": c.id, "content": self.run_tool(c.name, c.input)} for c in calls]})
         text = ANNOTATION.sub("", text).strip()
         if text and not self.actions:
-            text = self._text_calls(text, messages)
+            text = self._text_calls(text, messages, ordered=not NOT_AN_ORDER.search(heard))      # (the second try after a call that could not be read is behind the gate of the one after a denial: fix4:guards, code3#1)
+        elif text:
+            text = self._wipe_calls(text)                              # (a tool ran, and the words may still carry a call written as words: a bracket, a code fence ... never spoken, fix4:guards, core3#2)
         prev = next((m["content"] for m in reversed(self.history) if m["role"] == "assistant" and isinstance(m["content"], str)), "")
         action, why = musicguard.classify(heard, prev, text, [a["tool"] for a in self.actions], happened=self._music_happened)
         self.guard = (action, why)                                    # the house log keeps it: the next count of claims needs no log archaeology
@@ -1723,7 +2181,7 @@ class Brain:
         # A denial is judged BEFORE the logging-only tier below and before CLAIMED (the review of 2026-11-05): musicguard files "start a pasta timer", "put on the kitchen light", "crank the heat",
         # "pause the timer" under the music commands, so its shadow tier won and 26 of 123 logged commands never got the second try; and "I cannot set an alarm from here" matched CLAIMED
         # ("set an alarm") and was asked "you said that, but NOTHING was done". A reply that also claims something in another clause, or gives a figure, takes those branches as before.
-        denied = quiet and not claimed and not figure and denies(text) and not RISKY.search(heard) and not ASKS_ABILITY.search(heard)
+        denied = quiet and not claimed and not figure and denies(text) and not RISKY_THING.search(heard) and not ASKS_ABILITY.search(heard)      # (RISKY_THING: a "no" about the router or the fridge stands too)
         # "Done." and nothing done (the Captain's oldest complaint): a few words that only acknowledge, to an order for a tool this voice has, and no tool called. Judged FIRST: musicguard's tiers below
         # file "turn off the living room lights" under music (a "retract" that says "I have not played any music") or only log it, and neither gets the order done.
         nothing_done = quiet and not claimed and not figure and not denied and why != "history" and self._acknowledges(heard, text)
@@ -1745,7 +2203,11 @@ class Brain:
             print(f"[brain] (shadow, {why}) a music command and no music tool: {text[:80]!r}", flush=True)       # the loose and silent tiers: logged for a week, the reply stands
         elif claimed:
             print(f"[brain] claimed without a tool: {text[:80]!r}: asked again", flush=True)
-            text = self._second_try(text, messages, ASK_AGAIN, self.tools(), UNCLAIM, tools_ran=lambda: bool(self.actions))
+            # Behind the gate of the other two second tries (fix3:guards, the second review: "I do not need the alarm on sunday" was answered "Alarm cancelled." with no tool, and this try, offered every tool
+            # with the model's own `confirm`, ran cancel_alarm with nothing named: both alarms gone): reads always, a change only when his words are an order, never cancel / clear / announce, no `confirm`.
+            # A genuine "cancel my alarm" that was claimed and not done is then told plainly (UNCLAIM), as on the backstop: the alarm he wakes to is never cancelled by a second guess.
+            ordered = order_shaped(heard) and not NOT_AN_ORDER.search(heard)
+            text = self._second_try(text, messages, ASK_AGAIN, self.tools(), UNCLAIM, tools_ran=lambda: bool(self.actions), ordered=ordered)
         elif figure:
             print(f"[brain] a physical figure with no Mentat call: {text[:80]!r}: Mentat asked now", flush=True)   # Core answered physics from memory, once as "Mentat" (2026-11-04)
             self.guard = ("force", "physics")
@@ -1785,16 +2247,21 @@ class Brain:
         judged (the stage directions are out), it is BARE_WORDS at most and asks nothing, and the FIRST or the LAST sentence of it opens like an acknowledgement (BARE_ACK: "Done, Captain.", or a quip
         and then "Done.") or, for an order for the house's lights, plugs or fans, some sentence is a plain claim of state (STATE_CLAIM: "The kitchen lights are on, Captain."); and nothing is taken
         back (HONEST, less a quip's "try not to"). His words must be an order in shape (order_shaped: a statement that names a light is no order), never a question about the house (NOT_AN_ORDER) or
-        about what it can do (ASKS_ABILITY), never about what can hurt (RISKY: a lock, a door, the garage)."""
+        about what it can do (ASKS_ABILITY), never about what can hurt (RISKY_THING: a lock, a door, the garage, the router, the fridge ...).
+        fix3:guards: a reply of up to BARE_NAMING_WORDS counts when it names the thing he ordered; a sentence of the house's own closed bank ("Paused.", "Next.", "Volume five.": said only after a tool
+        worked), a claim of the thing in the order's own tool (DONE_CLAIMS: "Setting a timer for ten minutes.") or a "you're welcome" is a claim like a "Done." """
         heard = heard or ""
         said = strip_stage_directions(text or "").strip()
-        if not said or "?" in said or len(said.split()) > BARE_WORDS or self.guard == ("reask", "claim"):          # (a claim of music to a request for music has its own second try: REASK_MUSIC)
+        words = len(said.split())
+        if not said or "?" in said or words > BARE_NAMING_WORDS or self.guard == ("reask", "claim"):          # (a claim of music to a request for music has its own second try: REASK_MUSIC)
             return False
-        if NOT_AN_ORDER.search(heard) or RISKY.search(heard) or ASKS_ABILITY.search(heard) or not order_shaped(heard):
+        if NOT_AN_ORDER.search(heard) or RISKY_THING.search(heard) or ASKS_ABILITY.search(heard) or not order_shaped(heard):
             return False
         names = {t["name"] for t in self.tools()}
-        wanted = [tools for tools, rx in ORDER_CUES if names & set(tools) and rx.search(heard)]
+        wanted = [(tools, rx) for tools, rx in ORDER_CUES if names & set(tools) and rx.search(heard)]
         if not wanted:
+            return False
+        if words > BARE_WORDS and not any(rx.search(said) for _, rx in wanted):          # (a longer reply is a claim only when it names the light, the timer ... he asked for)
             return False
         sentences = [s for s in ACK_SENTENCES.split(said) if s.strip()]
         for i in dict.fromkeys((0, len(sentences) - 1)):               # the first sentence, then the last
@@ -1802,7 +2269,10 @@ class Brain:
             if opening is not None:                                    # (what is left once the opening is out: "No trouble at all." opens with a "no" that is no refusal)
                 rest = " ".join(sentences[:i] + [sentences[i][opening.end():]] + sentences[i + 1:])
                 return not HONEST.search(QUIP_NEGATIONS.sub(" ", rest))
-        if any("home_control" in tools for tools in wanted) and any(STATE_CLAIM.search(s) for s in sentences):
+            if bank_phrase(sentences[i]):
+                return not HONEST.search(QUIP_NEGATIONS.sub(" ", " ".join(sentences[:i] + sentences[i + 1:])))
+        claims = [DONE_CLAIMS[tools[0]] for tools, _ in wanted if tools[0] in DONE_CLAIMS]
+        if any(rx.search(s) for rx in claims for s in sentences) or any(ACK_TAIL.search(s) for s in sentences):
             return not HONEST.search(QUIP_NEGATIONS.sub(" ", said))
         return False
 
@@ -1819,7 +2289,32 @@ class Brain:
         if ordered is None:
             return self.run_tool(c.name, c.input)
         args = {k: v for k, v in (c.input if isinstance(c.input, dict) else {}).items() if k != "confirm"}
-        return self.run_tool(c.name, args) if retry_may(c.name, args, ordered) else NOT_DONE
+        return self.run_tool(c.name, args) if retry_may(c.name, args, ordered) else self._refuse()
+
+    def _refuse(self) -> str:
+        """NOT_DONE, the answer to a call a second try may not make; and the note of how many calls had run when it was refused (_unsound)."""
+        self._refused_at = len(self.actions)
+        return NOT_DONE
+
+    def _unsound(self, new: str) -> bool:
+        """Are these the last words of a second try in which nothing that CHANGES anything ran, and do they still say it was done? (fix4:guards, the third review's core#3: a look at the alarms, a cancel that was refused,
+        and then 'There was a 09:00 alarm. I've cancelled it.' with both alarms still set; on the real Core also a refused cancel, a look, and then 'The Sunday alarm is at 09:00. I've cancelled it for you.') If the model
+        was told no (NOT_DONE) and has looked at nothing since, its last word came right after the refusal: the words must own it (_honest). Otherwise (it looked, or was never refused) the words answer the look
+        ('what alarms do I have': the write refused, the look run, 'Two alarms, monkey.') unless they still promise or claim it in the first person (announces without `claims`: a read answer is full of 'the alarm is
+        set'). A change that ran is the claim made true."""
+        if self._changed():
+            return False
+        at = getattr(self, "_refused_at", None)
+        return not self._honest(new) if at is not None and len(self.actions) <= at else announces(new, claims=False)
+
+    def _changed(self) -> bool:
+        """Did a tool that CHANGES something run in this reply? (A look, is_read, changes nothing: it never makes a claim true.)"""
+        return any(not is_read(a["tool"], a["args"]) for a in self.actions)
+
+    def _honest(self, new: str) -> bool:
+        """Do the words of a second try take the claim back, or ask? A retraction (HONEST), a denial or a question, that says no music is done (music_claimed) and promises or claims nothing more (announces: 'Right, my mistake.
+        Let me cancel that timer for you.' is an apology and a promise, not a retraction)."""
+        return bool(new) and not musicguard.music_claimed(new) and not announces(new) and (bool(HONEST.search(new)) or denies(new) or "?" in new)
 
     def _needs_arguments(self, name: str) -> bool:
         """Does this tool mean nothing without arguments (its schema requires some, or has an `action` to choose), or do too much with none (RETRY_NEVER: cancel_alarm and cancel_timers with nothing named
@@ -1831,7 +2326,7 @@ class Brain:
         """A call written as `[music]next[/music]`, as `[music]` + `[next]` + `/music`, or as `[music] with action "next"` (the real Core, 3 of 7 for "could you skip to the next track"): its one argument is a bare
         word, an `action` the tool really has. -> ({"action": word}, characters of `rest` used) when the text right after the bracket (up to its closer, else the first line) is that word and the words that go
         around it (BARE_FILLERS) and nothing else; ({}, 0) for a sentence ("Skipping to the next track now."), two actions, none, or an action that undoes (RETRY_NEVER_ACTIONS)."""
-        props = next(((t.get("input_schema") or {}).get("properties") or {} for t in self.tools() if t["name"] == name), {})
+        props = self._tool_props(name)
         enum = [str(a) for a in ((props.get("action") or {}).get("enum") or [])]
         if not enum or name in RETRY_NEVER:
             return {}, 0
@@ -1850,35 +2345,70 @@ class Brain:
             return {"action": words[0]}, used
         return {}, 0
 
+    def _tool_props(self, name: str) -> dict:
+        """The arguments a tool really has (the properties of its schema); {} for a tool that has none, or is not here."""
+        return next(((t.get("input_schema") or {}).get("properties") or {} for t in self.tools() if t["name"] == name), {})
+
+    def _tool_brackets(self, text: str, names) -> list[str]:
+        """The tools whose NAME opens a bracket of `text`, in the order written ("[set_timer 90 tea]", "[play_music: genre=jazz, speaker=living room]"): a call that was meant, whatever TEXT_CALL makes of its
+        arguments. (An `action` word alone is not one: "[pause]" may be a stage direction. A closer is no call.) fix4:guards, the third review's core#6: nor is a stage direction that happens to open with the
+        name of a tool that is an English word ("[music swells]", "[news anchor voice]", "[weather report voice]"): that one is a call only when what follows the name looks like arguments (a colon, an equals sign, a
+        digit, a parenthesis) or is nothing; a name that is an identifier (set_timer, play_music: it has an underscore) is a call whatever follows ("[play_music jazz]")."""
+        if not text or "[" not in text or not names:
+            return []
+        found = re.findall(r"\[(" + "|".join(sorted(map(re.escape, names), key=len, reverse=True)) + r")\b([^\]\n]{0,160})\]", text)
+        return [name for name, rest in found if "_" in name or not rest.strip() or re.search(r"[:=(\d]", rest) or self._says_an_action(name, rest)]
+
+    def _says_an_action(self, name: str, rest: str) -> bool:
+        """Does what follows a tool's name in its bracket say one of that tool's ACTIONS, or the word "action"? Then it is the call written in plain words ("[music with quieter]", "[music next]",
+        "[music action quieter]", "[list add milk]": 6 of the 43 real replies to "turn the music down a notch" were the first, and with core3#6's rule alone they were wiped as stage directions and the
+        words that came with them ("There. Quieter.") spoken, nothing done), not a stage direction ("[music swells]", "[music with a flourish]")."""
+        enum = {str(a).lower() for a in ((self._tool_props(name).get("action") or {}).get("enum") or [])}
+        return bool(set(re.findall(r"[a-z_]+", rest.lower())) & (enum | {"action"}))
+
+    def _phantom(self, text: str) -> str:
+        """`text` without a tool call written in it as words, for a call that offers no tools (the wording of a routed answer, Mentat's): a bracket that starts with the name of ANY tool this brain has
+        (PHANTOM knew only ask_mentat and car_status), whatever it holds. Any other bracket ("[nonsense a=1]") stays: it is not a call."""
+        return phantom_pattern({t["name"] for t in self.tools()} | {"ask_mentat", "car_status"}).sub("", text)
+
     def _wipe_calls(self, text: str, names=None, every: bool = False) -> str:
         """`text` without the tool calls written in it as words: every bracket that starts with the name of one of this brain's tools or with an `action` one of them has, whatever it holds ("[music with
         action quieter]", "[set_timer 90 tea]", "[music mode=weird]", "[volume 5]": the real Core wrote that last one for "turn the music down a notch"), and the closers ("[/music]"); with `every`, also the
-        calls TEXT_CALL reads whatever their name. A bracket that starts with any other word stays ("[nonsense a=1]")."""
-        if not text or "[" not in text:
+        calls TEXT_CALL reads whatever their name. A bracket that starts with any other word stays ("[nonsense a=1]"). fix4:guards (the third review's core#2) also the other dialects of a call written as
+        words (CALL_DIALECT: a code fence, "[call: ...]", "[Calling ...]", "[tool_call ...]") and the function way, "music(action='quieter')"; text with none of it is returned as it is, byte for byte."""
+        if not text or ("[" not in text and "`" not in text and "(" not in text and "tool_call" not in text.lower()):
             return text
         names = names if names is not None else {t["name"] for t in self.tools()}
-        out = TEXT_CALL.sub(" ", text) if every else text
-        heads = set(names) | {str(a) for t in self.tools() for a in ((((t.get("input_schema") or {}).get("properties") or {}).get("action") or {}).get("enum") or [])}
+        actions = {str(a) for t in self.tools() for a in ((((t.get("input_schema") or {}).get("properties") or {}).get("action") or {}).get("enum") or [])}
+        out = _cut_calls(text, names, {a.lower() for a in actions}) if "[" in text else text      # (a bracket takes the argument lines under it with it: review4:seams)
+        out = TEXT_CALL.sub(" ", out) if every else out
+        heads = set(names) | actions
         if heads:
             out = re.sub(r"\[/?(?:" + "|".join(sorted(map(re.escape, heads), key=len, reverse=True)) + r")\b[^\]\n]{0,160}\]", " ", out)
+        out = strip_call_dialects(out)
+        if names:
+            out = re.sub(r"\b(?:" + "|".join(sorted(map(re.escape, names), key=len, reverse=True)) + r")\((?=\s*\)|[^()\n]*[=\"'])(?:[^()\n]|\([^()\n]*\))*\)", " ", out)      # (empty, or with an `=` or a quote in it: "list(s)" is a word)
         if out == text:
             return text
         return re.sub(r"\s+([.,!?;:])", r"\1", re.sub(r"\s{2,}", " ", out)).strip()
 
     def _second_try_denied(self, text: str, messages: list, heard: str = "") -> str:
         """One more go after "I cannot ..." with no tool called, told the tools it really has. A tool that runs is its answer; if none does, the first reply stands (it may be true).
-        The menu is the safe part of the tool list (retry_tools): it looks at anything, changes something only when his words are an order, and never undoes or announces. The call is
+        What it may DO is the safe part of the tool list (retry_tools): it looks at anything, changes something only when his words are an order, and never undoes or announces; the nudge names only
+        those tools and every call it makes passes retry_may. The menu it is SHOWN is the whole list, exactly what the turn's own calls were made with (fix3:guards, the second review's code#8): Core
+        keeps its prompt cache per tool list, and the cut menu was read from scratch (7.8 to 44 s measured, the room deaf meanwhile; 2 s with the whole list). The call is
         optional and the room is deaf while it waits, so it waits RETRY_PATIENCE_S at most, and nothing that goes wrong in it ever costs him the first reply."""
         ordered = not NOT_AN_ORDER.search(heard or "")
-        tools = retry_tools(self.tools(), ordered)
-        if not tools:
+        allowed = retry_tools(self.tools(), ordered)
+        if not allowed:
             return text
+        self._refused_at = None                                       # (nothing was refused yet: _refuse, _unsound)
         messages += [{"role": "assistant", "content": text},
-                     {"role": "user", "content": DENIED.format(names=", ".join(sorted(t["name"] for t in tools)), asked="" if ordered else ASKED_ONLY)}]
+                     {"role": "user", "content": DENIED.format(names=", ".join(sorted(t["name"] for t in allowed)), asked="" if ordered else ASKED_ONLY)}]
         new, last = "", ""
         try:
             for _ in range(3):
-                resp = self._create(need_words=True, patience=RETRY_PATIENCE_S, model=self.model, max_tokens=SPEAK_TOKENS, system=self.system(), messages=messages, tools=tools)
+                resp = self._create(need_words=True, patience=RETRY_PATIENCE_S, model=self.model, max_tokens=SPEAK_TOKENS, system=self.system(), messages=messages, tools=self.tools())
                 blocks = list(resp.content)
                 new = self._spoken(resp)
                 calls = [b for b in blocks if getattr(b, "type", "") == "tool_use"]
@@ -1891,7 +2421,7 @@ class Brain:
                         last = self.run_tool(c.name, args)
                         results.append(last)
                     else:
-                        results.append(NOT_DONE)
+                        results.append(self._refuse())
                 messages.append({"role": "assistant", "content": [self._dump(b) for b in blocks]})
                 messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": c.id, "content": r} for c, r in zip(calls, results)]})
         except Exception as e:                                        # noqa: BLE001 — the model stayed away (Dropped), answered with a failure, a tool broke: the first reply stands
@@ -1899,6 +2429,9 @@ class Brain:
         new = ANNOTATION.sub("", new).strip()
         if new and not self.actions:                                  # a call written as words ("[list_timers]"): through the same gate as a real one
             new = self._text_calls(new, messages, allow=lambda n, a: retry_may(n, a, ordered), patience=RETRY_PATIENCE_S)
+        new = self._wipe_calls(new)                                   # (a call written in another dialect, or one a tool that ran left behind, is never words: fix4:guards, core3#2)
+        if self.actions and self._unsound(new):
+            return text                                               # (a look, a change that was refused and then 'I've cancelled it': the first reply stands, fix4:guards, core3#3)
         return (new or last or text) if self.actions else text
 
     def _ask_mentat_now(self, heard: str) -> str:
@@ -1907,10 +2440,10 @@ class Brain:
         messages = self._prefix() + [{"role": "user", "content": self._user_turn(heard, f"[The ask_mentat tool's answer for this request: {result}]")}]
         try:
             resp = self._create(need_words=True, model=self.model, max_tokens=WORDING_TOKENS, system=self.system(), messages=messages)
-            words = self._spoken(resp)
+            words = self._spoken(resp, restore=False)
         except Exception:                                             # noqa: BLE001 — it stayed away: the plain apology below
             words = ""
-        return ANNOTATION.sub("", TEXT_CALL.sub("", PHANTOM.sub("", words))).strip() or "Mentat answered, and then my brain wandered off. Ask me again."
+        return ANNOTATION.sub("", self._wipe_calls(TEXT_CALL.sub("", self._phantom(words)))).strip() or "Mentat answered, and then my brain wandered off. Ask me again."      # (review4:seams: nor a call in another dialect)
 
     def _second_try(self, text: str, messages: list, nudge: str, tools: list[dict], fallback: str, tools_ran=None, ordered: bool | None = None, merge: bool = False) -> str:
         """One more go after a claim with no tool: `nudge` says so, `tools` are what it may call. A tool that runs is its answer; otherwise its words stand only when they take
@@ -1918,6 +2451,7 @@ class Brain:
         retry_may, never the model's own `confirm`), also for a call it writes as words: the try after a bare "Okay." to an order is not allowed to undo or announce. `merge`: the first reply is NOT
         shown again; the nudge joins his message instead (a model shown a call written as text as its own last turn writes it again: 9 of 9 on the real Core)."""
         ran = tools_ran or self._ran_music
+        self._refused_at = None                                       # (nothing was refused yet: _refuse, _unsound)
         if merge and messages and messages[-1].get("role") == "user" and isinstance(messages[-1].get("content"), str):
             messages[-1] = {"role": "user", "content": messages[-1]["content"] + "\n\n" + nudge}
         else:
@@ -1929,7 +2463,7 @@ class Brain:
             except Dropped:
                 break
             blocks = list(resp.content)
-            new = self._spoken(resp)
+            new = self._spoken(resp, restore=ordered is not None)       # (a call written inside its reasoning is put back only where _text_calls reads the words, just below: with no gate it is not)
             calls = [b for b in blocks if getattr(b, "type", "") == "tool_use"]
             if not calls:
                 break
@@ -1937,24 +2471,47 @@ class Brain:
             messages.append({"role": "user", "content": [{"type": "tool_result", "tool_use_id": c.id, "content": self._run_call(c, ordered)} for c in calls]})
         if ordered is not None and new and not ran():                  # a call written as words ("[home_control name=lamp action=on]"): through the same gate as a real one
             new = self._text_calls(ANNOTATION.sub("", new).strip(), messages, allow=lambda n, a: retry_may(n, a, ordered), patience=RETRY_PATIENCE_S)
-        if ran():
-            return new or text
-        honest = bool(new) and not musicguard.music_claimed(new) and (bool(HONEST.search(new)) or denies(new) or "?" in new)
-        return new if honest else fallback
+        new = self._wipe_calls(new)                                   # (fix4:guards, core3#2: a call written in another dialect, or one a tool that ran left behind, is not words; nothing left is the fallback)
+        if ran() and not self._unsound(new):                          # (a tool ran, or a look answered; a refused change followed by "I've cancelled it" is not done: the words must own it, core3#3)
+            return new or (text if self._changed() or merge else fallback)      # (no words after it: the first reply of a CLAIM stands only if a change ran, a look never makes it true; after a call written as text (merge) there is no claim, and _asked_again says the tool's own answer)
+        return new if self._honest(new) else fallback
 
-    def _text_calls(self, text: str, messages: list, allow=None, patience: float | None = None) -> str:
+    def _asked_again(self, text: str, messages: list, names, meant: list, ordered: bool | None = None) -> str:
+        """A tool call written as text that the house could not read or run, and nothing ran: the model is asked again, with the tools. The model is NOT shown its bracket as its own last turn (it wrote it again:
+        9 of 9 on the real Core, 0.1 s each): the nudge (TEXT_AGAIN) joins his message and names the tool it `meant`. A tool that runs is the answer; a second reply that calls nothing says plainly that it was not done.
+        `ordered` (fix4:guards, code3#1) puts the try behind the gate of the other second tries (_run_call: retry_may, never the model's own `confirm`): a bracket like '[cancel_alarm] Noted.' was followed by a call
+        of cancel_alarm that cancelled both alarms."""
+        said = self._wipe_calls(text, names, every=True)
+        out = self._second_try(said or "Hm.", messages, TEXT_AGAIN.format(named=f" ({', '.join(meant[:2])})" if meant else ""), self.tools(), UNCLAIM, tools_ran=lambda: bool(self.actions), ordered=ordered, merge=True)
+        if self.actions and not said and out == "Hm.":                # (the tool ran and the model never worded it: the tool's own answer, not the placeholder)
+            out = str(self.actions[-1]["outcome"])
+        return self._wipe_calls(out, names, every=True) or (str(self.actions[-1]["outcome"]) if self.actions else "") or out
+
+    def _text_calls(self, text: str, messages: list, allow=None, patience: float | None = None, ordered: bool | None = None) -> str:
         """A tool call written as words ("[list action="read" list="shopping"]") is run as the call it meant, and the model words the answer. `allow`, when given, is the gate of the
-        second try after a denial (retry_may): a call it refuses is not run, and no call runs with the `confirm` the model wrote (that is his yes, aloud)."""
+        second try after a denial (retry_may): a call it refuses is not run, and no call runs with the `confirm` the model wrote (that is his yes, aloud). Only the arguments the tool has are kept ("[music
+        mode=weird]" is a call with none); one that cannot be read, or a bracket that starts with a tool's name and that TEXT_CALL cannot read at all ("[set_timer 90 tea]"), runs nothing and the model is
+        asked again (_asked_again), unless this is a second try already (`allow`): its calls are dropped and the words stand. `ordered` (fix4:guards, the third review's code3#1) is the gate of THAT second try, the
+        one after a call that could not be read: his words are not a question (not NOT_AN_ORDER), so it looks at anything and changes something, but never cancels, clears or announces on its own, never touches
+        what has to keep running, and never with the `confirm` the model writes (_run_call). None (a second try already, or no gate asked for): as before."""
         names = {t["name"] for t in self.tools()}
         found = [m for m in TEXT_CALL.finditer(text) if m.group(1) in names]
         if not found:
-            return self._wipe_calls(text, names)                      # (a bracket that starts with the name of a tool, "=" in it or not, is never spoken)
+            # A bracket that starts with the name of a tool, "=" in it or not, is never spoken. When it is a call TEXT_CALL cannot read ("[set_timer 90 tea] Ninety seconds.", "[play_music: genre=jazz, speaker=living
+            # room]") and nothing ran, the words that came with it are a claim with nothing behind it: the model is asked again, as for a call that was read and had no arguments (fix3:text, problem 7).
+            meant = sorted(set(self._tool_brackets(text, names))) if allow is None else []
+            if not meant:                                             # no call in it, or this is a second try already (its calls are dropped, the words stand)
+                return self._wipe_calls(text, names)
+            print(f"[brain] a tool call written as text that could not be read: {meant} in {text.strip()[:60]!r}", flush=True)
+            return self._asked_again(text, messages, names, meant if len(meant) < 2 else [], ordered)
         consumed, readable, unread = [], [], []
         for m in found:
             args = {}
             for a in TEXT_ARG.finditer(m.group(2)):
                 v = next(g for g in a.groups()[1:] if g is not None)
                 args[a.group(1)] = int(v) if v.isdigit() else {"true": True, "false": False}.get(v.lower(), v)
+            props = self._tool_props(m.group(1))
+            args = {k: v for k, v in args.items() if k in props}      # only the arguments the tool has ("[music mode=weird]" ran music with a `mode`): none left is a call with none, read below
             if not args:                                              # "[music]" with the arguments on the lines after it ("action: next"): the real Core wrote that for "skip to the next track" (3 of 96)
                 args, used = self._call_lines(m.group(1), text[m.end():])
                 consumed.append((m.end(), m.end() + used))
@@ -1969,19 +2526,13 @@ class Brain:
             print(f"[brain] a tool call written as text that could not be read: {[m.group(0)[:60] for m in found][:4]}", flush=True)
             if allow is not None:                                     # (inside a second try already: the calls are dropped, the words stand)
                 return self._wipe_calls(text, names, every=True)
-            # The model is NOT shown its bracket as its own last turn (it wrote it again: 9 of 9 on the real Core, 0.1 s each): the nudge joins his message, and names the tool it meant.
-            meant = sorted({m.group(1) for m in found}) if len(lost) < 2 else []
-            said = self._wipe_calls(text, names, every=True)
-            out = self._second_try(said or "Hm.", messages, TEXT_AGAIN.format(named=f" ({', '.join(meant[:2])})" if meant else ""), self.tools(), UNCLAIM, tools_ran=lambda: bool(self.actions), merge=True)
-            if self.actions and not said and out == "Hm.":            # (the tool ran and the model never worded it: the tool's own answer, not the placeholder)
-                out = str(self.actions[-1]["outcome"])
-            return self._wipe_calls(out, names, every=True) or (str(self.actions[-1]["outcome"]) if self.actions else "") or out
+            return self._asked_again(text, messages, names, sorted({m.group(1) for m in found}) if len(lost) < 2 else [], ordered)       # (names the tool it meant, unless it is a pile)
         results, done = [], []
         for m, args in readable:
             if allow is not None:
                 args.pop("confirm", None)
                 if not allow(m.group(1), args):
-                    results.append(NOT_DONE)
+                    results.append(self._refuse())
                     continue
             if (m.group(1), args) in done:                            # the same call written twice in one reply ("[music] with action next ... [music] with action next") is one call
                 continue
@@ -1993,7 +2544,7 @@ class Brain:
                                                  + ". Now say the answer aloud, in plain words. Never write a tool call as text: call the tool.]"}]
         try:
             resp = self._create(need_words=True, patience=patience, model=self.model, max_tokens=WORDING_TOKENS, system=self.system(), messages=messages)
-            words = self._spoken(resp)
+            words = self._spoken(resp, restore=False)                    # (the wording of a call that ran or was refused: nothing in it is read as a call again)
         except Exception:                                             # noqa: BLE001 — the tool's own words will do
             words = ""
         words = ANNOTATION.sub("", self._wipe_calls(words, names, every=True)).strip()
@@ -2004,7 +2555,7 @@ class Brain:
     def _call_lines(self, name: str, rest: str) -> tuple[dict, int]:
         """The arguments of a call written as `[music]` with its arguments on the lines that follow ("action: next", "level: 5", "what: null" skipped): the lines straight after the bracket (or on
         its line) that read `key: value` with a key the tool really has. -> (arguments, characters used); nothing used when the first line after it is a sentence."""
-        props = next(((t.get("input_schema") or {}).get("properties") or {} for t in self.tools() if t["name"] == name), {})
+        props = self._tool_props(name)
         args, used = {}, 0
         for i, line in enumerate(rest.splitlines(keepends=True)[:12]):
             body = line.strip()

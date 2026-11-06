@@ -69,12 +69,24 @@ WEATHER_RE = re.compile(r"\b(?:weather|forecast|rain(?:ing|y)?|umbrella|jacket|c
                         r"what (?:should|do) i (?:wear|bring|need)|dress for)\b", re.I)
 COAST_RE = re.compile(r"\b(?:tides?|surf|waves?|beach|ocean|sea|coast|swell|buoy)\b", re.I)
 NOT_WEATHER = re.compile(r"\b(?:news|headlines?|song|album|play|music|book|story|poem|haiku|joke|movie|film|game)\b", re.I)
+# A COMMAND or a plain STATEMENT about a temperature is not a question about the weather (the third review, 2026-11-06: "set the temperature to 45" was answered with the forecast, and so were
+# "set the oven temperature to 350" and "the water temperature is 60"): only the word "temperature" made them one. The thermostat route has taken the settings it understands before this runs,
+# so what is left is an oven, a pool, a water heater, a change of degrees ("turn the temperature up") or a choice ("68 or 70?"): the model's. A question that merely mentions one stays here.
+_NUMBER = r"(?:\d|(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)\b)"
+TEMPERATURE_COMMAND = re.compile(
+    rf"\b(?:set|change|put|adjust|raise|lower|preheat)\b[^?!.]*?\b(?:temperature|temp)\b[^?!.]*?\b(?:to|at)\s+{_NUMBER}"
+    rf"|\b(?:set|make|keep)\s+(?:(?:the|my|our)\s+)?(?:\w+\s+)?(?:temperature|temp)\s+(?:(?:at|to)\s+)?{_NUMBER}"
+    rf"|(?:^\W*|[,.;:!?]\s*|\b(?:and|then|please|skippy|hey|ok|okay|can you|could you|would you|will you)\s+)(?:turn|bring|raise|lower|adjust|increase|decrease|crank)\s+(?:(?:the|my|our)\s+)?(?:\w+\s+)?(?:temperature|temp)\b", re.I)
+TEMPERATURE_STATEMENT = re.compile(rf"\b(?:temperature|temp)\s+(?:is|was|reads?|says?|shows?)\s+(?:about\s+|around\s+|at\s+|over\s+|under\s+)?{_NUMBER}", re.I)
+OTHER_WEATHER = re.compile(WEATHER_RE.pattern.replace("temperature|", "", 1), re.I)         # (everything WEATHER_RE knows but the bare word "temperature")
 
 
 def pre_route(heard: str) -> dict | None:
     """Tool args for a plain weather question ("do I need an umbrella tomorrow?", "how's the surf?"); None = the model decides."""
     h = heard or ""
     if not WEATHER_RE.search(h) or NOT_WEATHER.search(h):
+        return None
+    if TEMPERATURE_COMMAND.search(h) or (TEMPERATURE_STATEMENT.search(h) and not OTHER_WEATHER.search(h)):
         return None
     if re.search(r"\btomorrow\b", h, re.I):
         when = "tomorrow"

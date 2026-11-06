@@ -599,7 +599,7 @@ def test_fixbr_a_true_reply_that_names_the_lights_by_place_is_no_music_claim_aft
                         ("turn off the theater lights", "I turned off the theater lights."), ("turn off the track stove light", "I turned off the track stove light."),
                         ("lights off in the living room", "I turned off the lights in the living room."), ("turn off the lights upstairs", "I switched the lights upstairs off.")):
         assert musicguard.classify(heard, "", said, ["home_control"]) == (None, None), said
-        assert musicguard.classify(heard, "", said, []) != (None, None), said              # (with no tool at all the same words still are what they were)
+        assert musicguard.classify("hello there", "", said, []) != (None, None), said      # (to words that are no order for the lights the same reply still is what it was; to an order for them it is a claim about the HOUSE, not the music: the backstop's, fix3:guards)
 
 
 def test_fixbr_the_model_that_switched_a_light_called_track_is_not_told_it_played_music():

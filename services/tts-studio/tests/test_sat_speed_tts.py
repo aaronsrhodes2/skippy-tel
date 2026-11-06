@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("flask")
-np = pytest.importorskip("numpy")
+try:
+    import numpy as np
+except ImportError:                    # CI's python:3.12-slim has none: only the tests that make audio skip (app.py imports numpy only when a voice renders)
+    np = None
+needs_numpy = pytest.mark.skipif(np is None, reason="numpy is not installed: this test makes audio (CI's services image has none; the pure tests run there)")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app as studio  # noqa: E402
 
@@ -43,6 +47,7 @@ def skippy(f5, prepared="fast"):
     return s
 
 
+@needs_numpy
 def test_speedtts_a_line_never_reads_the_reference_from_disk_again():
     f5 = FakeF5()
     s = skippy(f5)
@@ -61,6 +66,7 @@ def test_speedtts_a_line_never_reads_the_reference_from_disk_again():
     assert call["model"] is f5.ema_model and call["vocoder"] is f5.vocoder
 
 
+@needs_numpy
 def test_speedtts_each_line_is_a_new_random_take_unless_a_seed_is_given():
     f5 = FakeF5()
     s = skippy(f5)
@@ -70,6 +76,7 @@ def test_speedtts_each_line_is_a_new_random_take_unless_a_seed_is_given():
     assert len(set(f5.seeds[:3])) == 3 and all(isinstance(x, int) and x >= 0 for x in f5.seeds) and f5.seeds[3] == 1234
 
 
+@needs_numpy
 def test_speedtts_a_different_f5_goes_back_to_the_long_way_for_good():
     f5 = FakeF5()
     s = skippy(f5, prepared=f5.prepared(fail=TypeError("unexpected keyword argument")))
@@ -151,6 +158,7 @@ def speak(monkeypatch, body, voice=None):
     return voice.said, r, data
 
 
+@needs_numpy
 def test_speedtts_whole_renders_a_short_reply_in_one_run_and_the_default_is_unchanged(monkeypatch):
     text = "The bedroom lamp is on and the porch light is dim. I left the kitchen alone, since you did not ask."
     said, r, data = speak(monkeypatch, {"text": text, "voice": "skippy", "whole": True})
@@ -164,6 +172,7 @@ def test_speedtts_whole_renders_a_short_reply_in_one_run_and_the_default_is_unch
     assert 1 < len(said) < 8 and all(len(p) <= 186 for p in said) and " ".join(said) == long_text
 
 
+@needs_numpy
 def test_speedtts_a_chunk_with_no_audio_is_skipped_not_a_broken_mp3(monkeypatch):
     class Silent(Voice):
         def say(self, text, seed=None):

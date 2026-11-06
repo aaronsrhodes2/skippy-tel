@@ -156,5 +156,8 @@ to come home. Home is `SKIPPY_HOME_LATLON`, else where the car spends the night.
 6. Restart the hub: only by its python PIDs, and only after `state/hub.log` shows no woke/heard/said/routine/starter activity for 2 minutes.
    `tools/hub_run.sh` starts it again by itself. The log says `garage: connected to the ratgdo at ...`.
 7. Say "Skippy, is the garage door open?". Then "open the garage door", which he asks you to confirm out loud.
+   The yes is checked in code (`says_yes`, `Brain._confirm_given`), not by the model: "yes", "yeah, do it", "go ahead", "uh, yes" open it; a sarcastic or hedged one
+   ("yeah right", "yeah, sure", "sure, sure") is asked again on purpose, a yes older than 120 s counts for nothing, and a yes to a question the model asked by itself
+   counts for nothing. A model that shortens the name it was asked about ("garage" for "garage door") costs one more yes. This has never been tried on the real opener.
 8. Try the auto-close once: leave the door open, drive off. Within about half a minute of passing 150 m it closes, and a DM says so. To
    test it without driving, leave `GARAGE_AUTOCLOSE=0` until then.

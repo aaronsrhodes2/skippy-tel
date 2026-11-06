@@ -14,6 +14,9 @@ records nothing is judged as before, a start-up warm waits for a turn) passed th
 * P11  the start-up warm's retries ignored the 60 s "Core is away" pause and another room's warm in flight (a second prefill of the same prompt beside the first).
 * P13  (the survivors of the mutation run in this region) a start-up warm waits while a turn is being thought.
 * the hub's Gate.tts asks the voice gate for a whole reply ("whole": true), so the studio renders a short reply in one F5 run (0.35-1.1 s saved per 2-3 sentence reply).
+* K7, K18 (the third review of 2026-11-05) two changes to the keeper were "caught" only because the test that caught them never ended: `turn_ended` leaving an entry at 0 in `thinking` (the
+  start-up warm waits on a turn that is over, for ever) and a start-up warm with no bound on its tries. A regression there would have HUNG a run. The fake Clock now stops a loop that
+  has slept 10,000 times with Runaway (the run fails with a message), the entry at 0 has a test of its own, and so does the bound on the tries.
 
 Self-contained (its own fakes), so a change to another test file's helpers cannot break it. The brain's side (Brain.warm, Brain.timing) is another file's: it is a fake here."""
 import asyncio
@@ -39,11 +42,20 @@ class Stop(BaseException):
     """Raised by the test clock when a never-ending loop has run as long as the test wants (not an Exception: nothing under test may swallow it)."""
 
 
-class Clock:
-    """The keeper's clock and sleep, moved by the test: a sleep takes no real time, moves `t`, runs what the test scheduled for that moment, and stops the loop at `until`."""
+class Runaway(BaseException):
+    """Raised by the test clock (or a test's brain) when a loop under test goes on far past anything an honest run does: an exit that never comes (a gate that never opens, a count that never
+    reaches its bound). The run FAILS with this message; it does not hang. Not an Exception either: nothing under test may swallow it."""
 
-    def __init__(self, t=1000.0, until=None):
-        self.t, self.until, self.slept, self.due = t, until, [], []
+
+class Clock:
+    """The keeper's clock and sleep, moved by the test: a sleep takes no real time, moves `t`, runs what the test scheduled for that moment, and stops the loop at `until`.
+    A loop that has slept `max_sleeps` times and is still going is stopped with Runaway (the third review of 2026-11-05, K7 and K18: a start-up warm stuck on a gate that never opens, or a
+    count with no bound, slept for ever and the run never ended)."""
+
+    MAX_SLEEPS = 10_000                  # the longest honest run in this file sleeps 176 times (measured, the 60-seed stress): a runaway is stopped in under a second, an honest one never
+
+    def __init__(self, t=1000.0, until=None, max_sleeps=MAX_SLEEPS):
+        self.t, self.until, self.slept, self.due, self.max_sleeps = t, until, [], [], max_sleeps
 
     def __call__(self):
         return self.t
@@ -54,6 +66,8 @@ class Clock:
     async def sleep(self, seconds):
         self.slept.append(seconds)
         self.t += seconds
+        if len(self.slept) > self.max_sleeps:
+            raise Runaway(f"the loop under test slept {self.max_sleeps} times ({self.t - 1000:.0f} simulated seconds) and is not done: it waits for something that never happens")
         for item in sorted([d for d in self.due if d[0] <= self.t], key=lambda d: d[0]):
             self.due.remove(item)
             item[1]()
@@ -441,6 +455,75 @@ def test_fixhub_p13_a_start_up_warm_waits_while_a_turn_is_being_thought():
         return a.warm_at
     warm_at = asyncio.run(go())
     assert warm_at and warm_at[0] >= 1007                         # it would compete with the real call
+
+
+# ═══ K7 and K18 (the third review of 2026-11-05): the start-up warm cannot wait for ever, and no test here can run for ever ═══
+def test_fixhub_k7_the_turn_that_ends_last_leaves_no_entry_behind_and_a_warm_may_start():
+    """`thinking` counts the turns being thought; the keeper treats a non-empty dict as "a turn is being thought". An entry left at 0 after the last turn ended (the review's mutant) is such a
+    turn for ever: no warm would ever start again, and the start-up warm would sit on its one-second gate until the hub was restarted. (The two tests above only noticed because they never
+    ended; with the clock's bound they fail with a message, and this one fails at the first line that is wrong.)"""
+    keeper, clock, _ = new_keeper()
+    a, b = Brain(clock=clock), Brain(clock=clock)
+    keeper.turn_started(a)
+    keeper.turn_started(a)                                        # two turns of one brain at once
+    keeper.turn_ended(a)
+    assert keeper.thinking == {id(a): 1}
+    assert not keeper._may_warm(a, 0)                             # one is still being thought
+    keeper.turn_ended(a)
+    assert keeper.thinking == {} and keeper._may_warm(a, 0)       # the last one ended: nothing is left, and a warm may start
+    keeper.turn_ended(a)                                          # (an end with no start, as when a turn was refused: no entry, no negative count)
+    assert keeper.thinking == {}
+    keeper.turn_started(b)
+    keeper.turn_ended(b, ok=False)                                # a failed turn leaves nothing either (and takes Core away for a minute)
+    assert keeper.thinking == {} and keeper.away_until == clock() + hub_mod.WARM_AWAY_S
+    keeper.turn_started(b)
+    keeper.turn_ended(b, model=False)                             # nor does a turn that never asked the model
+    assert keeper.thinking == {}
+
+
+def test_fixhub_k7_a_start_up_warm_that_waited_for_a_turn_runs_once_the_turn_is_over_and_a_stuck_gate_fails_the_test_it_does_not_hang_it():
+    async def go(leave_entry):
+        keeper, clock, _ = new_keeper(clock=Clock(max_sleeps=500))
+        a = Brain(clock=clock)
+        keeper.turn_started(a)
+        clock.at(1007, lambda: keeper.turn_ended(a))
+        if leave_entry:                                           # the review's mutant, played by hand: the turn is over, and an entry at 0 is left behind
+            clock.at(1007, lambda: keeper.thinking.__setitem__(id(a), 0))
+        await keeper.startup(HUB(a))
+        return a.warm_at
+    warm_at = asyncio.run(go(False))
+    assert len(warm_at) == 1 and warm_at[0] >= 1007
+    with pytest.raises(Runaway, match="never happens"):           # (the gate that never opens ends the test with a message, after 500 looks, not after the end of time)
+        asyncio.run(go(True))
+
+
+def test_fixhub_k18_a_start_up_warm_that_never_works_stops_after_its_tries_and_says_so_once():
+    """Core never answers: the start-up warm tries WARM_START_TRIES times (a minute apart, once Core is taken for away) and then leaves the rest to the 240 s loop, with one line in the log.
+    Without the bound it would try for ever (the review's mutant: `while not self.started`); the brain here raises Runaway on a try past the ones it is allowed, so that fails the test at
+    the eleventh instead of never ending."""
+    tries = hub_mod.WARM_START_TRIES
+    assert 1 <= tries <= 20
+
+    async def go():
+        keeper, clock, log = new_keeper()
+        a = Brain(results=[None] * tries + [Runaway(f"try number {tries + 1}: the start-up warm has no bound")], clock=clock)       # (Core never answers)
+        await keeper.startup(HUB(a))
+        return keeper, clock, log, a
+    keeper, clock, log, a = asyncio.run(go())
+    assert a.warm_calls == tries and not keeper.started
+    said = [x for x in log if "warms at the start" in x]
+    assert len(said) == 1 and str(tries) in said[0] and str(hub_mod.WARM_IDLE_S) in said[0], log          # (one line: how many it tried, and that the idle loop keeps trying)
+    assert clock.t - 1000 >= 60 * (tries - 1)                     # (every retry waits out the minute Core is taken for away)
+
+
+def test_fixhub_k18_a_clock_that_is_asked_to_sleep_without_end_ends_the_test():
+    """The bound itself: a loop that never ends fails with Runaway after max_sleeps sleeps (quickly), whatever it is waiting for."""
+    async def forever():
+        clock = Clock(max_sleeps=200)
+        while True:
+            await clock.sleep(1.0)
+    with pytest.raises(Runaway, match="200 times"):
+        asyncio.run(forever())
 
 
 # ═══ the hub asks the voice gate for a whole reply ═══

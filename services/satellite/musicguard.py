@@ -320,6 +320,17 @@ def without_lights(text: str) -> str:
     return _MUSICAL_LIGHT.sub("the lights", text or "")
 
 
+_STAGE_SPAN = re.compile(r"\*[^*\n]*\*")
+
+
+def lights_order(heard: str) -> bool:
+    """His words are about a light, a lamp, a plug or a fan and say nothing of music, a speaker or a place of the music (a lamp is not a song: "the living room lights" is one name, see without_lights).
+    The reply to such an order is judged for what it claims of the HOUSE, never of the music (fix3:guards, the second review: "Fine, I'll switch on the kitchen lights for you. *presses imaginary button*
+    There. All done." to "would you mind switching the kitchen lights on" was answered "I have not played, moved or changed any music.": the imaginary button read as a dial of the stereo)."""
+    w = without_lights(plain(heard))
+    return bool(re.search(rf"\b{_LIGHT_NOUN}\b", w, re.I)) and not _AUDIO_WORD.search(w)
+
+
 def classify(heard: str, prev: str, text: str, tools: list[str], happened=None):
     """-> (action, why). action: None (leave it) | 'reask' (he asked, nothing music ran: re-ask with the music tools only) | 'retract' (he did not ask:
     say plainly nothing was played, with NO tools, so nothing can start). why: 'claim' | 'loose' | 'silent'.
@@ -330,8 +341,11 @@ def classify(heard: str, prev: str, text: str, tools: list[str], happened=None):
     did any music thing happen?"""
     if not text or any(t in MUSIC_TOOLS for t in tools):
         return None, None
-    if "home_control" in tools:
+    lights = lights_order(heard)
+    if "home_control" in tools or lights:
         text = without_lights(text)                                # (a switched light is named in the reply; a claim about the music in the same reply is still read)
+    if lights:
+        text = _STAGE_SPAN.sub(" ", text)                          # (a stage direction is never spoken, and "*presses imaginary button*" at a lamp is no dial of the music)
     asked = asked_music(heard, prev)
     about = describing(heard)
     if music_claimed(text, about):

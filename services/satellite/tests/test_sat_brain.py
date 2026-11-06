@@ -316,15 +316,16 @@ def test_the_second_try_after_a_denial_never_cancels_clears_or_announces_on_its_
         b, c, ran, al, ls, timers = house_brain(tmp_path / f"case{i}", [text(said)], [call], [text("Done, all gone.")])
         assert b.reply(heard) == said, heard                                                  # nothing ran, so the first reply stands
         assert len(al.items) == 2 and ls.lists == {"shopping": ["milk", "eggs", "bread"]} and ran == [] and timers.remaining() == [("pasta", 600)] and b.actions == [], heard
-        offered = {t["name"] for t in c.calls[1]["tools"]}
-        assert not offered & {"cancel_alarm", "cancel_timers", "announce"}, (heard, offered)
+        named = set(next(m["content"] for m in c.calls[1]["messages"] if isinstance(m["content"], str) and "you DO have these: " in m["content"]).split("you DO have these: ")[1].split(". Read his words")[0].split(", "))      # (fix3:guards: the nudge names what the second try may use; the menu it is shown is the whole list)
+        assert not named & {"cancel_alarm", "cancel_timers", "announce"} and c.calls[1]["tools"] == c.calls[0]["tools"], (heard, named)       # (and the whole list, the one the turn's own call had: Core's cache is per tool list)
 
 
 def test_a_question_gets_a_second_try_that_can_only_look(tmp_path):
     b, c, ran, al, ls, timers = house_brain(tmp_path / "a", [text("I have no access to your timers, Captain.")], [tool("list_timers")], [text("Pasta, ten minutes left, monkey.")])
     assert b.reply("what timers do I have") == "Pasta, ten minutes left, monkey." and [a["tool"] for a in b.actions] == ["list_timers"]
-    offered = {t["name"]: t for t in c.calls[1]["tools"]}
-    assert set(offered) <= LOOKS and "set_timer" not in offered and "set_alarm" not in offered and "play_music" not in offered and "speakers" not in offered
+    named = set(next(m["content"] for m in c.calls[1]["messages"] if isinstance(m["content"], str) and "you DO have these: " in m["content"]).split("you DO have these: ")[1].split(". Read his words")[0].split(", "))      # (fix3:guards: the nudge names what a question's second try may use; the menu is the whole list)
+    assert named <= LOOKS and "set_timer" not in named and "set_alarm" not in named and "play_music" not in named and "speakers" not in named and c.calls[1]["tools"] == c.calls[0]["tools"]
+    offered = {t["name"]: t for t in __import__("brain").retry_tools(b.tools(), False)}                                                    # (the part of the list it may use: the gate at execution is retry_may)
     assert offered["list"]["input_schema"]["properties"]["action"]["enum"] == ["read", "lists"] and offered["music"]["input_schema"]["properties"]["action"]["enum"] == ["what"]
     assert "only asking" in str(c.calls[1]["messages"])                                       # the nudge says he may only be asking, and nothing may change
     b, c, ran, al, ls, timers = house_brain(tmp_path / "b", [text("I cannot do that, Captain.")], [tool("set_timer", seconds=5)], [tool("play_music", what="everything")], [text("Done.")])
@@ -345,8 +346,9 @@ def test_a_question_and_an_order_are_told_apart_for_the_second_try():
 def test_an_order_the_model_wrongly_refused_is_done_by_the_second_try_with_a_menu_that_cannot_undo(tmp_path):
     b, c, ran, al, ls, timers = house_brain(tmp_path, [text("I cannot set timers from here.")], [tool("set_timer", seconds=300, label="eggs")], [text("Five minutes on the eggs.")])
     assert b.reply("I want a five minute egg timer") == "Five minutes on the eggs." and ("eggs", 300) in timers.remaining()
-    offered = {t["name"]: t for t in c.calls[1]["tools"]}
-    assert {"set_timer", "set_alarm", "list", "play_music", "music"} <= set(offered) and not set(offered) & {"cancel_alarm", "cancel_timers", "announce"}
+    named = set(next(m["content"] for m in c.calls[1]["messages"] if isinstance(m["content"], str) and "you DO have these: " in m["content"]).split("you DO have these: ")[1].split(". Read his words")[0].split(", "))      # (fix3:guards: the nudge names what the try may use; the menu is the whole list)
+    assert {"set_timer", "set_alarm", "list", "play_music", "music"} <= named and not named & {"cancel_alarm", "cancel_timers", "announce"} and c.calls[1]["tools"] == c.calls[0]["tools"]
+    offered = {t["name"]: t for t in __import__("brain").retry_tools(b.tools(), True)}
     assert offered["list"]["input_schema"]["properties"]["action"]["enum"] == ["add", "read", "lists"]                                   # (the shared schema is not touched)
     from lists import TOOL as list_tool
     assert list_tool["input_schema"]["properties"]["action"]["enum"] == ["add", "remove", "read", "clear", "lists"] and "only asking" not in str(c.calls[1]["messages"])

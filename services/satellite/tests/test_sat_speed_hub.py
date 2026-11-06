@@ -36,11 +36,19 @@ class Stop(BaseException):
     """Raised by the test clock when a never-ending loop has run as long as the test wants (not an Exception: nothing under test may swallow it)."""
 
 
-class Clock:
-    """The keeper's clock and sleep, moved by the test: a sleep takes no real time, moves `t`, runs what the test scheduled for that moment, and stops the loop at `until`."""
+class Runaway(BaseException):
+    """Raised by the test clock when a loop under test goes on far past anything an honest run does (an exit that never comes): the run FAILS with this message, it does not hang."""
 
-    def __init__(self, t=1000.0, until=None):
-        self.t, self.until, self.slept, self.due = t, until, [], []
+
+class Clock:
+    """The keeper's clock and sleep, moved by the test: a sleep takes no real time, moves `t`, runs what the test scheduled for that moment, and stops the loop at `until`.
+    A loop that has slept `max_sleeps` times and is still going is stopped with Runaway (the third review, 2026-11-05, K7 and K18: a start-up warm waiting on a turn that is over, or with no
+    bound on its tries, slept for ever and the run never ended)."""
+
+    MAX_SLEEPS = 10_000                  # the longest honest run in this file sleeps 174 times (measured)
+
+    def __init__(self, t=1000.0, until=None, max_sleeps=MAX_SLEEPS):
+        self.t, self.until, self.slept, self.due, self.max_sleeps = t, until, [], [], max_sleeps
 
     def __call__(self):
         return self.t
@@ -51,6 +59,8 @@ class Clock:
     async def sleep(self, seconds):
         self.slept.append(seconds)
         self.t += seconds
+        if len(self.slept) > self.max_sleeps:
+            raise Runaway(f"the loop under test slept {self.max_sleeps} times ({self.t - 1000:.0f} simulated seconds) and is not done: it waits for something that never happens")
         for item in [d for d in self.due if d[0] <= self.t]:
             self.due.remove(item)
             item[1]()
@@ -707,6 +717,20 @@ def test_speed_hub_h3_a_room_without_a_keeper_adds_nothing_to_the_record(tmp_pat
     path = next((tmp_path / "log").glob("*.jsonl"))
     record = next(r for r in (json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()) if r["kind"] == "command")
     assert not {"core", "cached", "template"} & set(record["timing"]) and "prompt" not in next(x for x in log if "(timing:" in x)
+
+
+# ═══ the test clock itself ═══
+def test_speed_hub_a_clock_that_is_asked_to_sleep_without_end_ends_the_test():
+    """The bound itself (the fourth review, 2026-11-06; K7 and K18 of the third review hung this file): a loop that never ends fails with Runaway after max_sleeps sleeps, quickly, whatever it
+    waits for; and the default bound is far above the longest honest run of this file (174 sleeps), so no honest test meets it."""
+    async def forever():
+        clock = Clock(max_sleeps=200)
+        while True:
+            await clock.sleep(1.0)
+    t0 = time.monotonic()
+    with pytest.raises(Runaway, match="200 times"):
+        asyncio.run(forever())
+    assert time.monotonic() - t0 < 5 and Clock.MAX_SLEEPS >= 1000
 
 
 # ═══ the wiring ═══

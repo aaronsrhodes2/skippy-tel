@@ -352,7 +352,7 @@ def test_fix2_guards_more_shapes_of_the_same_claim_with_no_tool(said, tmp_path):
     ("turn on the bedroom lamp", "The bedroom lamp is not on, Captain."),
     ("turn on the bedroom lamp", "The lights are on the left of the stairs."),
     ("turn on the bedroom lamp", "Which lamp, monkey. There are two bedrooms."),
-    ("turn on the bedroom lamp", "Done, Captain. The bedroom lamp is on, as you wished, and so is everything else in this magnificent house."),      # (too long to be a bare acknowledgement)
+    ("turn on the bedroom lamp", "Done, Captain. The bedroom lamp is on, as you wished, and so is everything else in this magnificent house, the garden, and the neighbours' porch lights too, which I find hilarious."),      # (too long to be a bare acknowledgement: fix3:guards moved the limit from 14 to 25 words for a reply that names the thing ordered, so the 19-word version of this reply is now caught: test_sat_fix3_guards.py)
     ("play some jazz", "The lights are on, Captain."),                                    # a claim of state counts only for an order for the house
     ("my name is Aaron", "Got it."), ("never mind", "Okay."),
 ])
@@ -494,7 +494,7 @@ def test_fix2_guards_the_same_call_written_twice_in_one_reply_runs_once(tmp_path
 
 def test_fix2_guards_a_bracket_that_starts_with_a_tools_name_is_wiped_even_when_it_cannot_be_read(tmp_path, no_routes):
     b, model = guard_brain(tmp_path, [text("[music (next) now] Sure thing, skipping.")], [call("music", action="next")], [text("Skipped.")])
-    assert b.reply("could you skip to the next track") == "Skipped." and b.world.ran == [("music", {"action": "next"})] and b.guard == ("reask", "ack")      # (and "Sure thing" to an order was asked again)
+    assert b.reply("could you skip to the next track") == "Skipped." and b.world.ran == [("music", {"action": "next"})] and b.guard == (None, None) and len(model.calls) == 3      # (fix3:text: "Sure thing" was asked again as a call written as text that could not be read, no longer by the bare-acknowledgement backstop)
     b, model = guard_brain(tmp_path / "chat", [text("[nonsense a=1] Sure, a story then.")])
     assert b.reply("tell me a story") == "[nonsense a=1] Sure, a story then."                          # a bracket that is no tool of ours is left alone
     b, _ = guard_brain(tmp_path / "wipe")

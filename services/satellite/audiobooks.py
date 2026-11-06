@@ -660,7 +660,7 @@ BOOK_TOOLS = [
          "seconds": {"type": "integer", "description": "how far for back / forward; 30 when he did not say"},
          "minutes": {"type": "number", "description": "for sleep: stop in this many minutes; 0 cancels the timer"},
          "end_of_chapter": {"type": "boolean", "description": "for sleep: stop when this chapter ends"},
-         "speed": {"type": "number", "description": "for speed: 1.0 is normal, 1.25 a quarter faster (0.5 to 2.0)"}},
+         "speed": {"type": "number", "description": "for speed: the BOOK's playback speed only, never his or Skippy's own voice; 1.0 is normal, 1.25 a quarter faster (0.5 to 2.0)"}},
          "required": ["action"]}},
 ]
 

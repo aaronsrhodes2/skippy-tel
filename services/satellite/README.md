@@ -143,7 +143,16 @@ another's things. Tests: `tests/test_sat_matter.py`, against a fake controller s
 Guard rails (`house.py`, the same for every backend; tests in `tests/test_sat_house*.py`... see `test_sat_hass.py` and `test_sat_homekit.py`):
 
 * only lights, switches, fans, covers, climate, media players, scenes, scripts, vacuums, humidifiers and input booleans can change; sensors can be read;
-* locks, alarm panels and garage doors/gates are invisible unless `HASS_SENSITIVE=1`, and then still need a spoken yes (`confirm`); an alarm panel is never driven;
+* locks, alarm panels and garage doors/gates are invisible unless `HASS_SENSITIVE=1`, and then still need a spoken yes (`confirm`) that only he gives: `Brain.run_tool`
+  drops the model's own `confirm` from every `home_control` call (routes, second tries and calls written as text all come through it) unless his words now are a plain yes
+  (`says_yes`) to the house's own "needs him to confirm out loud first" (`CONFIRM_ASKED`) about the same thing and action, within `CONFIRM_FOR_S` = 120 s of that exchange;
+  one yes opens one door, once. A yes is up to ten words, all of them yes-words ("yes", "yeah, go ahead", "do it"), the fillers Whisper writes for a hesitation (uh, um,
+  er, erm, hmm, well, oh) or the words of the thing asked about; "yeah right", "yeah, sure" and "sure, sure" are not one (usually sarcasm: a false no costs one more word,
+  a false yes opens the garage). The call must name the thing he was asked about with all of its words (`_same_thing`: "garage door" for "garage" counts, "door" for
+  "front door" does not, because the house settles a vague name by itself and his yes was for what it asked), so a model that shortens the name costs him one more yes
+  (none of 13 real two-turn flows did). Only the HOUSE's question counts: if the model asks in its own words ("Shall I open the garage?") and he says yes, that yes opens
+  nothing and the house asks again. On the real Core and a stub house that shows the garage and the locks, the model wrote `confirm=true` itself on its first call for 11
+  of 12 one-utterance orders; now 0 of 18 reach the house, and the two-turn flow (order, the house asks, "yes") opens it 6 of 6; an alarm panel is never driven;
 * a spoken name must match one entity (the room counts as part of the name); several matches change nothing and Skippy asks which;
 * no raw service calls from the model; pairing keys and tokens are never returned or printed.
 * the garage door is never closed while the opener reports an obstruction (the safety beam): Skippy says so instead (`house.control`, and again in `garage.py`).
@@ -176,7 +185,7 @@ has not checked. `SKIPPY_HOUSE_LAYOUT` names another file. Tests: `tests/test_sa
 The Captain, 2026-11-05: *"streamline it so it becomes snappy like Amazon Echo."* That day a turn took a median 8 s (90th percentile 24 s) from the end of his voice to
 Skippy's voice being ready, mostly Skippy Core re-reading its prompt, plus the voice studio speaking each reply from scratch. Core's chat model (llama.cpp, a hybrid)
 reuses a cached prefix only from a checkpoint about 500 tokens before the end of the last prompt, so a word that changed in the middle (the minute, the room, what
-plays) made every turn read all of it again. The house prompt with its tools is a 10.5k-token prefix (5.6k without the tools; Core keeps a cache per shape): 0.6 to 2.5
+plays) made every turn read all of it again. The house prompt with its tools is a 10.5k-token prefix (5.6k without the tools; Core keeps a cache per shape; about 800 tokens fewer since the persona was cut): 0.6 to 2.5
 s to read from the cache, 20 to 33 s from scratch. Everything below keeps that prefix identical, warm and short, or skips the model.
 
 * **One prompt all day: `Brain.system()` and `Brain.context()`.** `system()` is the same text at every minute in every room: the persona, `SPOKEN`, the layout's floors,
@@ -184,6 +193,13 @@ s to read from the cache, 20 to 33 s from scratch. Everything below keeps that p
   bracketed note at the start of his newest message (`_user_turn`) with the clock, the room he is talking from, `Brain.live()` (what the house audio plays and where),
   the headlines and the starter he was just given. The prompt says the note is not something he said, `Brain._spoken` cuts a copy of it out of a reply (`NOTE_ECHO`),
   and the memory never keeps it, so consecutive turns share everything before it.
+  The persona is the file shared with flask-api minus what the house cannot use (`house_persona()`): the examples whose answer says "I cannot" (they taught the denial)
+  and, by the Captain's call of 2026-11-06, the sections that teach `[SKIPPY_LEARN: ...]` and `[TTS_ADJUST: ...]` (found by heading, not by line: the file is 13,392
+  characters, 13,003 without the examples, 9,851 without the sections, about 800 tokens fewer in every prompt). Of 18 provoked replies on the real Core ("remember that
+  the throne light is the bedroom lamp", "your voice is too fast" ...) 11 carried an annotation and 6 were nothing else, so he heard "Hm. I had nothing to say, which is
+  unlike me."; now 0 and 0. With those sections gone a request about his own voice had no outlet, and on the real Core 1 of 9 "your voice is too fast, slow it down" called the
+  audiobook tool's `speed` and changed the book player: `SPOKEN` now says that the house's own voice (speed, pitch, loudness) is not something a tool changes (say so in a few words, call no tool) and the tool's `speed` says it is
+  the BOOK's. About half of the provoked replies still promise to remember (see Left undone).
 
 * **`Brain.warm()`** reads that prefix into Core's cache before a turn needs it: the model, the system text, the tools, the memory as it stands (`_prefix()`, the very
   messages the next reply sends), a placeholder for his words (`WARM_WORDS`) and ONE token of answer; then the same again without the tools, the shape of a routed
@@ -217,6 +233,16 @@ s to read from the cache, 20 to 33 s from scratch. Everything below keeps that p
   model's, and so is anything that goes wrong inside a route. The tool runs first; the model only words its answer, with no tools on offer (`WORDING_TOKENS`), unless
   the bank answers.
 
+* **The thermostat route** (`house.thermostat_route`, before the weather route). "Set the thermostat to 70", "set the temperature to seventy two", "make the thermostat
+  70" and "make it 70 degrees in here" go straight to `home_control` `set_temperature` (`SET_THERMO`; `SET_TEMPERATURE` and `SET_IT` when no device is named; `DEGREES` is
+  two digits or twenty to ninety-nine in words, and "make it N in here" counts only from 55 to 85, so a volume is never a setting). A setting that names no device stands
+  only as a plain command: a question or condition word, a clock time or a second command (`NOT_NOW`), a choice ("68 or 70") or a change ("up 10 degrees") is the model's.
+  A water heater and a space heater are no thermostat, and "what's the house temperature" reads the thermostat (`ASK_THERMO`). `weather.pre_route` leaves a command or a
+  plain statement about a temperature ("set the oven temperature to 350", "the water temperature is 60", "turn the temperature up") to the model instead of answering with
+  the forecast (`TEMPERATURE_COMMAND`, `TEMPERATURE_STATEMENT`; a statement that also has another weather word in it (rain, a forecast) stays the weather's). A table of
+  80 phrases, half thermostat commands and questions and half weather questions and unrelated talk, through the real brain: 45 routed right before, 80 now (every weather
+  question still goes to the weather: 20 of 20).
+
 * **The memory is whole exchanges with the real tool calls in them** (`_remember`, `_window`, `_keep`). A model shown only words in its history answers the next command
   in words: "it said Done and did nothing". Each exchange now keeps the call that ran and what it answered (`tool_use` / `tool_result`: the last `TRACE_CALLS` = 4
   calls, answers cut to `TRACE_CHARS` = 300), `MEMORY_TURNS` = 8 exchanges at most, all forgotten after `FORGET_AFTER_S` = 600 s of quiet. Every call that offers tools
@@ -228,32 +254,96 @@ s to read from the cache, 20 to 33 s from scratch. Everything below keeps that p
 
 * **A call that offers no tools is shown plain words** (`plain_words`, applied by `Brain._shape` in `_create` for every call and in `warm()`'s second request): no
   `tool_use` / `tool_result` block, no `EXAMPLE`. Shown them with no tool to call, Skippy Core answers in its own tool-call XML (`<tool_call><function=weather>...`)
-  instead of words: 32 of 56 trials on the real Core (after four routed commands, 6 of 8 weather answers and 6 of 6 "play some jazz"), 0 of 117 with the plain view.
-  What a model writes anyway is cut by `Brain._spoken` (`TOOL_MARKUP`: the XML, and the persona's `[IMAGE: ...]` sentinel, which would be read aloud), so none of it is
-  spoken or kept; nothing runs it. A routed answer left with no words says the tool's own short answer (`own_answer`: one line, at most 160 characters, no brackets),
-  else `UNWORDED` / `TRIED`.
+  instead of words: 32 of 56 trials on the real Core (after four routed commands, 6 of 8 weather answers and 6 of 6 "play some jazz"), 0 of 117 with the plain view. A
+  routed answer left with no words says the tool's own short answer (`own_answer`: one line, at most 160 characters, no brackets), else `UNWORDED` / `TRIED`.
+
+* **What a model writes that is not words is cut, and never spoken or kept** (`strip_model_markup(words, names)`, which `Brain._spoken` runs on every reply of the brain):
+  Core's tool-call XML (nothing runs it) and the `[IMAGE: ...]` sentinel (`TOOL_MARKUP`), its reasoning when the server leaves it in (`THINK`, `THINK_CLOSE`,
+  `THINK_OPEN`: a block, a lone `</think>` with all before it, an unclosed `<think>` with all after it), a copy of the clock note, whole or cut off (`NOTE_ECHO`,
+  `NOTE_CUT`), and the persona's `[SKIPPY_LEARN ...]` / `[TTS_ADJUST ...]` annotations (`ANNOTATION`: whole, with no JSON, or cut off by the token limit, from its bracket
+  to the end). A reply the token limit cut inside the name of a tag (`[SKIPPY_LE`, `<func`) or at the start of the clock note (`[Right no`) loses that stub (`CUT_TAGS`,
+  `CUT_XML`, `NOTE_STUB`; so does one that really ends in `<p`). It runs BEFORE the cut-back to a whole sentence (`whole_sentences`), which used to land inside a cut
+  annotation and speak the rest of it; 8 of 89 worded replies from the real Core carried one of these, and none reaches speech now. Every pattern ends in an alternative
+  for the end of the text, so unclosed tags cost no more than closed ones (`'<think>x'` twenty thousand times took 12 s, now 3 ms). The routines' words get the same
+  cleaning (`Daily.word`, which has no tool names to pass; its `WORDING` also tells the model not to write the two annotations). Core's other ways of writing a call as
+  words (a code fence, `[call: ...]`, `[Calling ...]`) are not markup it knows: see the text-call bullet.
+
+* **A call written inside the reasoning is put back** (`_reasoned_calls`, in `strip_model_markup`). For "turn the music down a notch" the real Core wrote `[music]` and a
+  line `music(action='quieter')` inside its reasoning (1 of 16), where the text-call rescue below could not see it. Now a call found in the cut reasoning is put back in
+  front of the words, one per line, and the rescue reads it as if it stood there. Only a bracket that starts with the name of a tool the brain has is put back ("[sighs]"
+  and "[speak]" are not), with, when nothing is inside it, the rest of its line and up to two lines after it that look like arguments ("action: next", one bare action
+  word), never words; each call once, and none that the visible words hold themselves; and never one that undoes or announces (`RETRY_NEVER`, a list's `remove` /
+  `clear`), because a call the model only CONSIDERED must not cancel an alarm, clear a list or speak in every room. `Brain._spoken` passes the tool names only while no
+  tool has run in the reply, so the wording of a routed answer, Mentat's and a call that ran get no calls back. Replayed offline, the real reasoning-wrapped replies of
+  the reviews ran the call in 1 of 7 cases before and 7 of 7 now, once each (no live reply carried reasoning on the day it was fixed: 0 of 51).
+  **The words after the reasoning are the model's last word** (review4): nothing is put back when they hold a call of their own (the reasoning's was a draft), deny, take it back
+  (`_RETRACTS`) or ask a question, and no call that a negation just before it rules out (`_NOT_MEANT`: "nothing is playing, so I should not call [music action=next]"); a
+  `home_control` call on a `RISKY_THING` target or a group of plugs is never put back (a lock, a door and the garage still are: the house asks for the yes aloud), and three
+  calls at most. `Brain._spoken(resp, restore=...)` puts a call back only where the text-call rescue goes on to read these words: the first reply and the second tries that
+  read text calls (a denial's, the backstop's, a claim's, `TEXT_AGAIN`), not the music re-ask and not the wording calls, where the lines of such a call ("action: next") would be spoken.
 
 * **The bare-acknowledgement backstop** (`Brain._acknowledges`): a reply that is only "Done." with no tool called is asked again, behind a gate. It fires only when his
-  words are an ORDER in shape (`order_shaped`: a verb first, can / could / would you + a verb, I want / I need, please, the curt "lights off in the bedroom"; a
-  statement that names a light is not one) for something a tool does (`ORDER_CUES`), not a question (`NOT_AN_ORDER`) or an ability question (`ASKS_ABILITY`), and about
-  nothing that can hurt (`RISKY`); and the spoken reply (stage directions out) is at most `BARE_WORDS` = 14 words, asks nothing, takes nothing back (`HONEST`), and has
-  an acknowledgement (`BARE_ACK`) as its first or last sentence or, for the lights, plugs and fans, a plain claim of state ("The kitchen lights are on, Captain.":
-  `STATE_CLAIM`). The second try (`_second_try(ordered=True)`) is shown the WHOLE tool list (Core caches per tool list: a menu cut to the safe part was read from
-  scratch, 19 to 44 s against 2.1 s) and every call passes `_run_call` -> `retry_may`: nothing is cancelled, cleared or announced on a bare "Okay.", and the model's own
-  `confirm` is dropped. The house log shows `guard reask ack`.
+  words are an ORDER in shape (`order_shaped`: a verb first, can / could / would you + a verb, I want / I need, please, the curt "lights off in the bedroom") for something
+  a tool does (`ORDER_CUES`), not a question (`NOT_AN_ORDER`) or an ability question (`ASKS_ABILITY`), and about nothing that can hurt or has to keep running
+  (`RISKY_THING`). A statement that only sounds like an order is none: it defers or describes (`ORDER_NEGATED`: "someday", "usually", "makes"), wishes for what no tool does
+  (`ORDER_TO_OTHER`, `_wish_off_topic`: "we want a new stereo"), asks whether it can (`_asks_ability`: "can you set timers"), puts the verb of a statement right after its
+  first words (`_statement_after`: "turn signals are on the left", "play time is over"), or is an idiom ("cut costs"). Statements that fired it fell from 32 of 60 to 0 of
+  60 (a list written before the rules and used to tune them) and from 26 of 40 to 2 of 40 (a second list, written after the rules and partly tuned on). The spoken reply
+  (stage directions out) is at most `BARE_WORDS` = 14 words, or `BARE_NAMING_WORDS` = 25 when it names the thing he ordered; it asks nothing, takes nothing back (`HONEST`),
+  and claims what no tool did: an acknowledgement (`BARE_ACK`: "Done.", or the order's own verb said as done, "Added, Captain.") as its first or last sentence, a sentence
+  of the closed bank (`bank_phrase`: "Paused.", "Volume five."), a plain claim of what the order's own tool does (`DONE_CLAIMS`: the lights' `STATE_CLAIM`, "Setting a timer
+  for ten minutes."; an offer, "I can set a timer", is none) or "you're welcome" (`ACK_TAIL`); all 32 false acknowledgements of the review get a second try, 27 did before.
+  For an order for the lights `musicguard.lights_order` stops the music guard adding "I have not played, moved or changed any music." The house log shows `guard reask ack`.
+
+* **What a second try may do** (`retry_may`, `retry_tools`, `Brain._run_call`). Four second tries are gated alike: after a bare acknowledgement (above), after a denial
+  ("I cannot ..." with no tool: `Brain._second_try_denied`), after a claim with no tool ("Alarm set for seven." and nothing set: `ASK_AGAIN`) and after a tool call
+  written as text that could not be read (`TEXT_AGAIN`, `Brain._asked_again`; it takes the denial's test for an order, `not NOT_AN_ORDER`, because "a ninety second tea
+  timer" has no verb and is one). Before, `[cancel_alarm] Noted.` was followed by a call of `cancel_alarm` that cancelled both alarms, and 230 of 21,600 random replies
+  broke the rules below, every one on this path; now none. Each is shown the WHOLE tool list, the one the turn's own calls used (Core caches per tool list: the denial's
+  cut menu was read from scratch, a median 43.6 s against 3.3 s for the whole list on the real Core, about 0.5 s more when the cut menu happens to be cached), and what it
+  may DO is decided where a call runs. It may always look (`RETRY_READS`, `RETRY_READ_ACTIONS`). It may change something only when his words are no question
+  (`NOT_AN_ORDER`) and, after a claim, an order in shape too (before, a claimed "Alarm cancelled." to "I do not need the alarm on sunday" let the second try call
+  `cancel_alarm` with nothing named, which cancels both alarms). It never cancels, clears or announces on its own (`RETRY_NEVER`, `RETRY_NEVER_ACTIONS`), never uses the
+  model's `confirm`, and never switches a `RISKY_THING` target the house does not guard itself (the router, the fridge, a pump, the oven; it sees only the name, so a
+  light called "security light" is refused too) or a whole set of plugs (`RETRY_GROUPS`). A lock, a door or the garage runs without `confirm`, so the house asks him for
+  the yes. A call it writes as text passes the same gate, a refused one is answered `NOT_DONE`, and the nudges of the first two name only the tools it may use. A denial
+  to words that name anything in `RISKY_THING` stands: no second try. The second try for a music claim (`REASK_MUSIC`) is the one that has no such gate (Left undone).
+  **What a second try SAYS is judged too** (`Brain._second_try`, `_unsound`, `_honest`, `announces`). Its words first lose any call written as words (`_wipe_calls`: a
+  code fence, `[call: ...]`, `[Calling ...]`, `music(action='quieter')`), and nothing left is the fixed line (`UNCLAIM`). If a tool that CHANGES something ran, the words
+  stand. If only looks ran, or a change was refused, they must not claim it was done: right after a refusal (`NOT_DONE`) with no look since, they must own it (`_honest`:
+  a retraction, a denial or a question, and no promise), and after a look they must not promise or claim in the first person (a read answer is full of "the alarm is
+  set"). So a refusal, a look and "The Sunday alarm is at 09:00. I've cancelled it for you." (1 of 8 samples on the real Core), or "Right, my mistake. Let me cancel that
+  timer for you." (an apology that promises, `announces`: 3 of about 35 real second tries) get the fixed line (after a denial, the first reply stands), and a look that
+  nobody worded no longer makes the first claim true. Of 40 dishonest replies written for the rules 4 were replaced before and all 40 are now, and all 40 honest ones are
+  still spoken; of 6,000 random second tries 894 spoke a lie or a read answer right after a refusal, now none. A question promises and claims nothing ("Which alarm should I
+  cancel?" is an honest second try; before, 24 of 109 honest questions were thrown away for the fixed line), "all set" claims only when it opens a sentence ("You're all
+  set." claims nothing), and a sentence that is only "Cancelled." claims like "Done." ("Right. Cancelled. What alarm was it?" was spoken with both alarms still set).
 
 * **A tool call written as text** (`Brain._text_calls`): `[list action="read" list="shopping"]`, `[music with action=quieter]`, `[music]next[/music]` or `[music]`
   followed by a line `action: next` is read (`TEXT_CALL`, `_bare_action`, `_call_lines`) and run as the call it meant (inside a second try, behind its gate), and the
-  model words the answer. A call that needs arguments and has none (`_needs_arguments`; `cancel_alarm`, `cancel_timers` and `announce` always) is never run empty; a
-  pile of brackets runs nothing; the same call twice runs once; one that cannot be read is asked again with the nudge joined to his message (`TEXT_AGAIN`: shown its own
-  bracket as its last turn the model wrote it again, 9 of 9). A bracket that starts with a tool or action name is never spoken (`_wipe_calls`).
+  model words the answer. Only the arguments the tool really has are kept (`Brain._tool_props`: `[music mode=weird]` is a call with none). A call that needs arguments and
+  has none (`_needs_arguments`; `cancel_alarm`, `cancel_timers` and `announce` always) is never run empty; a pile of brackets runs nothing; the same call twice runs once;
+  one that cannot be read is asked again with the nudge joined to his message (`TEXT_AGAIN`: shown its own bracket as its last turn the model wrote it again, 9 of 9; that
+  second try is behind the gate of the others). So is a bracket that starts with a TOOL's name and that `TEXT_CALL` cannot read at all (`[set_timer 90 tea] Ninety
+  seconds.`: `Brain._tool_brackets`, `Brain._asked_again`), because the words with it claim what nothing did. A name that is also an English word counts only when a
+  colon, `=`, a parenthesis or a digit follows it inside the bracket, or when nothing follows it (a name with an underscore, `[play_music jazz]`, always counts): `[music
+  swells]`, `[announce proudly]`, `[speakers hum]` and `[list of reasons]` are stage directions, wiped, with no second try (before, `[music swells] It is a quarter to
+  twelve.` cost a second model call and the fixed line replaced the answer). A bracket with one of that tool's own action words in it, or the word `action`, is a call
+  written in plain words and counts too (`[music louder]`, `[music with quieter]`, `[music action quieter]`, `[list add milk]`: 6 of 43 real replies to "turn the music down a
+  notch" were of this kind, and with the colon-or-digit rule alone they were wiped as directions and the volume stayed: `Brain._says_an_action`). An action word alone (`[pause]`, `[volume 5]`) is only wiped too, and inside a second try the
+  calls are dropped and the words stand. A bracket that starts with a tool or action name is never spoken (`_wipe_calls`), and nor is any other way Core writes a call as
+  words: a code fence, `[call: ...]`, `[Calling ...]`, `[tool_call ...]` (`CALL_DIALECT`, `strip_call_dialects`; the real Core wrote the fence for "turn everything off")
+  and `music(action='quieter')`. Where no tools are offered (a routed answer's wording, Mentat's) `Brain._phantom` cuts a bracket of ANY tool the brain has
+  (`phantom_pattern`; `PHANTOM` itself knows only `ask_mentat` and `car_status`), and both then run `_wipe_calls`, so they cut the dialects too. A wiper takes a bracket together
+  with the argument lines under it (`_cut_calls`, `_call_extent`: `[music]` + `action: next`, + `next`, + `/music`; a plain word goes only when it is one of the tools' actions,
+  so "Okay." stays), because a call put back from the reasoning left those lines to be spoken and kept.
 
 * **Short replies.** The prompt asks for one or two short sentences, a few words once a tool has done it. `SPEAK_TOKENS` = 300 is the room of a round that may call a
   tool, `WORDING_TOKENS` = 160 of the model wording a tool's answer (`WORDING_ROOM`: the book's place 200, the headlines 300), and a reply that ran out of room is cut
   back to its last whole sentence (`whole_sentences`). `strip_stage_directions` deletes `*sighs*` and `[laughs]` (the voice reads them out; four of seven baseline
-  replies had one) but keeps a stressed word (`Do *not* open it`) and a title (`Now playing *Dancing Queen*`: two or more capitalised words). Gaps: a lower-case phrase
-  that starts with a word ending in -s, -ing or -ed (`*living room*`) is still taken for a direction, and a Title-Case one (`*Dramatic Pause*`) is spoken (none of the
-  84 directions in the house logs of 11-01 to 11-05 was capitalised).
+  replies had one) but keeps a stressed word (`Do *not* open it`) and a title (`Now playing *Dancing Queen*`: `_titled`, two or more capitalised words, the first one too,
+  so `*the Rolling Beat*` is a direction and `*The Rolling Beat*` a title). A span of two or more words whose first word ends in -s, -ing or -ed is an action unless that
+  word only looks like a verb (`_NOT_ACTIONS`: this, is, plus, always, morning, nothing ...). Its two gaps are under Left undone.
 
 * **The filler rule** (`Room._cover_the_wait`: the recorded quips that cover a slow answer). With Core's prompt believed hot (`SpeedKeeper.core_state`: a warm or a turn
   worked in the last `WARM_HOT_S` = 300 s) a model turn takes 1.5 to 4.4 s (median 2.1 s; cold, 15 to 20 s) and a quip at 1 s only sat in front of the answer (the
@@ -278,7 +368,7 @@ answered, a reply that waited behind a warm.
 `wait` is the silence the voice detector waited, `hear` Whisper, `think` the brain, `voice` the reply turned into audio. `route none`: the model chose the tool;
 `route home_control`: a route ran it first. `model` lists each model call (none when the bank answered: `template`). `prompt hot | warming | cold` is what the keeper
 believed as the thinking began; `cache_read` and `uncached` are the first model call's prompt tokens read from Core's cache and read fresh (hot: about 10.6k and a few
-hundred; cold: 0 and about 10.5k, and 20 s). `voice 0.0s cached`: a clip rendered ahead, no TTS call. A slow turn reads off the line: `prompt cold` with `cache_read 0`
+hundred; cold: 0 and about 10.5k, and 20 s; all about 800 tokens fewer since the persona was cut). `voice 0.0s cached`: a clip rendered ahead, no TTS call. A slow turn reads off the line: `prompt cold` with `cache_read 0`
 is a lost cache (another client of Core's chat slot, a Core restart; the 240 s loop brings it back), `warm_wait_s` time spent behind a warm, a long `model` on a hot
 prompt Core busy, a long `voice` the studio. `(speed: ...)` lines in the hub log say when the prompt was warmed and how many phrases were rendered ahead; a `[brain]`
 line says when a guard asked again or a text call was run.
@@ -288,22 +378,85 @@ tools) took 116.4 s with the old brain and 5.3 s now (4.5 s with two rooms): the
 right after a warm read 99.4% of its prompt from the cache, in 0.7 s. The right tool for eight phrasings no route takes (model alone, three repeats each, in four
 conditions: a fresh conversation, after four routed commands, after one earlier turn, after two chat turns): where the memory held words only, 0 to 3 of 24 (the old
 brain after four routed commands: 2 of 24); 21 to 24 of 24 in all four now (24, 24, 23 and 24 on the final tree).
+On the third review's tree: 24, 24, 23 and 22 of 24; the three misses are the stub audio's honest "nothing is playing" to "could you skip to the next track".
+On the fourth pass the battery ran twice on the working tree of the moment, both times with the shorter persona: 24, 24, 23 and 23 of 24 (the two misses: "could you skip
+to the next track", answered by the stub audio's honest "nothing is playing"), then 23, 23, 24 and 18, whose six misses in the last condition were first calls that named
+no tool ("would you mind switching the kitchen lights on", "light up the kitchen for me", "could you skip to the next track"), made before any guard runs; the third
+review's code scored 24 in that condition on the same Core fifteen minutes later, so it reads as the model's draw. Neither run was on the final tree.
+On the final tree (every patch of the fourth review in, 2026-11-06 05:10) the battery scored 23, 24, 24 and 23 of 24; the misses were "could you skip to the next track" answered by
+starting the library (the stub audio plays nothing) and one claim with no tool that the backstop does not know ("Kitchen's bright again."). The text-call rescue on the real Core
+(something playing, two chat turns first): "could you skip to the next track" 12 of 12 and "turn the music down a notch" 11 of 12, all 24 first replies written as text, no empty
+call, no markup spoken or kept; the one miss was a bare `[music]` and prose, whose second try did not call, so the fixed line was spoken. Second tries on the claim path: 9 of 9 left
+both alarms, the list and the announcements alone. The spoken yes: 6 of 6 flows did what was said only after the yes, a lone "yes" and a yes after 121 s did nothing, and no
+one-utterance order for a lock or the garage ran. The model's own first call still switched off the router or the fridge in 3 of 4 phrasings (Left undone). A plain turn now
+reads a median 9,855 tokens from Core's cache (10,660 before the persona was cut), 71 fresh, in a median model call of 2.2 s.
 
 **Tests:** `tests/test_sat_speed_{brain,hub}.py` pin the first build, `tests/test_sat_fix_{brain_core,brain_routes,hub}.py` the first review's fixes,
-`tests/test_sat_fix2_{brain_view,brain_guards,small}.py` the second review's; beside them, each in its own pytest session,
-`services/voice-gate/tests/test_sat_{speed,fix,fix2}_gate.py` and `services/tts-studio/tests/test_sat_{speed,fix}_tts.py`. Run the satellite suite as the last line of
+`tests/test_sat_fix2_{brain_view,brain_guards,small}.py` the second review's, `tests/test_sat_fix3_{text,guards,small}.py` the third's (the cleaning of what a model
+writes; the second tries' gate, the spoken yes and the order test; the stage-direction rules and a zero length of time), `tests/test_sat_fix4_{text,guards,small}.py` the
+fourth's (1,087 tests: a call written inside the reasoning and the cost of the cleaning, run through the real brain with a scripted model; the fourth second try's gate,
+what a second try may say, the yes vocabulary and the call dialects; the thermostat route and the persona's cut sections), `tests/test_sat_review4_*.py` the fourth
+review's findings (the seams between the fixes: the lines of a call put back, a call the model only considered, a question taken for a promise, a call in plain words in its
+bracket, the dialects in the wording paths; a voice request); beside them, each in its own pytest session,
+`services/voice-gate/tests/test_sat_{speed,fix,fix2}_gate.py` and `services/tts-studio/tests/test_sat_{speed,fix,fix3}_tts.py`. The loops in `test_sat_fix_hub.py`,
+`test_sat_speed_hub.py` and `test_sat_fix2_gate.py` are bounded, so a mutant fails with a message instead of hanging (`Runaway` after 10,000 sleeps of the fake clock;
+`tries()` refuses a `DOOMED_TRIES` that is not a few); the drain loop in `test_sat_dj.py` (`while not ch.done`) is the one left unbounded in this folder.
+`test_dj_mode_hands_over_to_spotify_on_a_phrase` is timing-sensitive: it can fail while the machine is busy and passes alone. Run the satellite suite as the last line of
 this file says. CI (`core/ci/ci.py`) runs no `services/satellite/tests`, so run them by hand before a push; the voice-gate and tts-studio files sit in suites its
-`services` job does run.
+`services` job does run. That job installs no numpy, so the 19 tts-studio tests that make audio (`needs_numpy`) skip there and the other 24 of the three
+`test_sat_*_tts.py` run (the folder: 43 passed and 19 skipped in a `python:3.12-slim` image; before, all three files skipped whole and 19 passed).
 
-**Left undone** (nothing here is applied). The voice studio's remaining speed, measured but speed only, quality untested, so the Captain's ear decides
-(`services/tts-studio/README.md`, "Where a line's time goes"): a lower `F5_NFE` (12 steps: -21 to -25% per run), a 5.4 s reference clip instead of the 9 s one (-16 to
--20%), and CUDA graphs for the flow steps (-31 to -35% on a 1 to 2 s line once its length is captured). The persona (the file shared with flask-api, about 13 kB;
-`house_persona()` drops only the examples whose answer says "I cannot"): its sarcasm doctrine and in-character examples probably drive the long replies and are a large
-part of the system text, and trimming them for the house voice is the next lever, untried. Three gaps the reviews left: the second try after a denial
-(`Brain._second_try_denied`) still shows a menu cut to the safe part (`retry_tools`), which Core reads from scratch (7.8 to 44 s measured for such a menu), where the
-whole list with the `retry_may` gate at execution, as the backstop does, would stay cached; the second try after a claim with no tool (`ASK_AGAIN`) is unchanged, with
-every tool and the model's own `confirm`; and the turn after the window slides (every fourth) re-reads about 400 tokens (about 1 s), which a warm right after the slide
-would hide.
+**Left undone** (nothing here is applied):
+
+* The voice studio's remaining speed, measured but speed only, quality untested, so the Captain's ear decides (`services/tts-studio/README.md`, "Where a line's time goes"):
+  a lower `F5_NFE` (12 steps: -21 to -25% per run), a 5.4 s reference clip instead of the 9 s one (-16 to -20%), and CUDA graphs for the flow steps (-31 to -35% on a 1 to
+  2 s line once its length is captured).
+* The persona (the file shared with flask-api, 13,392 characters; the house voice gets 9,851): its sarcasm doctrine and in-character examples probably drive the long
+  replies and are a large part of the system text, and trimming them for the house voice is the next lever, untried. Two things are the Captain's to decide. (1) "Remember
+  that ..." no longer comes back as an annotation alone, but nothing keeps what was said past the 8-exchange memory, and about half of 10 replies still promise to ("Noted
+  for future reference, Captain."): a house notes file that the prompt reads would make that true. (2) The "Image Generation" section still teaches `[IMAGE: ...]`, which
+  is cut, so "show me a sunset" is answered "Here's your sunset" and nothing is shown (2 of 2 on the real Core); cutting that section too is a small change in
+  `house_persona()`.
+* The model's own FIRST call is not gated, only the routes and the second tries are: a spoken order that reaches the model can switch off the router, the modem, the
+  fridge, the freezer, a sump pump or a CPAP through `home_control` (`RISKY_THING` is the list the second tries refuse), a call it writes as text in its first reply runs
+  the same way, and so does one put back from its reasoning. Whether such names need the spoken yes that a lock and the garage need is the Captain's decision.
+* The second try for a music claim with no music tool (`REASK_MUSIC`) is the one second try with no `retry_may` gate: it is offered only the music tools, and `run_tool`
+  drops the model's own `confirm` unless his yes is pending. A gate there (refusing a call outside its menu, or `retry_may`) would also refuse "play jazz and set a
+  timer", so it was left.
+* A call written as words in one of Core's other dialects (`CALL_DIALECT`: a code fence, `[call: ...]`, `[Calling ...]`, `[tool_call ...]`) is cut by `_wipe_calls`, not
+  by `strip_model_markup`, so the one path that does not run it still speaks it: a routine's words (`Daily.word`); the wording of a routed answer and Mentat's
+  (`_ask_mentat_now`) run it since the fourth review. The real Core wrote them in a first and a second reply; the wording paths were probed with scripted replies only.
+  Calling `strip_call_dialects` from `_model_markup` (with its early return widened) would close the routines too.
+* Two odd shapes of an annotation are cut only as far as the first `]`: one with `}]` inside a JSON string (`[SKIPPY_LEARN: {"note": "a }] b"}]` speaks `b"}]`) and a bare
+  tag with its JSON on the next line (the tag goes, the JSON is spoken). Neither was ever seen from Core, and a JSON branch that knew about quotes would lose real words
+  when an annotation has an odd number of quotes and another follows.
+* The thermostat route's older pattern, the one that names a device (`SET_THERMO`), is as it was and still takes some questions and compound requests: "why is the
+  thermostat at 60" and "the thermostat is at 70 but it feels cold" set the number named, "set the thermostat to 68 or 70" sets 68, "turn the heat on at 10 pm" sets 10
+  (the house accepts 5 to 95 in the thermostat's own unit), "set the thermostat to 72 and turn off the lights" does only the first half, and "turn the thermostat up two
+  degrees" is a read. Narrowing it would change phrases that work today ("when it's cold, set the heat to 70"). "What temperature is the oven" and "what's the inside
+  temperature" still go to the weather.
+* Some regex alternatives are pinned by no test (the third review's mutation run changed them one at a time and nothing failed): `_ORDER_PARTICULAR`, `_ORDER_PREDICATE`,
+  `_ORDER_PRONOUN`, `_ORDER_IDIOM`, some alternatives of `RETRY_GROUPS`, `RETRY_GUARDED` and `ACK_TAIL`, the verb forms of `DONE_CLAIMS` and the inside of
+  `_asks_ability`. None changes a verdict by itself.
+* The turn after the window slides (every fourth) re-reads about 400 tokens (about 1 s), which a warm right after the slide would hide.
+* A starred phrase is judged by its look, not its meaning: a lower-case one that starts with a word ending in -s, -ing or -ed that is not in `_NOT_ACTIONS`
+  (`*living room*`) is still deleted as a stage direction, and a Title-Case direction (`*Dramatic Pause*`) is spoken (none of the 84 directions in the house logs of 11-01
+  to 11-05 was capitalised).
+* The backstop skips an order that `NOT_AN_ORDER` reads as a question (`have the music play in the kitchen`) or that names anything in `RISKY_THING`
+  (`cancel the oven timer`), where a bare "Done." stands; and a "yes" answered with a bare "Done." and no call is not asked again (the real Core called the tool on all 6
+  yes turns of the trial).
+* The spoken yes is proved against the real Core and a stub house, not against the real garage opener or the hub's voice path (the yes arrives as a transcript, "Skippy,
+  yes"; `says_yes` drops the wake word): do step 7 of the "when it arrives" checklist in `rooms/README.md` by hand the day `HASS_SENSITIVE=1` is set. `CONFIRM_FOR_S` is the
+  one constant to change if 120 s is too short at the door.
+* A yes to a question the model asked in its own words (not the house's) counts for nothing, so he says it twice (see the guard rails); counting it was left out on
+  purpose.
+* voice-gate's cache (`services/voice-gate/gate.py`): `Voice._unlink_doomed` decides under its lock whether a leftover file may go (a line that is pending or listed again
+  is kept, decided when the pass reaches the name, not when its list was made) and unlinks it outside the lock. A store of the same words that begins after the decision
+  and has put its new file in place before the unlink call has that file removed: the line is listed with no file, its next `cached()` is a miss, and the line is rendered
+  and stored once more (one render). The wider interleavings are pinned (`tests/test_sat_fix_gate.py`, `test_sat_fix2_gate.py`); this gap, between the decision and the
+  call, is not, and is not closed (closing it means unlinking inside the lock that `cached()` and `remember()` also take). A file that will not go (a reader has it open,
+  on the Windows bind mount) is given `DOOMED_TRIES` = 3 stores and then left for a restart, with a warning in the log.
+* The 19 tts-studio tests that make audio (`needs_numpy`) skip in CI, whose `services` job installs no numpy; the other 24 of the three `test_sat_*_tts.py` run there.
 
 ## The news, and things Skippy brings up himself (`news.py`, `starters.py`, `tools/starter_refresh.py`)
 
@@ -464,7 +617,9 @@ can change it, or add to it, but they are not the players."* Bilby's music no lo
   access to"):** the prompt's "What you are" paragraph lists the real tool names and, in his words, what they are (`brain.CAPS`: the house, Bilby, audiobooks,
   alarms, timers, lists, announcements, the news, a web search, the weather, his car, Mentat; a phrase only while its tool is here). A reply that says
   "I cannot / I have no access / it isn't connected" with no tool called (`brain.DENIAL`) gets one more go with the real tool list in front of it
-  (`Brain._second_try_denied`); a tool that runs is its answer, otherwise the first reply stands (it may be true).
+  (`Brain._second_try_denied`); a tool that runs is its answer unless its words claim a change that never ran (`_unsound`), otherwise the first reply stands (it may be
+  true). It is shown the whole tool list and every call it makes passes the gate of the second tries (Snappy like an Echo, "What a second try may do"); a denial to words
+  that name anything in `RISKY_THING` is not asked again.
 
 ## The Enclave on skippy-core, and several outputs in one room (`router.py`, `sync_outputs.py`)
 

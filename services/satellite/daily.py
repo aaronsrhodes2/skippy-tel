@@ -72,7 +72,8 @@ WMO = {0: "clear", 1: "mostly clear", 2: "partly cloudy", 3: "overcast", 45: "fo
        85: "snow showers", 86: "heavy snow showers", 95: "thunderstorms", 96: "thunderstorms with hail", 99: "thunderstorms with hail"}
 
 WORDING = (" You are speaking aloud in his house, so: plain spoken sentences, no lists, no markdown, no emoji, no URLs. Say only what the material "
-           "below says; never add a fact, a number or a detail of your own. Keep it short. Stay in character.")
+           "below says; never add a fact, a number or a detail of your own. Keep it short. Stay in character. "
+           "Never write [SKIPPY_LEARN] or [TTS_ADJUST] here (nothing strips them: they would be read aloud).")
 
 
 def http_get_json(url: str, timeout: float = 15) -> dict:
@@ -660,7 +661,8 @@ class Daily:
         resp = self.client.messages.create(model=self.model, max_tokens=max_tokens, system=system,
                                            messages=[{"role": "user", "content": f"{task}\n\nMaterial:\n{material}"}])
         text = " ".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
-        text = re.sub(r"<think>.*?</think>|\[IMAGE:[^\]]*\]", "", text, flags=re.S | re.I).strip()   # no picture tags in a spoken line
+        from brain import strip_model_markup                          # noqa: PLC0415 — brain imports car, which imports this module
+        text = strip_model_markup(text)                               # the brain's cleaning, so a routine says what a reply does: no reasoning, no tool-call markup, no [IMAGE: ...] (no picture here), no [SKIPPY_LEARN: ...]
         return text or None
 
     async def aword(self, task: str, material: str, max_tokens: int = 400, persona: bool = True, fallback: str | None = None) -> str | None:

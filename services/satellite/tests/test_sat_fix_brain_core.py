@@ -370,7 +370,7 @@ def test_fix_brain_core_the_backstop_judges_before_musicguards_tiers_which_file_
     ("what can you do with the lights", "Okay."),
     ("turn on the bedroom lamp", "Done? I did not, monkey. Ask me again."),    # a reply that asks, takes it back or is long is not an acknowledgement
     ("turn on the bedroom lamp", "Okay, but I did not turn it on."),
-    ("turn on the bedroom lamp", "Done, Captain. The bedroom lamp is on, as you wished, and so is everything else in this magnificent house."),
+    ("turn on the bedroom lamp", "Done, Captain. The bedroom lamp is on, as you wished, and so is everything else in this magnificent house, the garden, and the neighbours' porch lights too, which I find hilarious."),      # (more than 25 words: fix3:guards moved the limit from 14 to 25 for a reply that names the thing ordered)
     ("turn on the bedroom lamp", "The lamp is yours to turn on, monkey."),     # (not an acknowledgement at all)
 ])
 def test_fix_brain_core_only_an_acknowledgement_to_an_order_is_asked_again(heard, said, no_routes):

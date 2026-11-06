@@ -11,7 +11,11 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("flask")
-np = pytest.importorskip("numpy")
+try:
+    import numpy as np
+except ImportError:                    # CI's python:3.12-slim has none: only the tests that make audio skip (app.py imports numpy only when a voice renders)
+    np = None
+needs_numpy = pytest.mark.skipif(np is None, reason="numpy is not installed: this test makes audio (CI's services image has none; the pure tests run there)")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import app as studio  # noqa: E402
 
@@ -178,6 +182,7 @@ def skippy_on(f5, prepared=True):
     return s
 
 
+@needs_numpy
 def test_fixtts_the_fast_path_hands_f5_the_nfe_knob_it_is_not_a_constant(monkeypatch):
     f5 = F5()
     s = skippy_on(f5)
@@ -235,6 +240,7 @@ ORDINALS = "first second third fourth fifth sixth seventh eighth ninth tenth ele
 PLACES = "porch kitchen hall garage attic cellar study patio den loft shed yard".split()
 
 
+@needs_numpy
 def test_fixtts_whole_a_short_reply_is_one_run_and_the_default_is_one_per_sentence(studio_up):
     text = "The bedroom lamp is on and the porch light is dim. I left the kitchen alone, since you did not ask."
     assert len(text) < F5.MAX_CHARS
@@ -246,6 +252,7 @@ def test_fixtts_whole_a_short_reply_is_one_run_and_the_default_is_one_per_senten
     assert len(speak(studio_up, "skippy", skippy_on(f5), {"text": text})) == 2          # without "whole": a run per sentence, as before
 
 
+@needs_numpy
 def test_fixtts_whole_a_reply_longer_than_the_batch_is_several_runs_in_order_none_dropped(studio_up):
     text = " ".join(f"The {o} light, the one in the {p}, is on and it stays on for the night." for o, p in zip(ORDINALS, PLACES))
     assert 2 * F5.MAX_CHARS < len(text) <= studio.MAX_TEXT
@@ -258,6 +265,7 @@ def test_fixtts_whole_a_reply_longer_than_the_batch_is_several_runs_in_order_non
     assert sum(runs) == 8 * sum(len(" ".join(call["texts"])) for call in f5.batch_calls) and all(r > 0 for r in runs)
 
 
+@needs_numpy
 def test_fixtts_whole_a_sentence_longer_than_the_batch_is_one_run_that_f5_splits_inside_never_dropped_or_cut(studio_up):
     clauses = ", ".join(f"the {p} light is on in the {o} room" for o, p in zip(ORDINALS, PLACES))
     sentence = f"Right now {clauses}."
@@ -270,6 +278,7 @@ def test_fixtts_whole_a_sentence_longer_than_the_batch_is_one_run_that_f5_splits
     assert " ".join(batches) == sentence and runs == [8 * len(sentence)]       # the whole sentence was rendered
 
 
+@needs_numpy
 def test_fixtts_whole_a_sentence_with_no_punctuation_at_all_goes_to_f5_whole_not_truncated(studio_up):
     sentence = " ".join(["then the lamp in the hall turned on by itself while nobody was home"] * 5)
     assert len(sentence) > F5.MAX_CHARS and "," not in sentence and "." not in sentence
@@ -278,6 +287,7 @@ def test_fixtts_whole_a_sentence_with_no_punctuation_at_all_goes_to_f5_whole_not
     assert f5.batch_calls[0]["texts"] == [sentence + "."] and runs == [8 * (len(sentence) + 1)]     # (F5 gets the closing stop it wants, and every word)
 
 
+@needs_numpy
 def test_fixtts_whole_two_sentences_that_each_fill_a_batch_are_two_runs(studio_up):
     first = "Right now the " + ", the ".join(["porch light is on"] * 9) + "."
     second = "And later the " + ", the ".join(["kitchen light is off"] * 8) + "."
@@ -287,6 +297,7 @@ def test_fixtts_whole_two_sentences_that_each_fill_a_batch_are_two_runs(studio_u
     assert len(runs) == 2 and " ".join(t for call in f5.batch_calls for t in call["texts"]) == f"{first} {second}"
 
 
+@needs_numpy
 def test_fixtts_whole_a_short_reply_full_of_numbers_grows_in_words_and_is_still_rendered_to_the_last_one(studio_up):
     """The reply is counted as written (52 characters); spelled out for F5 it is several times longer. It is still ONE run of the studio, F5 splits it inside, nothing is lost."""
     text = "The totals are 1,284, 2,357, 9,876, 4,321 and 8,765."
@@ -299,6 +310,7 @@ def test_fixtts_whole_a_short_reply_full_of_numbers_grows_in_words_and_is_still_
     assert len(batches) > 1 and " ".join(batches) == spelled and runs == [8 * len(spelled)]
 
 
+@needs_numpy
 def test_fixtts_whole_a_voice_with_no_batch_size_still_renders_every_word(studio_up):
     class Stock:                                                               # (Kokoro cuts a long text itself and joins it: no batch_chars)
         def __init__(self):

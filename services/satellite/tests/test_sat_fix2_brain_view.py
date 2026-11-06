@@ -343,14 +343,16 @@ def test_fix2_warm_reads_into_the_cache_exactly_the_plain_prefix_the_next_call_w
 
 
 def test_fix2_a_denials_filtered_menu_keeps_the_history_as_it_is_even_when_the_menu_lacks_a_tool_the_history_used(no_routes):
-    """The tools path does not change: the second try after a denial offers retry_tools (a question may only look, so home_control is not in the menu) and the history still holds home_control calls."""
+    """The tools path: the second try after a denial is SHOWN the whole tool list (fix3:guards: Core caches per tool list, a cut menu was read from scratch), the nudge names only what a question may use (a question may
+    only look, so home_control is not named) and the history still holds home_control calls, which the whole list has."""
     model = Model([text("I cannot see the lights from here.")], [call("home_state", name="bedroom")], [text("It is off, monkey.")])
     b, clock = brain(model, hass=FakeHouse())
     lived(b, clock, 2)
     assert b.reply("is the bedroom light on") == "It is off, monkey." and len(model.calls) == 3 and [a["tool"] for a in b.actions] == ["home_state"]
     second = model.calls[1]
     names = {t["name"] for t in second["tools"]}
-    assert "home_control" not in names and "home_state" in names and set(names) < {t["name"] for t in model.calls[0]["tools"]}
+    named = second["messages"][-1]["content"].split("you DO have these: ")[1].split(". Read his words")[0].split(", ")
+    assert "home_control" not in named and "home_state" in named and second["tools"] == model.calls[0]["tools"] and "home_control" in names
     assert second["messages"][:4] == list(brain_mod.EXAMPLE) and "home_control" in str(second["messages"][:4]) and valid(second["messages"][:-3])
     assert any(m["role"] == "assistant" and isinstance(m["content"], list) and m["content"][0]["name"] == "set_timer" for m in second["messages"])
 
@@ -386,7 +388,7 @@ def test_fix2_tool_call_markup_is_never_in_the_words(raw, said):
 
 
 @pytest.mark.parametrize("plain", ["It is 5 < 7 and 9 > 3, monkey.", "Use the <b>bold</b> one.", "Call the function weather. The tool called weather said sunny.", "Tomorrow: sunny.\nTonight: clear.",
-                                   "[SKIPPY_LEARN: {\"x\": 1}] kept for the code that handles it", "I wrote a tool_call once.", "The [IMAGE] key is not a prompt.", "[sighs] left for strip_stage_directions"])
+                                   "I wrote a tool_call once.", "The [IMAGE] key is not a prompt.", "[sighs] left for strip_stage_directions"])      # (fix3:text: the persona's annotations are _spoken's to cut now, test_sat_fix3_text.py)
 def test_fix2_words_that_are_not_markup_are_left_exactly_as_they_were(plain):
     assert spoken(plain) == plain
 
