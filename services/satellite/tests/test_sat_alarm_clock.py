@@ -864,3 +864,34 @@ def test_a_due_timer_never_holds_up_a_due_alarm_and_is_still_said_when_the_room_
     assert len(rang) == 1 and 0.5 < rang[0] < 0.95                    # the ring waited its floor (0.6 s) and nothing else: not the timer's line (another 0.6 s), not the reply
     assert state["tick_done"]                                         # and the clock was not kept waiting for the room, for its next ring
     assert pod.said == ["Your pasta timer is done."] and not c._bg    # the timer was not lost
+
+
+def test_a_hub_that_has_just_started_does_not_tell_him_the_speaker_is_off(tmp_path):
+    # 2026-11-05: a restart at 22:30 (after the check time) ran the evening check a second before the router had opened the Enclave, and his phone was told
+    # "the upstairs speaker isn't connected". Too early to judge: nothing is said and the day is not marked checked.
+    now = [at(2026, 11, 1, 22, 30)]
+    c, posted, _ = make(tmp_path, now, router=Router(open_=()))
+    c.alarms.add("alarm", "06:30")
+    run(c.evening_check())
+    assert posted == [] and c._checked == ""
+    c.router.open.add("enclave")                                          # the router found the Enclave a moment later
+    now[0] += alarm_clock.SETTLE_S + 1
+    run(c.evening_check())
+    run(c.evening_check())
+    assert posted == [] and c._checked != ""                              # judged once it settled: fine, so nothing was ever said
+
+
+def test_a_speaker_that_is_really_off_is_still_reported_once_the_hub_has_settled(tmp_path):
+    now = [at(2026, 11, 1, 22, 30)]
+    c, posted, _ = make(tmp_path, now, router=Router(open_=()))
+    c.alarms.add("alarm", "06:30")
+    run(c.evening_check())
+    assert posted == []
+    now[0] += alarm_clock.SETTLE_S - 1
+    run(c.evening_check())
+    assert posted == []                                                   # still settling
+    now[0] += 2
+    run(c.evening_check())
+    run(c.evening_check())
+    texts = [b["text"] for p, b in posted if p == "/home/alert"]
+    assert len(texts) == 1 and "06:30" in texts[0] and "isn't connected" in texts[0]

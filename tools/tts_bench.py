@@ -1,6 +1,6 @@
 """Time Skippy chat's voices through the REAL voice-gate: time to first audio and real-time factor, per voice.
 
-    python tools/tts_bench.py [stock skippy ...]      (default: stock skippy; "elevenlabs" spends real characters)
+    python tools/tts_bench.py [stock skippy ...] [--whole]      (default: stock skippy; "--whole" asks for one run per reply, as the house hub does)
 
 It runs itself inside the skippytel-voice-gate container (docker exec), which holds the home token, signs a pass for each voice with
 the gate's own sign(), and POSTs to the gate on 127.0.0.1:8080 exactly as a browser does through Funnel (minus the Funnel hop).
@@ -26,6 +26,8 @@ LINES = [
 
 
 def inside(voices):
+    whole = "--whole" in voices                                       # ask for the reply in one run, as the house hub does
+    voices = [v for v in voices if v != "--whole"] or ["stock", "skippy"]
     sys.path.insert(0, "/app")
     import requests
     import gate
@@ -36,11 +38,11 @@ def inside(voices):
         token = gate.sign(key, exp, v)
         runs = []
         for i, line in enumerate(["Right. Warming up, since apparently that is my job now."] + LINES):
-            cached = gate.Voice("/state", 0, time.time)._path(f"{v}|{line}" if v in gate.LOCAL_VOICES else line)
+            cached = gate.Voice("/state", time.time)._path(f"{v}|{line}")
             if cached.exists():
                 cached.unlink()                                       # a fresh render every time, never the cache
             t0 = time.perf_counter()
-            r = requests.post(f"http://127.0.0.1:8080/t/{token}/tts", json={"text": line}, stream=True, timeout=900)
+            r = requests.post(f"http://127.0.0.1:8080/t/{token}/tts", json={"text": line, "whole": True} if whole else {"text": line}, stream=True, timeout=900)
             first, data = None, b""
             for piece in r.iter_content(chunk_size=None):
                 if first is None:

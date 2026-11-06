@@ -44,6 +44,8 @@ RING_WAIT_S = 45                    # the longest a silent box waits for the ste
 FLOOR_WAIT_S = 20                   # a ring waits this long for Skippy to finish what he is saying (a routine's line, an answer) before it speaks over it: an alarm must wake him
 GAINS = (0.45, 0.6, 0.75, 0.9, 1.0)  # each ring a little louder (the first never startles him out of bed)
 CHECK_AT = "21:30"                  # the evening check: an alarm tomorrow and the way it rings is broken -> his phone is told tonight
+SETTLE_S = 120                      # the evening check waits this long after the hub starts: the router has not opened the Enclave yet (2026-11-05: a restart at 22:30 told him
+                                    # the upstairs speaker "isn't connected" a second before the router found it)
 WAKE_WINDOW = ("04:30", "11:00")    # an alarm in these hours is a wake-up: the morning briefing is planned around the first of them (wake_time, daily.Daily.morning_time)
 PORTAL_PAGE = "https://makerportal.live/alarms"
 
@@ -103,6 +105,7 @@ class AlarmClock:
         self.done: list = []                            # command ids the portal sent, carried out (sent back on the next sync)
         self.changed = asyncio.Event() if _loop_running() else None
         self._checked = ""                              # the date of the last evening check
+        self._born = self.clock()                       # when this clock was made (the evening check settles for SETTLE_S first)
         self._ring_task: asyncio.Task | None = None     # the ring being rung now (an answer cancels it between its parts)
         self._snoozed: dict[int, float] = {}            # snoozed copies still waiting to ring: id -> due (is_ringing: the morning briefing keeps quiet for them)
         self._bg: set = set()                           # the timers' lines being said, or waiting for a room's voice (_say_due)
@@ -764,6 +767,8 @@ class AlarmClock:
         now = self.clock()
         today = time.strftime("%Y-%m-%d", time.localtime(now))
         if self._checked == today or time.strftime("%H:%M", time.localtime(now)) < self.env.get("SATELLITE_ALARM_CHECK_AT", CHECK_AT):
+            return
+        if now - self._born < SETTLE_S:                 # too early to judge: the outputs are still being found (the day is not marked, so it is judged a moment later)
             return
         self._checked = today
         a = self.next_wake(12 * 3600)
