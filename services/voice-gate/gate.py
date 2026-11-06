@@ -8,7 +8,7 @@ internet exactly two things:
     GET  /health                     {"ok", "ready", "whisper", "tts", "voices"}           (no pass: the reporter's probe)
     POST /t/<pass>/stt[?lang=xx][&raw=1]   body = one recording (webm/ogg/mp4/wav, at most 4 MB) -> {"text", "lang", "sure"[, "raw"]}
                                      (Whisper, at home; `raw` = the speech in its own language, when it isn't English and raw=1 asked)
-    POST /t/<pass>/tts               {"text", "voice"?} (at most 500 chars) -> audio/mpeg in the pass's voice (or "stock"): see VOICES
+    POST /t/<pass>/tts               {"text", "voice"?, "whole"?: true} (at most 500 chars) -> audio/mpeg in the pass's voice (or "stock"): see VOICES
     POST /t/<pass>/summary           {"text"} (at most 8000 chars) -> {"text}: what a person would SAY aloud about it, 2 to 4 short
                                      sentences (the home Ollama writes it); any pass. A long reply is spoken as this, not word for word
     GET  /t/<pass>/wake.json         {"ok", "threshold", "patience"}: the trained "Skippy" wake word, for a browser that runs it itself
@@ -26,6 +26,7 @@ can reach them.
 """
 from __future__ import annotations
 
+import collections
 import hashlib
 import hmac
 import json
@@ -112,38 +113,171 @@ def allowed(scope: str | None, wanted: str | None) -> str | None:
     return "stock" if wanted == "stock" else None
 
 
+DOOMED_TRIES = 3          # the tries (one per store) a cache file that would not go is given before it is left for a restart: a few, so a folder nothing can be removed from costs each store a few unlinks, not a growing list
+
+
 class Voice:
     """A cache of what was already said (the same words never cost twice to render).
-    state_dir="" keeps it all in memory (tests); otherwise files in the cache directory."""
+    state_dir="" keeps it all in memory (tests); otherwise files in the cache directory.
+
+    Storing a line never holds its reply back (2026-11-05, measured on the live mount: 319 ms median, 258 to 444 ms, before the first byte of every line that was
+    not cached). The cache directory is a Windows bind mount, where one stat() costs about 0.85 ms, and the old store stat()ed all 300 cached files after every
+    render to find the oldest. Now `remember` keeps the audio in memory at once (so the same words are a hit straight away) and a background thread writes the file
+    and trims the cache from an order kept in memory, read from the directory one time: a store costs one write, and one unlink past `keep` files.
+
+    A file is written whole or not there at all (its own temp file, then os.replace), and a file that would not go when its line left the cache (on that mount a file
+    a reader has open cannot be unlinked) is tried again at the next stores (DOOMED_TRIES in all), so the folder ends at its cap without a restart, also after a burst of stores. Every file in
+    the folder is a line of the cache (listed in `_order`), a line on its way (pending), or on the list `_doomed` of files to remove; a name leaves that list only when its file is gone, its line
+    is a line of the cache again (or on its way, and a store that fails puts it back), or it was tried DOOMED_TRIES times and refused every time."""
 
     def __init__(self, state_dir: str, clock, cache_keep: int = 300):
         self.dir, self.clock, self.keep = state_dir, clock, cache_keep
         self._lock, self._mem = threading.Lock(), {}
+        self._pending: dict[str, bytes] = {}               # lines accepted but not on disk yet: file name -> audio
+        self._order: collections.OrderedDict | None = None  # the cache files, least recently used first; None until the first store reads the directory
+        self._doomed: collections.OrderedDict = collections.OrderedDict()   # lines that left the cache whose files are not removed yet, oldest first: file name -> the times removing it was refused
+        self._writers: set = set()
         if state_dir:
             pathlib.Path(state_dir, "tts-cache").mkdir(parents=True, exist_ok=True)
 
     def cached(self, text: str) -> bytes | None:
         if not self.dir:
             return self._mem.get(text)
+        p = self._path(text)
+        with self._lock:
+            held = self._pending.get(p.name)
+        if held is not None:
+            return held
         try:
-            p = self._path(text)
             data = p.read_bytes()
-            os.utime(p, None)                              # recently used stays
-            return data
+            os.utime(p, None)                              # recently used stays (also over a restart: the order is rebuilt from these times)
         except OSError:
             return None
+        with self._lock:
+            if self._order is not None and p.name in self._order:
+                self._order.move_to_end(p.name)
+        return data
 
     def remember(self, text: str, audio: bytes) -> None:
         if not self.dir:
             self._mem[text] = audio
             return
+        name = self._path(text).name
+        writer = threading.Thread(target=self._store, args=(name,), name="voice-cache", daemon=True)
+        with self._lock:
+            self._pending[name] = audio
+            self._writers.add(writer)
+            writer.start()                                 # (inside the lock: wait() never meets a writer that has not started)
+
+    def wait(self, timeout: float = 5.0) -> bool:
+        """Until the stores in flight are on disk (tests, a tidy shutdown). True when none is left."""
+        end = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                running = list(self._writers)
+            if not running:
+                return True
+            if time.monotonic() >= end:
+                return False
+            for w in running:
+                w.join(max(0.0, end - time.monotonic()))
+
+    def _store(self, name: str) -> None:
+        folder = pathlib.Path(self.dir, "tts-cache")
+        tmp = folder / f"{name}.{os.urandom(6).hex()}.tmp"      # its own temp file: two stores of the same words at once never write the one the other is renaming
+        audio = None
         try:
-            self._path(text).write_bytes(audio)
-            files = sorted(pathlib.Path(self.dir, "tts-cache").glob("*.mp3"), key=lambda f: f.stat().st_mtime)
-            for old in files[:-self.keep]:
-                old.unlink()
+            with self._lock:
+                audio = self._pending.get(name)
+            if audio is None:
+                return
+            tmp.write_bytes(audio)
+            os.replace(tmp, folder / name)                 # all of it or not there: a reader never meets half a file
+            order = self._known()
+            with self._lock:
+                order[name] = None
+                order.move_to_end(name)
+                if self._pending.get(name) is audio:       # listed: a line of the cache from here on, like any other. (Pending until this store's pass is over, it could be evicted in a burst by
+                    del self._pending[name]                # another store meanwhile, and the retry would take "pending" for "said again" and drop it from the list: its file would stay.
+                                                           # A newer take of the same words, still on its way, is left pending: that is its own.)
+                while len(order) > self.keep:
+                    self._doomed[order.popitem(last=False)[0]] = 0         # (refusals so far: none; nothing is ever taken off this list before its file was tried, see _unlink_doomed)
+            self._unlink_doomed(folder)
+        except OSError:
+            try:
+                tmp.unlink()                               # a store that died midway takes its temp file with it
+            except OSError:
+                pass
+            with self._lock:
+                if self._pending.get(name) is audio:       # (this store is over: it is no reason to keep a file, see _unlink_doomed)
+                    del self._pending[name]
+                if self._order is not None and name not in self._order:
+                    self._doomed.setdefault(name, 0)       # an older file of these words may be on disk, its entry dropped because this store was on its way to replace it (Windows refuses
+                                                           # a replace over a file another store is replacing): nothing on disk stays unlisted. A name no file belongs to is dropped at the pass.
+            self._unlink_doomed(folder)
+        finally:
+            with self._lock:
+                if self._pending.get(name) is audio:
+                    self._pending.pop(name, None)
+                self._writers.discard(threading.current_thread())
+
+    def _unlink_doomed(self, folder: pathlib.Path) -> None:
+        """Remove the files of the lines that left the cache. A file that will not go (a reader has it open: a sharing error on the Windows bind mount) stays on the list
+        and is tried again at the next store, DOOMED_TRIES times in all, and is then left to the next restart (which reads the folder again); one that is gone already is dropped; a line
+        said again meanwhile is a line of the cache again, not a leftover. Only a file that was tried and refused that often is ever dropped unremoved: a list cut back to the cap whatever it
+        held loses, in a burst of stores (600 in a second, 16 threads: several hundred files left over a cap of 40), the names of files nobody had tried to remove."""
+        with self._lock:
+            mine = collections.deque(self._doomed.items())
+            self._doomed.clear()                           # these files are this pass's now: a store running at the same time finds none of them to try as well (if every store of a burst went
+                                                           # down the whole list, 2000 of them took 76 s, and Windows refuses a file another thread is deleting)
+        try:
+            while mine:
+                name, refused = mine[0]
+                with self._lock:
+                    live = name in self._pending or (self._order is not None and name in self._order)       # (decided now, not when the list was made)
+                if not live:
+                    try:
+                        (folder / name).unlink()
+                    except FileNotFoundError:
+                        pass
+                    except OSError:
+                        refused = (refused or 0) + 1
+                        if refused < DOOMED_TRIES:
+                            with self._lock:
+                                self._doomed[name] = refused   # (back on the list, behind the others)
+                        else:
+                            log.warning("voice-gate: the cache file of a line that left it would not go %d times, left for a restart", refused)
+                mine.popleft()
+        finally:
+            if mine:                                       # (an error that is no OSError cut the pass short: what it did not get to goes back, untried)
+                with self._lock:
+                    for name, refused in mine:
+                        self._doomed.setdefault(name, refused)
+
+    def _known(self) -> collections.OrderedDict:
+        """The cache files, least recently used first: the directory is read once (names and times), after that cached() and remember() keep the order.
+        A half-written file left by a crash (".tmp", over a minute old) is swept at that reading."""
+        with self._lock:
+            if self._order is not None:
+                return self._order
+        found: list[tuple[float, str]] = []
+        try:
+            with os.scandir(pathlib.Path(self.dir, "tts-cache")) as entries:
+                for e in entries:
+                    try:
+                        if e.name.endswith(".mp3"):
+                            found.append((e.stat().st_mtime, e.name))
+                        elif e.name.endswith(".tmp") and time.time() - e.stat().st_mtime > 60:
+                            os.unlink(e.path)
+                    except OSError:
+                        pass
         except OSError:
             pass
+        found.sort()
+        with self._lock:
+            if self._order is None:
+                self._order = collections.OrderedDict((name, None) for _, name in found)
+            return self._order
 
     def _path(self, text: str) -> pathlib.Path:
         return pathlib.Path(self.dir, "tts-cache", hashlib.sha256(text.encode()).hexdigest()[:32] + ".mp3")
@@ -165,12 +299,13 @@ def create_app(key: bytes, whisper_url: str, studio_url: str, clock=time.time,
                slots: int = 3, post=requests.post, get=requests.get,
                ollama_url: str = "", summary_model: str = "qwen2.5:7b",
                state_dir: str = "", wake_dirs: tuple = (), wake_threshold: float = 0.5,
-               health_ttl: float = 5.0, health_clock=time.monotonic) -> Flask:
+               health_ttl: float = 5.0, health_clock=time.monotonic, whole_default: bool = False) -> Flask:
     app = Flask(__name__, static_folder=None)
     app.url_map.merge_slashes = False
     app.config["MAX_CONTENT_LENGTH"] = MAX_AUDIO + 4096
     busy = threading.BoundedSemaphore(slots)          # the GPU is shared with everything else at home: a few at a time
     voice = Voice(state_dir, clock)
+    app.extensions["voice_cache"] = voice                # (the tests wait on its background stores)
 
     def err(code: int) -> Response:
         return Response(json.dumps({"error": MESSAGES.get(code, "request failed")}), status=code,
@@ -341,12 +476,15 @@ def create_app(key: bytes, whisper_url: str, studio_url: str, clock=time.time,
             return err(400)
         if len(text) > MAX_TEXT:
             return err(413)
-        out = local(which, text.strip())
+        asked = body.get("whole") if isinstance(body, dict) else None
+        out = local(which, text.strip(), one_run=asked if isinstance(asked, bool) else whole_default)
         return out
 
-    def local(which: str, text: str) -> Response:
-        """A local voice from tts-studio: no budget (it costs nothing), the same cache, and streamed through as it renders, so the
-        first sentence plays while the rest is still being made."""
+    def local(which: str, text: str, one_run: bool = False) -> Response:
+        """A local voice from tts-studio: no budget (it costs nothing) and the same cache. The reply is sent once it is whole (every client here, the
+        hub's Gate.tts and the pages' fetch().blob(), reads it whole anyway). `one_run` (the request's "whole": true, or TTS_WHOLE=1 for every request)
+        tells the studio so: it renders a reply that fits one F5 batch in ONE run instead of one run per sentence (0.8 to 1.1 s faster for 2 to 3
+        sentences, and the hub skips its ffmpeg re-encode of joined pieces, about 0.1 s). The cache is the same either way: the words are the key."""
         key_text = f"{which}|{text}"
         said = voice.cached(key_text)
         if said is not None:
@@ -356,7 +494,8 @@ def create_app(key: bytes, whisper_url: str, studio_url: str, clock=time.time,
         if not busy.acquire(blocking=False):
             return err(429)
         try:
-            r = post(f"{studio_url}/speak", json={"text": text, "voice": which}, stream=True, timeout=(5, 240))   # a cold load on a busy disk took 190 s
+            speak = {"text": text, "voice": which, **({"whole": True} if one_run else {})}
+            r = post(f"{studio_url}/speak", json=speak, stream=True, timeout=(5, 240))   # a cold load on a busy disk took 190 s
         except requests.RequestException:
             busy.release()
             return err(503)
@@ -457,4 +596,5 @@ def from_env() -> Flask:
                       summary_model=os.environ.get("SUMMARY_MODEL", "qwen2.5:7b"),
                       state_dir=os.environ.get("STATE_DIR", "/state"),
                       wake_dirs=tuple(d for d in os.environ.get("WAKE_DIRS", "/wake:/wake-features").split(":") if d),
-                      wake_threshold=float(os.environ.get("SATELLITE_WAKE_THRESHOLD") or 0.5))
+                      wake_threshold=float(os.environ.get("SATELLITE_WAKE_THRESHOLD") or 0.5),
+                      whole_default=os.environ.get("TTS_WHOLE", "").strip() == "1")      # 1: every reply is rendered in as few F5 runs as it fits (see local())

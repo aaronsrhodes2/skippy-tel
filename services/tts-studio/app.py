@@ -2,8 +2,11 @@
 
     GET  /health    {"ready", "voices": {"stock": bool, "skippy": bool}, "loaded": [...], "vram_reserved_gib"}   a voice is true once
                     its files are there; a RESIDENT voice only once it is loaded and warm (so voice-gate falls back while it loads)
-    POST /speak     {"text", "voice": "stock"|"skippy"} -> audio/mpeg, streamed a sentence at a time (MP3 frames, so the
-                    browser can start on the first sentence while the rest renders)
+    POST /speak     {"text", "voice": "stock"|"skippy", "whole"?: true} -> audio/mpeg, streamed a sentence at a time (MP3 frames, so
+                    a client could start on the first sentence while the rest renders). "whole": true is for a caller that plays nothing
+                    until it has all of it (voice-gate buffers the reply, the hub and the browser read it whole): no lone first
+                    sentence, only as many F5 runs as F5's own batch size needs (measured 2026-11-05, a 2 to 3 sentence reply: 0.8 to
+                    1.1 s faster, the same audio length). Off unless asked: the Captain's ear decides whether it becomes the default.
 
 Two voices, and which one a person gets is voice-gate's call (the portal's pass), never this service's:
   stock   Kokoro-82M (Apache-2.0), a stock voice (STOCK_VOICE, default bm_george). Everyone who may chat.
@@ -20,7 +23,9 @@ after IDLE_UNLOAD_S idle seconds (0 = never). One line at a time (a lock): it is
 from __future__ import annotations
 
 import os
+import random
 import re
+import sys
 import threading
 import time
 
@@ -78,16 +83,41 @@ def chunks(text: str, rest_max: int = 260) -> list[str]:
     return out
 
 
+def chunks_whole(text: str, limit: int) -> list[str]:
+    """For a caller that plays nothing until it has the whole reply: sentences packed up to `limit` characters (F5's own batch size for this reference)
+    and no lone first sentence. Every chunk is a full F5 run over the 9 s reference, about 0.55 s at the best of times and 1 s on a busy card, so a reply
+    that fits one batch is ONE run instead of one per sentence. A sentence longer than the limit stays one chunk (F5 splits it inside)."""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?;])\s+", re.sub(r"\s+", " ", text).strip()) if s.strip()]
+    out: list[str] = []
+    for s in sentences:
+        if out and len(out[-1]) + 1 + len(s) <= limit:
+            out[-1] += " " + s
+        else:
+            out.append(s)
+    return out
+
+
 def files() -> dict:
     return {"stock": os.path.isfile(f"{KOKORO}/kokoro-v1_0.pth") and os.path.isfile(f"{KOKORO}/voices/{STOCK_VOICE}.pt"),
             "skippy": all(os.path.isfile(p) for p in (f"{F5_DIR}/model_1250000.safetensors", f"{F5_DIR}/vocab.txt",
                                                        f"{REF}/ref.wav", f"{REF}/ref.txt", f"{VOCOS}/config.yaml"))}
 
 
+def line_file(voice: str) -> str:
+    """The one file a LOADED voice can still be asked to read when it speaks. F5's weights, vocab and vocoder and Kokoro's weights are in memory since the
+    load, and the reference is held too (Skippy._prepare), but F5TTS.infer (the long way Skippy.say goes back to when this f5-tts is not the pinned shape)
+    reads /ref/ref.wav on every line, and Kokoro is handed its voice pack as a path."""
+    return f"{REF}/ref.wav" if voice == "skippy" else f"{KOKORO}/voices/{STOCK_VOICE}.pt"
+
+
 def ready() -> dict:
     """A voice that can speak now: its files are there and, if it is resident, it is loaded and warm (a cold F5 load takes over a
-    minute, which voice-gate would rather spend on ElevenLabs)."""
-    return {v: ok and (v not in RESIDENT or v in _warm) for v, ok in files().items()}
+    minute, which voice-gate would rather spend on ElevenLabs). A resident voice that is already warm is in memory, so files() (seven stat() calls on the
+    bind mounts, 4 ms a line and a stall whenever D: is busy) is not asked about it: one stat() of line_file(), the file its next line may still read, is.
+    A reference or voice pack that vanished is therefore not called ready (the long way would fail inside a streamed reply, and voice-gate would not have fallen back)."""
+    warm = [v for v in VOICES if v in RESIDENT and v in _warm]
+    present = files() if len(warm) < len(VOICES) else {}
+    return {v: os.path.isfile(line_file(v)) if v in warm else bool(present.get(v)) and v not in RESIDENT for v in VOICES}
 
 
 class Stock:
@@ -111,13 +141,63 @@ class Skippy:
         self.m = F5TTS(model="F5TTS_v1_Base", ckpt_file=f"{F5_DIR}/model_1250000.safetensors", vocab_file=f"{F5_DIR}/vocab.txt",
                        vocoder_local_path=VOCOS, device="cuda")
         self.ref_text = open(f"{REF}/ref.txt", encoding="utf-8").read().strip()
+        self.prepared = self._prepare()
 
-    def say(self, text: str):
+    def _prepare(self):
+        """The reference, once. F5TTS.infer re-reads and hashes /ref/ref.wav on the bind mount and re-decodes its processed copy for EVERY line (measured
+        2026-11-05: 4 ms + 6 ms, and each one a disk read that stalls whenever D: is busy). The same preprocessing runs here one time, its result is held, and
+        say() gives it to F5's batch function directly: the very calls F5TTS.infer makes (f5-tts 1.1.22, pinned in the Dockerfile), the same audio for the same
+        seed. None when this F5 is not shaped like that: say() then goes on calling F5TTS.infer as it always did."""
+        try:
+            import torchaudio
+            from f5_tts.infer import utils_infer
+            from f5_tts.model.utils import seed_everything
+            ref_audio, ref_text = utils_infer.preprocess_ref_audio_text(f"{REF}/ref.wav", self.ref_text, show_info=lambda *a: None)
+            audio, sr = torchaudio.load(ref_audio)
+            # infer_process's own batch size for this reference (speed 1.0): 192 characters for the 9 s print
+            max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (22 - audio.shape[-1] / sr) * 1.0)
+            return {"chunk_text": utils_infer.chunk_text, "batches": utils_infer.infer_batch_process, "seed_everything": seed_everything,
+                    "audio": audio, "sr": sr, "ref_text": ref_text, "max_chars": max_chars}
+        except Exception as exc:  # noqa: BLE001  (a different F5 build: keep the long way, say so once)
+            print(f"[tts-studio] skippy reference not prepared ({type(exc).__name__}: {exc}); every line will go through F5TTS.infer", flush=True)
+            return None
+
+    @property
+    def batch_chars(self) -> int:
+        """How many characters F5 renders as one batch for this reference (what chunks_whole packs up to)."""
+        return self.prepared["max_chars"] if self.prepared else 180
+
+    def say(self, text: str, seed: int | None = None):
+        """One chunk to audio. `seed` fixes the take (tests, and listening comparisons): none = a new random one every line, as F5TTS.infer does."""
         import numpy as np
-        wav, sr, _ = self.m.infer(ref_file=f"{REF}/ref.wav", ref_text=self.ref_text, gen_text=for_f5(text), nfe_step=F5_NFE,
-                                  remove_silence=False, show_info=lambda *a: None)
+        gen = for_f5(text)
+        seed = random.randint(0, sys.maxsize) if seed is None else seed
+        wav = None
+        if self.prepared is not None:
+            try:
+                wav = self._fast(gen, seed)
+            except (TypeError, AttributeError, ImportError) as exc:      # this F5 is not the one the fast path was written for: the long way, for good
+                print(f"[tts-studio] skippy fast path off ({type(exc).__name__}: {exc}); every line goes through F5TTS.infer from here", flush=True)
+                self.prepared = None
+        if self.prepared is None:
+            wav, sr, _ = self.m.infer(ref_file=f"{REF}/ref.wav", ref_text=self.ref_text, gen_text=gen, nfe_step=F5_NFE,
+                                      remove_silence=False, show_info=lambda *a: None, seed=seed)
+            assert sr == SR, sr
+        return np.zeros(0, dtype="float32") if wav is None else np.asarray(wav, dtype="float32")
+
+    def _fast(self, gen: str, seed: int):
+        """F5TTS.infer minus its per-line file work: seed, F5's batches of the text, then infer_batch_process with the reference held since the load.
+        Everything else is F5TTS.infer's own arguments (target_rms 0.1, cross-fade 0.15, cfg 2, sway -1, speed 1.0, nothing fixed), nfe_step as before."""
+        p = self.prepared
+        p["seed_everything"](seed)
+        batches = p["chunk_text"](gen, max_chars=p["max_chars"])
+        if not batches:
+            return None
+        wav, sr, _ = next(p["batches"]((p["audio"], p["sr"]), p["ref_text"], batches, self.m.ema_model, self.m.vocoder, mel_spec_type=self.m.mel_spec_type,
+                                       progress=None, target_rms=0.1, cross_fade_duration=0.15, nfe_step=F5_NFE, cfg_strength=2, sway_sampling_coef=-1,
+                                       speed=1.0, fix_duration=None, device=self.m.device))
         assert sr == SR, sr
-        return np.asarray(wav, dtype="float32")
+        return wav
 
 
 VOICES = {"stock": Stock, "skippy": Skippy}
@@ -280,15 +360,19 @@ def speak():
         _lock.release()
         return jsonify(error=f"{voice} failed to load: {exc}"[:300]), 503
 
+    whole = body.get("whole") is True                  # the caller plays nothing until it has it all: fewest runs, not the first sentence alone
+
     def stream():
         global _last_used
         started, audio_s = time.time(), 0.0
-        for i, part in enumerate(chunks(text)):
+        parts = chunks_whole(text, getattr(model, "batch_chars", MAX_TEXT)) if whole else chunks(text)
+        for i, part in enumerate(parts):
             wav = model.say(part)
             audio_s += len(wav) / SR
             if i == 0:
-                print(f"[tts-studio] {voice}: first audio after {time.time() - started:.2f}s", flush=True)
-            yield mp3(wav)
+                print(f"[tts-studio] {voice}: first audio after {time.time() - started:.2f}s" + (" (whole)" if whole else ""), flush=True)
+            if len(wav):
+                yield mp3(wav)
             _last_used = time.time()
         took = time.time() - started
         print(f"[tts-studio] {voice}: {len(text)} chars, {audio_s:.1f}s of audio in {took:.2f}s (RTF {took / max(audio_s, 0.01):.2f})", flush=True)

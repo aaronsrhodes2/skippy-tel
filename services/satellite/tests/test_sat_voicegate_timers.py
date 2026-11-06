@@ -1,6 +1,7 @@
 """The gate client signs passes the REAL voice gate accepts, and the timers keep time."""
 import importlib.util
 import io
+import sys
 import wave
 from pathlib import Path
 
@@ -14,10 +15,20 @@ GATE_PY = Path(__file__).resolve().parents[2] / "voice-gate" / "gate.py"
 
 
 def real_gate():
-    spec = importlib.util.spec_from_file_location("voice_gate_real", GATE_PY)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    """services/voice-gate/gate.py as a module. It imports its sibling ready.py (there is none in this folder), so the gate's folder is on the path while it loads, and a `ready` that an
+    earlier test left in sys.modules (another gate's) is not the one it gets and is put back after: the file passes alone and in the whole suite, in any order."""
+    sys.path.insert(0, str(GATE_PY.parent))
+    other = sys.modules.pop("ready", None)
+    try:
+        spec = importlib.util.spec_from_file_location("voice_gate_real", GATE_PY)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    finally:
+        sys.path.remove(str(GATE_PY.parent))
+        sys.modules.pop("ready", None)
+        if other is not None:
+            sys.modules["ready"] = other
 
 
 def test_passes_are_exactly_what_the_real_voice_gate_signs_and_accepts():

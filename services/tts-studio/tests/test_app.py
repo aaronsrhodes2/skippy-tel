@@ -71,6 +71,7 @@ def test_a_resident_voice_is_not_ready_until_it_is_warm_so_the_gate_falls_back_m
     c = studio.app.test_client()
     assert c.post("/speak", json={"text": "hi", "voice": "skippy"}).status_code == 503
     studio._warm.add("skippy")
+    monkeypatch.setattr(studio, "line_file", lambda v: __file__)               # a warm voice is judged by the one file its next line may read: here it is there
     assert studio.ready()["skippy"] and c.get("/health").get_json()["resident"] == ["skippy"]
 
 

@@ -105,13 +105,14 @@ def test_the_prompt_teaches_bilby_lists_the_real_tools_and_says_what_plays_right
     assert "Bilby: the house's audio" in system and "the ONE player" in system and "single stream" in system and "last-resort speaker" in system
     assert "act ONLY through these tools: audiobook, cancel_timers, dj_mode, list_timers, music, play_music, set_timer, speakers." in system
     assert "Out of your reach from here: his car, physics calculations (Mentat)" in system and "Never claim you did what no tool did" in system
-    live = system.split("## Right now in the house\n", 1)[1]
+    assert "Right now in the house: " not in system and "Gasoline" not in system           # what plays now rides in the note that starts his message (Brain.context), never in the prompt
+    live = c.calls[0]["messages"][-1]["content"].split("Right now in the house: ", 1)[1]
     assert "Bilby is playing Gasoline by MDFMK on the Enclave upstairs. Volume is 7 of 10. 700 tracks are queued, DJ mode is on." in live
     assert "homecoming routine is running" in live
     b2, c2, _ = music_brain([text("Done.")])
     b2.audio = None
     b2.reply("hello")
-    assert "Right now in the house" not in c2.calls[0]["system"] and "Bilby: the house's audio" in c2.calls[0]["system"]
+    assert "Right now in the house" not in c2.calls[0]["messages"][-1]["content"] and "Bilby: the house's audio" in c2.calls[0]["system"]
     b3, c3, *_ = make([text("Done.")])
     b3.reply("hello")
     assert "Bilby: the house's audio" not in c3.calls[0]["system"] and BILBY not in c3.calls[0]["system"] and "timers" in c3.calls[0]["system"].lower()
@@ -128,7 +129,7 @@ def test_a_question_about_the_house_answered_with_how_things_stand_is_not_a_clai
         "Because DJ mode is currently enabled. I have not played, moved or changed any music."
     assert g.classify("play some metal", "", "Bilby is playing Gasoline now.", [])[0] == "reask"          # a command is judged as before
     b, c, ran = music_brain([text(said)], radio=FakeRadio(playing=True, title="Gasoline", artist="MDFMK"))
-    assert b.reply(heard) == said and len(c.calls) == 1 and not ran         # the chat answers from the prompt's lines, and the guard lets it
+    assert b.reply(heard) == said.removeprefix("[sighs] ") and len(c.calls) == 1 and not ran         # the chat answers from the note's lines, the guard lets it, and the stage direction is not spoken
 
 
 # ── houseaudio: the lines the model reads ──

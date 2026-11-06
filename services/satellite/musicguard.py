@@ -28,6 +28,7 @@ from __future__ import annotations
 import inspect
 import re
 
+import house_layout
 import mixes
 
 _G = sorted((g for g in mixes.GENRE_WORDS if g != "house"), key=len, reverse=True)
@@ -295,6 +296,30 @@ def _happened(fn, kinds=None) -> bool:
         return False
 
 
+_AUDIO_WORD = re.compile(rf"\b(?:{NOUN}|{PLACE}|{GENRES})\b", re.I)
+_LIGHT_NOUN = r"(?:lights?|lamps?|lighting|plugs?|fans?|outlets?|switch(?:es)?|bulbs?)"
+_MUSICAL_LIGHT = re.compile(rf"\b(?:[a-z']+ )?(?:{NOUN}|{PLACE}|{GENRES})(?: room| area)? {_LIGHT_NOUN}\b|\b{_LIGHT_NOUN}(?: (?:in|on|at|throughout))?(?: the)? (?:{PLACE})\b", re.I)
+# ("music room lamp", "the stereo light", "the upstairs lights", "lights everywhere", "lamps in the living room": a lamp is not a song, and a place that is a light's is not the music's; the two words are ONE name:
+#  "jazz upstairs and the lights on" is not)
+
+
+def _light_names() -> list[str]:
+    """The names of the layout's lights, plugs and fans that have a word in them a music claim reads as audio ("living track middle": a track), longest first. [] when the layout cannot be read."""
+    try:
+        return sorted({str(d["name"]).lower() for room in house_layout.default().rooms.values() for d in room.get("devices") or []
+                       if d.get("name") and d.get("kind") in ("light", "switch", "fan", "plug", "outlet") and _AUDIO_WORD.search(str(d["name"]))}, key=len, reverse=True)
+    except Exception:                                              # noqa: BLE001 — the guard must never fail because a file did
+        return []
+
+
+def without_lights(text: str) -> str:
+    """`text` with the lights named in it taken out ("I turned off the living track middle" -> "I turned off the lights"): after home_control a reply names a light, and a light called "track" or
+    "music room lamp" is no music (the review of 2026-11-05: the true reply to "I want the living room lights off" was cut to "I have not played, moved or changed any music.")."""
+    for name in _light_names():
+        text = re.sub(rf"\b{re.escape(name)}\b", "the lights", text or "", flags=re.I)
+    return _MUSICAL_LIGHT.sub("the lights", text or "")
+
+
 def classify(heard: str, prev: str, text: str, tools: list[str], happened=None):
     """-> (action, why). action: None (leave it) | 'reask' (he asked, nothing music ran: re-ask with the music tools only) | 'retract' (he did not ask:
     say plainly nothing was played, with NO tools, so nothing can start). why: 'claim' | 'loose' | 'silent'.
@@ -305,6 +330,8 @@ def classify(heard: str, prev: str, text: str, tools: list[str], happened=None):
     did any music thing happen?"""
     if not text or any(t in MUSIC_TOOLS for t in tools):
         return None, None
+    if "home_control" in tools:
+        text = without_lights(text)                                # (a switched light is named in the reply; a claim about the music in the same reply is still read)
     asked = asked_music(heard, prev)
     about = describing(heard)
     if music_claimed(text, about):

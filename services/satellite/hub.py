@@ -14,6 +14,10 @@ Nothing is recorded or kept, as in ear.py. Timers are per room and are announced
 memory; the house (lights, plugs) is shared. A Room never knows which kind of box it is talking to: that is its Link (WyomingLink here,
 EsphomeLink in esphome_link.py).
 
+Snappy like an Echo (2026-11-05): one SpeedKeeper (below) keeps Skippy Core's prompt cache warm (Brain.warm: at the hub's start and after 240 s of nobody using a brain; not
+when the name is heard: the review measured that warm as worth nothing hot and as costly cold) and renders the brain's fixed phrases ahead into a cache that Room.say reads first (no TTS call for a template reply); every turn's timing line
+(TurnTiming) says where its time went. SATELLITE_SPEED=off in the vault switches both off.
+
     python hub.py                    rooms from SATELLITE_ROOMS, e.g. "kitchen=esphome://skippy-kitchen.local,den=192.168.1.41"
     python hub.py --say kitchen "Dinner is ready, monkeys."      say something in one room, then quit
 """
@@ -22,6 +26,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import math
 import re
 import asyncio
 import sys
@@ -49,6 +54,7 @@ HUSH_S = 45                                                     # ... but not in
 AFTER_TURN_S = 180                                              # nor this soon after he last spoke to Skippy
 STARTER_ANSWER_S = 180                                          # an offered starter still takes "Skippy, tell me more" this long
 STOP_AUDIO_WAIT_S = 3.0                                         # a plain "stop" waits this long for the radio's pause and then signs off anyway (the radio's own call allows 40 s, and the room is deaf all that time)
+HOT_FILLER_S = 4.0                                              # the filler quip waits at least this long while Skippy Core's prompt is believed hot (SpeedKeeper.core_state): the model then answers in 1.5-4.4 s (median 2.1 s), and a quip of about 2 s in front of that only delays the answer
 # What Whisper writes for noise it cannot read (2026-11-04 08:12: "Thanks for watching!" was taken as a command): never a thing said to the house. A sentence that
 # merely holds the words is another matter (the review of 2026-11-05): "Skippy, turn off the lights. Thanks for watching!" keeps its command, and a real sentence ("thank you
 # for watching the kids", "please subscribe me to the weather alerts", "put the subtitles by default on the TV") reaches the house. The longer outros are noise too (round 2:
@@ -168,25 +174,46 @@ def split_for_voice(text: str, limit: int = 480) -> list[str]:
     return out or [text[:limit]]
 
 
+async def render_clip(piece, said: str):
+    """("mp3", bytes): `said` in Skippy's own voice, as one clip. `piece` makes one piece of it (an async callable: Room._tts_piece for a reply, which covers a busy studio
+    with a quip, or a plain gate call for a render ahead, which never speaks). The gate speaks at most 500 characters at a time: a longer text is made in pieces, one after
+    another (the voice studio speaks one line at a time and refuses a second, 2026-10-31), and joined into one clean stream. Raises what the pieces raise."""
+    parts = split_for_voice(said)
+    clips = [await piece(t) for t in parts]
+    return ("mp3", await asyncio.to_thread(one_stream, b"".join(clips)))
+
+
 class TurnTiming:
     """Where the time of one spoken turn went, from the end of his voice to Skippy's voice being ready (the Captain, 2026-11-05: "streamline it so it becomes snappy
     like Amazon echo"; measured that day, heard -> said had a median of 8 s and a p90 of 24 s): wait (the silence the voice detector waited to be sure he had finished),
     hear (the voice gate's Whisper), think (the brain, with its own split when it keeps one: brain.timing = {"route", "model_s": [...], "tools_s", "total_s"}) and voice
     (the reply turned into audio). One log line per turn and a `timing` in the house log's command record. A typed turn has no wait and no hear. Nothing here raises: a
-    number that cannot be read is left out."""
+    number that cannot be read is left out.
+
+    What the keeper (SpeedKeeper) and the brain add when they have something to say, and nothing when they do not (so a room without one logs what it always did):
+    `core` (hub: Skippy Core's prompt cache as the thinking began, "hot" / "warming" / "cold"; shown as `prompt hot`), `cached` (hub: the voice was a clip rendered ahead, no
+    TTS call; `voice 0.0s cached`), `template` (the reply was one of the brain's fixed phrases: the hub's guess from the text, or the brain's own word for it), and whatever else
+    the brain's split holds besides route, model_s, tools_s and total_s (a prompt-cache hit, tokens read from the cache, an ack's name ...): short names with a yes/no, a
+    number or a few characters, shown as they are (`warm hit`, `no template`, `cache_read 5125`) and kept flat in the numbers. The brain's side can add keys without the hub
+    knowing them."""
+
+    BRAIN_KEYS = ("route", "model_s", "tools_s", "total_s")     # what the brain's split has always held
 
     def __init__(self, heard: dict | None = None, sink=None):
         heard = heard if isinstance(heard, dict) else {}
         self.wait, self.hear = heard.get("wait"), heard.get("hear")
         self.think = self.voice = None
         self.brain = None
+        self.core = None                                        # SpeedKeeper.core_state() as the thinking began; None in a room without a keeper
+        self.cached = False                                     # the voice came from the clips rendered ahead
+        self.template = False                                   # the reply is one of the brain's fixed phrases
         self.sink, self._done = sink, False                     # sink(self) is called once: when the voice is ready, or when the turn ended without one
 
     def thought(self, seconds: float, brain=None) -> None:
         self.think, self.brain = seconds, brain
 
-    def voiced(self, seconds: float) -> None:
-        self.voice = seconds
+    def voiced(self, seconds: float, cached: bool = False) -> None:
+        self.voice, self.cached = seconds, bool(cached)
         self.finish()
 
     def finish(self) -> None:
@@ -207,6 +234,26 @@ class TurnTiming:
         tools = b.get("tools_s") if isinstance(b.get("tools_s"), (int, float)) else None
         return route, model, tools
 
+    def _extras(self) -> list[tuple[str, object]]:
+        """What else the brain recorded about its reply, whatever it calls it: names of lower case letters, digits and underscores with a yes/no, a finite number or up to 24
+        printable characters for a value (anything else is not for a log line), at most six."""
+        b = self.brain if isinstance(self.brain, dict) else {}
+        out = []
+        for key, value in list(b.items()):                      # (a copy: the brain's thread may still be adding to its record)
+            if key in self.BRAIN_KEYS or not isinstance(key, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,23}", key):
+                continue
+            if isinstance(value, (bool, int)) or (isinstance(value, float) and math.isfinite(value)) or (isinstance(value, str) and 0 < len(value) <= 24 and value.isprintable()):
+                out.append((key, round(value, 1) if isinstance(value, float) else value))
+        return out[:6]
+
+    @staticmethod
+    def _extra_text(key: str, value) -> str:
+        if value is True:
+            return key.replace("_", " ")                        # warm_hit: True -> "warm hit"
+        if value is False:
+            return "no " + key.replace("_", " ")                # template: False -> "no template"
+        return f"{key} {value}"                                 # cache_read: 5125 -> "cache_read 5125"
+
     def numbers(self) -> dict:
         """Seconds to 0.1, for the house log's command record."""
         out = {name: round(v, 1) for name, v in self._parts()}
@@ -219,26 +266,51 @@ class TurnTiming:
                 out["model"] = [round(x, 1) for x in model]
             if tools is not None:
                 out["tools"] = round(float(tools), 1)
+            for key, value in self._extras():
+                out.setdefault(key, value)
         except Exception:                                       # noqa: BLE001 — the brain's own numbers are a bonus
             pass
+        if self.core:
+            out["core"] = str(self.core)
+        if self.cached:
+            out["cached"] = True
+        if self.template:
+            out.setdefault("template", True)                    # (the brain's own word for it, when it gave one, stays)
         return out
 
+    def _inner(self) -> list[str]:
+        """The bracket after the thinking time: the brain's own split, what else it recorded, then the prompt cache's state and a template reply (the hub's own facts)."""
+        inner, extras = [], []
+        try:
+            if self.brain:
+                route, model, tools = self._split()
+                inner.append(f"route {route if route else 'none'}")
+                if model:
+                    inner.append("model " + "+".join(f"{x:.1f}" for x in model) + "s")
+                if tools is not None:
+                    inner.append(f"tools {float(tools):.1f}s")
+            extras = self._extras()
+            inner += [self._extra_text(k, v) for k, v in extras]
+        except Exception:                                       # noqa: BLE001
+            pass
+        if self.core:
+            inner.append(f"prompt {self.core}")
+        if self.template and not any(k == "template" for k, _ in extras):
+            inner.append("template")
+        return inner
+
     def line(self) -> str:
-        """(timing: wait 0.7s, hear 0.9s, think 3.4s [route none; model 2.1+1.3s; tools 0.2s], voice 1.1s = 6.1s)"""
+        """(timing: wait 0.7s, hear 0.9s, think 3.4s [route none; model 2.1+1.3s; tools 0.2s], voice 1.1s = 6.1s); with a keeper: (timing: ..., think 1.0s [route none;
+        model 0.6s; tools 0.0s; prompt hot; template], voice 0.0s cached = 2.6s)"""
         bits = []
         for name, v in self._parts():
             text = f"{name} {v:.1f}s"
-            if name == "think" and self.brain:
-                try:
-                    route, model, tools = self._split()
-                    inner = [f"route {route if route else 'none'}"]
-                    if model:
-                        inner.append("model " + "+".join(f"{x:.1f}" for x in model) + "s")
-                    if tools is not None:
-                        inner.append(f"tools {float(tools):.1f}s")
+            if name == "think":
+                inner = self._inner()
+                if inner:
                     text += " [" + "; ".join(inner) + "]"
-                except Exception:                               # noqa: BLE001
-                    pass
+            elif name == "voice" and self.cached:
+                text += " cached"
             bits.append(text)
         return f"(timing: {', '.join(bits)} = {sum(v for _, v in self._parts()):.1f}s)"
 
@@ -273,6 +345,8 @@ class Room:
         self.alarms = None                                      # alarms.Alarms: this room's alarms and reminders (on disk); one rings here until he answers
         self.clock = None                                       # alarm_clock.AlarmClock (the house's, shared): rings the alarms and timers instead of this room
         self.inbox = None                                       # a Path: words handed to the running hub from this PC (`hub.py --type ROOM TEXT`), taken as typed
+        self.speed = None                                       # SpeedKeeper (shared): Skippy Core's prompt cache kept warm, the fixed phrases rendered ahead (attach_speed)
+        self.clips = None                                       # ... and those clips (speed.clips): _voice reads them first, so a template reply makes no TTS call
         self.tasks: set = set()
         self.voice = asyncio.Lock()                             # one thing said at a time (a timer waits for an answer to finish)
         self.vad = Vad(floor_min=floor)
@@ -795,6 +869,10 @@ class Room:
         self.log(f"[{self.name}] heard: {command}")
         started, outcome = time.time(), "ok"
         turn, thought = TurnTiming(None if typed else heard), time.monotonic()
+        speed = self.speed
+        if speed is not None:
+            turn.core = speed.core_state(self.brain)            # Skippy Core's prompt cache as the thinking begins: the start-up warm, the keep-warm loop, the last turn
+            speed.turn_started(self.brain)                      # no warm runs while this is being thought: it would only compete with the real call
         try:
             work = asyncio.ensure_future(asyncio.to_thread(self.brain.reply, command))
             await self._cover_the_wait(work, command)
@@ -803,7 +881,12 @@ class Room:
             self.log(f"[{self.name}] (brain failed: {type(e).__name__})")
             outcome = "brain_failed"
             reply = "My brain is not answering. Typical."
-        turn.thought(time.monotonic() - thought, getattr(self.brain, "timing", None) if outcome == "ok" else None)     # (a failed reply has no split of its own: the last one's is not its)
+        finally:
+            if speed is not None:
+                speed.turn_ended(self.brain, ok=outcome == "ok", model=self._asked_model())     # (a failed turn: Core is taken for away for a minute, and nothing warms it meanwhile)
+        record = getattr(self.brain, "timing", None) if outcome == "ok" else None             # (a failed reply has no split of its own: the last one's is not its)
+        turn.thought(time.monotonic() - thought, record)
+        turn.template = speed is not None and self._template_reply(reply, record)
         self.log(f"[{self.name}] said: {reply[:120]}")
         calls = list(getattr(self.brain, "actions", None) or [])
         seconds = round(time.time() - started, 1)
@@ -836,6 +919,24 @@ class Room:
         else:
             self._resume(IDLE)
 
+    def _template_reply(self, reply: str, record) -> bool:
+        """Is this reply a closed-bank confirmation (the timing line says `template`)? The brain knows: when it recorded its own split of the reply (a model_s list), its word is taken, `template` or not.
+        A "Done, Captain." the MODEL worded is a model reply that happens to equal a phrase of the bank, and it is exactly the kind of reply the log is read for (the review of 2026-11-05: the false
+        acknowledgements, hidden when the hub judged by the text). A brain that records nothing, or a turn that failed (`record` is None: the brain's record is the last reply's), is judged by the
+        phrase bank, as before."""
+        if isinstance(record, dict) and isinstance(record.get("model_s"), list):
+            return bool(record.get("template"))
+        return self.speed is not None and self.speed.is_fixed(reply)
+
+    def _asked_model(self) -> bool:
+        """Did the reply just made ask the model (the brain's own record of it)? A confirmation the brain worded from a phrase of its own never did, so it neither warmed nor
+        proved anything about Skippy Core's cache. True when that cannot be told: a brain that keeps no such record is taken to have asked."""
+        try:
+            record = getattr(self.brain, "timing", None)
+            return bool(record["model_s"]) if isinstance(record, dict) and "model_s" in record else True
+        except Exception:                                       # noqa: BLE001
+            return True
+
     async def _sign_off(self, command: str) -> None:
         """A short pre-recorded line when he is thanked or told goodbye (not for a plain stop or cancel)."""
         import re                                               # noqa: PLC0415
@@ -849,13 +950,29 @@ class Room:
                 await self.link.show(text)
                 await self._out(text, ("mp3", mp3), announce=True)
 
+    def _prompt_is_hot(self) -> bool:
+        """Does the keeper believe Skippy Core's prompt is hot for this room's brain? False when that cannot be told: no keeper, a warm running (the answer may wait for it), or a keeper that fails."""
+        try:
+            return self.speed is not None and self.speed.core_state(self.brain) == "hot"
+        except Exception:                                       # noqa: BLE001 — a belief about Core's cache must never cost a quip or a turn
+            return False
+
     async def _cover_the_wait(self, work, command: str) -> None:
         """While the answer is worked out, say a pre-recorded quip as soon as it is clearly not going to be instant (never for a quick home command), and one more
-        if it is still not ready after the first: Skippy answers at once, and the real answer follows."""
+        if it is still not ready after the first: Skippy answers at once, and the real answer follows.
+
+        What "clearly not going to be instant" is depends on Core's prompt (the review of 2026-11-05). On a cold prompt a model turn takes 15-20 s, and a quip at 1 s fills dead air. On a hot one it
+        takes 1.5-4.4 s (median 2.1 s), and a quip (the 207 recorded ones last 0.5-7.8 s, median 2.1 s) in front of that holds the voice lock and puts the answer behind itself. So while the keeper
+        believes the prompt hot, the FIRST quip waits max(filler_after_s, HOT_FILLER_S) (a household command still gets its longer factor); a cold or unknown prompt (no keeper, a warm running, a
+        keeper that cannot say) keeps the delays it always had. After the first quip the wait goes on the same way whatever the belief: 5 s more, and the second quip if the answer is still not
+        there. (A belief that the prompt is hot goes stale: another client of Core's chat slot evicts the cache after the keeper last saw it hot, and that turn takes 20 s. With the second quip
+        dropped for a hot turn it got one quip at 4 s and then silence, where a cold one got a quip at 1 s and another at 6 s. A genuinely hot turn, 1.5-4.4 s, is over before any quip.)"""
         if self.filler is None or self.filler_after_s <= 0:
             return
+        hot = self._prompt_is_hot()
         kind = self.filler.kind_for(command)
-        wait = self.filler_after_s * (2.2 if kind == "home" else 1.0)     # a quick household command is usually answered at once: give it longer
+        after = max(self.filler_after_s, HOT_FILLER_S) if hot else self.filler_after_s
+        wait = after * (2.2 if kind == "home" else 1.0)         # a quick household command is usually answered at once: give it longer
         done, _ = await asyncio.wait({work}, timeout=wait)
         import filler as filler_mod                             # noqa: PLC0415
         topic = filler_mod.topic_for(command)                   # the second line, when the wait drags: a factoid about what he asked, if there is one in stock
@@ -870,7 +987,7 @@ class Room:
                 async with self.voice:
                     await self.link.show(text)
                     await self._out(text, ("mp3", mp3), announce=True)
-            done, _ = await asyncio.wait({work}, timeout=5.0)
+            done, _ = await asyncio.wait({work}, timeout=5.0)         # (a hot turn too: its second quip comes if the answer is still not there, see above)
 
     def _resume(self, mode: str, window_ms: int = 0) -> None:
         self._fresh()
@@ -925,9 +1042,10 @@ class Room:
         self._last_said = (said, time.monotonic())              # an echo of it is not the Captain talking (is_echo)
         async with self.voice:
             made = time.monotonic()
+            ahead = (voice is None or said != text) and self.clips is not None and said in self.clips     # a fixed phrase, rendered ahead: no TTS call
             voice = voice if voice is not None and said == text else await self._voice(said)    # a clip made already (a starter) is used as it is
             if timing is not None:
-                timing.voiced(time.monotonic() - made)
+                timing.voiced(time.monotonic() - made, cached=ahead)
             await self.link.show(said)
             if self.stereo is not None:
                 self.stereo.duck(True, 90)                      # the house radio ducks under Skippy's voice, then comes back
@@ -1008,11 +1126,13 @@ class Room:
         return True
 
     async def _voice(self, said: str):
-        """("mp3", bytes) from Skippy's own voice, ("pcm", bytes, rate) from the machine's, or None when neither answers."""
+        """("mp3", bytes) from Skippy's own voice, ("pcm", bytes, rate) from the machine's, or None when neither answers. A fixed phrase that was rendered ahead
+        (SpeedKeeper, the clips) is served from memory: no call to the voice gate at all, and nothing to wait for."""
+        ready = self.clips.get(said) if self.clips is not None else None
+        if ready is not None:
+            return ready
         try:
-            parts = split_for_voice(said)                       # the gate speaks at most 500 characters at a time: a longer reply is spoken in pieces, joined into one clip
-            clips = [await self._tts_piece(t) for t in parts]  # one after another: the voice studio speaks one line at a time and refuses a second (2026-10-31)
-            return ("mp3", await asyncio.to_thread(one_stream, b"".join(clips)))
+            return await render_clip(self._tts_piece, said)
         except BudgetSpent:
             self.log(f"[{self.name}] (Skippy's voice has used today's budget: using the machine's own voice)")
         except (GateError, RuntimeError, OSError) as e:
@@ -1311,6 +1431,395 @@ class Hub:
         await room.announce(text)
 
 
+# ── snappy like an Echo (the Captain, 2026-11-05: "streamline it so it becomes snappy like Amazon Echo") ──
+# Measured that day: Skippy Core's chat model (a hybrid, llama.cpp: it reuses a cached prefix only from a checkpoint a little before the end of the last prompt) re-reads the whole
+# 5.6k-token house prompt, 4-6 s (6-8 s with the tools), whenever the text before that checkpoint changed, and answers in 0.6 s when the prefix is warm; and every spoken
+# reply costs the voice studio 1.4-2 s unless that exact text was rendered before. The SpeedKeeper is the hub's half of the fix (the brain's half: what comes first in its
+# prompt, and Brain.warm / fixed_phrases): it keeps the prompt warm and renders the brain's fixed phrases ahead of time. Every part is a favour to a turn that may never come:
+# nothing here is awaited on a turn's way, nothing raises into one, and a house that is busy gets left alone.
+WARM_START_TRIES = 10                                           # (a) the first warm, at hub start: this many tries, ...
+WARM_START_BACKOFF_S = (5, 60)                                  # ... 5 s apart at first, doubling up to a minute
+# (b), a warm when the name is heard, was built and then taken out again (review of 2026-11-05, P5): see the SpeedKeeper's docstring for what it was worth
+WARM_IDLE_S = 240                                              # (c) a brain nobody used or warmed for this long is warmed (other clients of Core's chat slot evict the prefix)
+WARM_CHECK_S = 15                                               # (c) how often that is looked at
+WARM_AWAY_S = 60                                                # a warm that failed or a turn that failed: Core is taken for away this long, and nothing warms it meanwhile
+WARM_HOT_S = 300                                                # a warm or a turn that succeeded this recently: the prompt is probably still hot (TurnTiming's `prompt hot`)
+WARM_LOG_S = 60                                                 # the warm's and the renders' trouble is logged once a minute at most
+RENDER_AFTER_S = 60                                             # (H2) the fixed phrases are rendered after the first warm worked, or this long after the start anyway
+RENDER_GAP_S = 3.0                                              # ... one at a time, this long apart
+RENDER_QUIET_S = 8                                              # ... and only when no room has heard a voice for this long
+RENDER_AGAIN_S = 900                                            # ... a pass renders what is missing; the next is this much later (a gate that was down has come back)
+RENDER_RETRY_S = 300                                            # ... or this much after a pass that had failures
+RENDER_SPENT_S = 3600                                           # ... or this much after the voice's budget for the day ran out
+RENDER_FAILS = 3                                                # this many failures in a row end a pass (a gate that is down is not asked over and over)
+HUB_FIXED = ("My brain is not answering. Typical.",             # what the hub itself says without the brain (Room.handle when the model is away) ...
+             "Okay, no problem, Captain.")                      # ... and when a no is answered and there is no recorded quip (Room._decline)
+
+
+class ClipCache:
+    """Skippy's voice for text that was rendered ahead: text -> ("mp3", bytes), one cache for every room. Only whole clips of the gate's own voice go in (never the machine's
+    own), and only the SpeedKeeper puts them there, so a reply that is not a fixed phrase is never kept. The text is matched as the voice gate matches it: without the
+    whitespace around it."""
+
+    def __init__(self, limit: int = 256):
+        self._clips: dict[str, tuple] = {}
+        self.limit = limit
+
+    @staticmethod
+    def _key(text):
+        return text.strip() if isinstance(text, str) else text
+
+    def get(self, text: str):
+        return self._clips.get(self._key(text))
+
+    def put(self, text: str, clip: tuple) -> None:
+        key = self._key(text)
+        if key not in self._clips and len(self._clips) >= self.limit:
+            self._clips.pop(next(iter(self._clips)))            # the oldest
+        self._clips[key] = clip
+
+    def clear(self) -> None:
+        self._clips.clear()
+
+    def __contains__(self, text) -> bool:
+        return self._key(text) in self._clips
+
+    def __len__(self) -> int:
+        return len(self._clips)
+
+
+def fixed_phrases_of(brain=None, module=None) -> list[str]:
+    """Every fixed phrase the brain can say, each once: what a brain lists itself (fixed_phrases() and ACKS), then what the brain's module lists (the same two, where the phrases
+    do not depend on a brain). Whatever is not a non-empty string is ignored, and a list that fails costs the others nothing."""
+    out: list[str] = []
+    for owner in (brain, module):
+        if owner is None:
+            continue
+        lists = []
+        listing = getattr(owner, "fixed_phrases", None)
+        if callable(listing):
+            try:
+                lists.append(listing())
+            except Exception:                                   # noqa: BLE001 — a favour: the other lists still count
+                pass
+        lists.append(getattr(owner, "ACKS", None))
+        for items in lists:
+            try:
+                phrases = list(items or ())
+            except TypeError:
+                continue
+            for p in phrases:
+                if isinstance(p, str) and p.strip() and p.strip() not in out:
+                    out.append(p.strip())
+    return out
+
+
+class SpeedKeeper:
+    """The hub's half of "snappy like an Echo", one for the whole hub (build_rooms makes it, `_main` runs it, every room is attached to it: attach_speed).
+
+    H1, Skippy Core's prompt cache kept warm (Brain.warm(): one token asked of the real house prompt, run in a thread): (a) once at the hub's start, tried again with a backoff
+    (5 s doubling to a minute, ten tries) until it works; (c) every 15 s a brain that nobody has used or warmed for 240 s. A warm never starts while a turn is being thought (Room.handle
+    brackets it with turn_started / turn_ended), while another warm of any room runs, or when Core is known to be away (a warm that failed, or a turn that did: for a minute), it
+    is never on a turn's way (the loops are their own tasks, nothing waits for them), and what goes wrong in one is logged once a minute at most.
+
+    There is no (b), a warm when the name is heard (built first, taken out again after the review of 2026-11-05, P5). Measured on Core: with the prompt hot the warm gains almost
+    nothing now that the clock and the room ride in the newest message instead of the end of the system prompt (the real Brain, 15 turns each way: a median turn of 2.23 s without
+    the warm and 2.16 s with it, 181 fresh tokens against 55; builder 1's probe of the old layout, 3 runs: a median 1.30 s against 1.10 s), and with the prompt cold, or evicted since
+    the keeper last saw it hot (a 300 s belief; other clients of Core's chat slot evict the prefix), it makes the turn twice as slow: a cold 10.5k-token prefix took a turn alone
+    20.7 s and 21.0 s, and with a warm started 3 s before it 40.0 s and 37.7 s, because llama.cpp does not share a prefill that is in flight. The start-up warm and the 240 s loop
+    keep the prefix hot; what a turn re-reads (the note and his words) is a few hundred tokens.
+
+    H2, the brain's fixed phrases (its acks and the like) rendered ahead into `clips`, which Room._voice reads first: the first time a template reply is said it is served from
+    memory, with no call to the voice gate at all. One phrase at a time, RENDER_GAP_S apart, only when no room is speaking, thinking, listening or has just heard a voice; a
+    render that fails is skipped (never retried in the moment, never covered with a quip, never the machine's own voice), RENDER_FAILS in a row end the pass, a spent
+    voice budget ends it for the day.
+
+    `clock` and `sleep` are for the tests. The brain's side is looked up with getattr (warm, fixed_phrases, ACKS), so a brain without them is simply left alone."""
+
+    def __init__(self, gate, log=print, clock=time.monotonic, sleep=asyncio.sleep, clips: ClipCache | None = None, brain_module=None, own_phrases=HUB_FIXED):
+        self.gate, self.log, self.clock, self.sleep = gate, log, clock, sleep
+        self.clips = clips if clips is not None else ClipCache()
+        self.module, self.own = brain_module, tuple(own_phrases)
+        self.started = False                                    # (a) done: the first warm worked, or there is nothing to warm
+        self.touched: dict[int, float] = {}                     # id(brain) -> when a warm of it began or a turn of it ended
+        self.hot_at: dict[int, float] = {}                      # id(brain) -> when a warm or a turn of it last worked
+        self.thinking: dict[int, int] = {}                      # id(brain) -> the turns being thought now
+        self.inflight: set[int] = set()                         # id(brain) -> a warm is running
+        self.away_until = 0.0                                   # Core is taken for away until then
+        self._complained, self._announced = -math.inf, False
+        self._fixed: set[str] = set()                           # every fixed phrase seen (is_fixed): the template replies
+
+    # ── what the rooms tell it ──
+    def core_state(self, brain) -> str:
+        """Skippy Core's prompt cache for this brain, as far as the hub can tell: "warming" (a warm is running), "hot" (a warm or a turn worked in the last WARM_HOT_S) or "cold"."""
+        key = id(brain)
+        if key in self.inflight:
+            return "warming"
+        at = self.hot_at.get(key)
+        return "hot" if at is not None and self.clock() - at < WARM_HOT_S else "cold"
+
+    def turn_started(self, brain) -> None:
+        key = id(brain)
+        self.thinking[key] = self.thinking.get(key, 0) + 1
+
+    def turn_ended(self, brain, ok: bool = True, model: bool = True) -> None:
+        """A turn of this brain is over (Room.handle, in a finally). If it asked the model it touched the prompt, so no warm is due for a while, and it proved Core is there; one
+        that never did (a confirmation from the brain's own phrases) changes nothing about either. If it failed, Core is taken for away for a minute."""
+        key, now = id(brain), self.clock()
+        left = self.thinking.get(key, 0) - 1
+        if left > 0:
+            self.thinking[key] = left
+        else:
+            self.thinking.pop(key, None)
+        if not ok:
+            self.touched[key] = now
+            self.hot_at.pop(key, None)
+            self.away_until = now + WARM_AWAY_S
+        elif model:
+            self.touched[key] = self.hot_at[key] = now
+            self.away_until = 0.0
+
+    def is_fixed(self, text) -> bool:
+        """Is this one of the brain's fixed phrases (a template reply)? Known once the phrases have been looked up (startup, every render pass)."""
+        return isinstance(text, str) and (text.strip() in self._fixed or text in self.clips)
+
+    # ── H1: the warm ──
+    def brains(self, hub) -> list:
+        """The distinct brains of the rooms that are connected, in the order of the rooms."""
+        seen, out = set(), []
+        for room in list(getattr(hub, "rooms", {}).values()):
+            brain = getattr(room, "brain", None)
+            if brain is not None and id(brain) not in seen:
+                seen.add(id(brain))
+                out.append(brain)
+        return out
+
+    def _may_warm(self, brain, gap: float) -> bool:
+        """A warm of this brain would be welcome now: it can warm, no warm is running (one at a time: two prefills of the same prompt side by side only slow each other),
+        no turn is being thought anywhere, Core is not known to be away, and the prompt was not touched (warmed, or used by a turn) in the last `gap` seconds."""
+        if not callable(getattr(brain, "warm", None)) or self.inflight or self.thinking:
+            return False
+        now = self.clock()
+        return now >= self.away_until and now - self.touched.get(id(brain), -math.inf) >= gap
+
+    def _claim(self, brain) -> bool:
+        key = id(brain)
+        if key in self.inflight:
+            return False
+        self.inflight.add(key)
+        self.touched[key] = self.clock()
+        return True
+
+    def _complain(self, text: str) -> None:
+        """One line a minute at most: a warm that fails every 15 s while Core is down must not fill the log."""
+        now = self.clock()
+        if now - self._complained < WARM_LOG_S:
+            return
+        self._complained = now
+        try:
+            self.log(f"(speed: {text})")
+        except Exception:                                       # noqa: BLE001
+            pass
+
+    async def warm(self, brain, why: str = "") -> float | None:
+        """Warm Skippy Core's prompt cache for this brain: brain.warm() in a thread. -> the seconds it took, or None (Core did not answer, the brain cannot warm, a warm of it
+        is running already). Never raises."""
+        key = id(brain)
+        warm = getattr(brain, "warm", None)
+        if not callable(warm) or not self._claim(brain):
+            return None
+        error, took = None, None
+        try:
+            took = await asyncio.to_thread(warm)
+        except Exception as e:                                  # noqa: BLE001 — Brain.warm never raises; another brain that does is logged, not raised
+            error = e
+        finally:
+            self.inflight.discard(key)
+        now = self.clock()
+        if took is True or (isinstance(took, (int, float)) and not isinstance(took, bool) and math.isfinite(took) and took >= 0):
+            self.hot_at[key], self.away_until, self.started = now, 0.0, True
+            if not self._announced:
+                self._announced = True
+                self.log(f"(speed: Skippy Core's prompt is warm: {0.0 if took is True else float(took):.1f} s)")
+            return 0.0 if took is True else float(took)
+        self.hot_at.pop(key, None)
+        self.away_until = now + WARM_AWAY_S
+        self._complain(f"warming Skippy Core's prompt ({why or 'a room'}) failed: {type(error).__name__}: {error}" if error is not None
+                       else f"Skippy Core did not answer the warm ({why or 'a room'}); not asking again for {WARM_AWAY_S} s")
+        return None
+
+    async def startup(self, hub) -> None:
+        """(a) The first warm, as soon as a box has connected (the first room's brain: the prompts of the rooms differ only in where he is). Tried again with a backoff of 5 s
+        doubling to 60 until it works, ten tries at most, and a brain that cannot warm is nothing to wait for. Every try keeps the gates every other warm keeps (_may_warm; the review of
+        2026-11-05): no turn being thought, no warm of ANY room running (two prefills of the same prompt side by side only slow each other), and Core not taken for away. Waiting for a gate
+        spends no try; a failed warm takes Core for away for WARM_AWAY_S, so a retry comes a minute after the failure at the soonest (the backoff is the least time between tries)."""
+        tries, delay = 0, WARM_START_BACKOFF_S[0]
+        while tries < WARM_START_TRIES and not self.started:
+            brains = self.brains(hub)
+            if not brains:
+                await self.sleep(1.0)                           # no box has connected yet
+                continue
+            brain = brains[0]
+            self.phrases(hub)                                   # (the template replies are known from here on)
+            if not callable(getattr(brain, "warm", None)):
+                self.started = True
+                return
+            if not self._may_warm(brain, 0):                    # a turn is being thought, a warm is running (any room's), or Core is known to be away
+                await self.sleep(1.0)
+                continue
+            if await self.warm(brain, "start") is not None:
+                return
+            tries += 1
+            if tries < WARM_START_TRIES:
+                await self.sleep(delay)
+                delay = min(WARM_START_BACKOFF_S[1], delay * 2)
+        if not self.started:
+            self.log(f"(speed: Skippy Core did not answer {WARM_START_TRIES} warms at the start; the {WARM_IDLE_S} s loop keeps trying)")
+
+    async def keep_warm(self, hub) -> None:
+        """(c) Every WARM_CHECK_S: one brain that nobody has used or warmed for WARM_IDLE_S (one never warmed at all, like a room that has just connected, counts) is
+        warmed. One at a time, never mid-turn."""
+        while True:
+            await self.sleep(WARM_CHECK_S)
+            due = next((b for b in self.brains(hub) if self._may_warm(b, WARM_IDLE_S)), None)
+            if due is not None:
+                await self.warm(due, "idle")
+            if len(self.touched) > 64:
+                self._prune()
+
+    def _prune(self) -> None:
+        """Brains of rooms that reconnected are gone: forget what was kept about the ones not touched for an hour."""
+        old = self.clock() - 3600
+        for kept in (self.touched, self.hot_at):
+            for key in [k for k, t in kept.items() if t < old and k not in self.inflight and k not in self.thinking]:
+                del kept[key]
+
+    # ── H2: the phrases rendered ahead ──
+    def _brain_module(self):
+        if self.module is not None:
+            return self.module
+        try:
+            import brain as brain_mod                           # noqa: PLC0415
+            return brain_mod
+        except Exception:                                       # noqa: BLE001
+            return None
+
+    def phrases(self, hub) -> list[str]:
+        """Every fixed phrase to have rendered: what each connected brain lists, what the brain's module lists, then what the hub itself says; each once."""
+        out: list[str] = []
+        lists = [fixed_phrases_of(b) for b in self.brains(hub)] + [fixed_phrases_of(None, self._brain_module()), list(self.own)]
+        for phrases in lists:
+            for p in phrases:
+                if isinstance(p, str) and p.strip() and p.strip() not in out:
+                    out.append(p.strip())
+        self._fixed.update(out)
+        return out
+
+    def quiet(self, hub) -> bool:
+        """The house is quiet enough to spend the voice studio on a render: no turn being thought, and no room busy, listening, speaking, hearing a voice now or a moment ago,
+        ringing an alarm, running a routine, recording, or still waiting out its own voice on a PC output."""
+        if self.thinking:
+            return False
+        now = time.monotonic()                                  # (what the rooms stamp their own times with)
+        for room in list(getattr(hub, "rooms", {}).values()):
+            if getattr(room, "mode", IDLE) != IDLE or getattr(room, "buf", None) is not None or getattr(room, "recorder", None) is not None:
+                return False
+            lock = getattr(room, "voice", None)
+            if lock is not None and lock.locked():
+                return False
+            heard = getattr(room, "_voice_at", None)
+            if heard is not None and now - heard < RENDER_QUIET_S:
+                return False
+            if getattr(getattr(room, "clock", None), "ringing", None) is not None or getattr(getattr(room, "daily", None), "busy", False):
+                return False
+            if any(getattr(o, "talking_until", 0) > now for o in getattr(room, "pc_outs", ())):
+                return False
+        return True
+
+    async def render(self, text: str) -> bool:
+        """Render one phrase into the clips: the pieces and the joining of a reply (render_clip), but a plain gate call for each: no retry in the moment, no quip in a room (a
+        studio busy with someone's line makes this render wait for the next pass), no machine voice. True when it is in the clips; raises BudgetSpent."""
+        async def piece(t: str) -> bytes:
+            return await asyncio.to_thread(self.gate.tts, t)
+        try:
+            clip = await render_clip(piece, text)
+        except BudgetSpent:
+            raise
+        except Exception as e:                                  # noqa: BLE001 — a render is a favour: this one is skipped
+            self._complain(f"could not render {text[:40]!r} ahead: {type(e).__name__}: {e}")
+            return False
+        self.clips.put(text, clip)
+        return True
+
+    async def prerender_pass(self, hub) -> tuple[int, int, bool]:
+        """One pass over the phrases that are not rendered yet: (rendered, failed, the voice's budget is spent)."""
+        rendered = failed = streak = 0
+        last = -math.inf
+        for text in self.phrases(hub):
+            if text in self.clips:
+                continue
+            while not (self.clock() - last >= RENDER_GAP_S and self.quiet(hub)):
+                await self.sleep(1.0)                           # one at a time, three seconds apart, in a quiet house
+            try:
+                done = await self.render(text)
+            except BudgetSpent:
+                self._complain("Skippy's voice has used today's budget: the fixed phrases wait for tomorrow")
+                return rendered, failed, True
+            last = self.clock()
+            if done:
+                rendered, streak = rendered + 1, 0
+            else:
+                failed, streak = failed + 1, streak + 1
+                if streak >= RENDER_FAILS:
+                    break                                       # the gate is down: not asked again and again
+        return rendered, failed, False
+
+    async def prerender(self, hub) -> None:
+        """(H2) After the first warm worked (or a minute after the start, whichever is first), and then every RENDER_AGAIN_S: render what is missing."""
+        began = self.clock()
+        while not self.started and self.clock() - began < RENDER_AFTER_S:
+            await self.sleep(1.0)
+        while True:
+            wait = RENDER_AGAIN_S
+            try:
+                rendered, failed, spent = await self.prerender_pass(hub)
+                wait = RENDER_SPENT_S if spent else RENDER_RETRY_S if failed else RENDER_AGAIN_S
+                if not self.brains(hub):
+                    wait = min(wait, 30)                        # no box has connected yet: its brain's phrases are still to come
+                if rendered:
+                    self.log(f"(speed: {rendered} fixed phrase{'s' if rendered != 1 else ''} rendered ahead{f', {failed} could not be' if failed else ''}: {len(self.clips)} in all)")
+            except Exception as e:                              # noqa: BLE001 — a favour: the next pass tries again
+                self._complain(f"the render pass failed: {type(e).__name__}: {e}")
+            await self.sleep(wait)
+
+    # ── all of it ──
+    async def _guarded(self, job, hub) -> None:
+        while True:
+            try:
+                await job(hub)
+                return
+            except Exception as e:                              # noqa: BLE001 — a bug in a favour must not take the hub's other jobs down with it
+                self._complain(f"{job.__name__} stopped: {type(e).__name__}: {e}")
+            await self.sleep(60)
+
+    async def run(self, hub) -> None:
+        """The hub's three background jobs, until cancelled. Never raises."""
+        await asyncio.gather(self._guarded(self.startup, hub), self._guarded(self.keep_warm, hub), self._guarded(self.prerender, hub))
+
+
+def speed_from_env(env: dict, gate, log=print):
+    """The hub's SpeedKeeper, or None when the vault says SATELLITE_SPEED=off (the way back to a hub that warms nothing and renders nothing ahead)."""
+    if str(env.get("SATELLITE_SPEED", "on")).strip().lower() in ("off", "0", "no", "false"):
+        return None
+    return SpeedKeeper(gate, log=log)
+
+
+def attach_speed(room, speed) -> None:
+    """A room gets the hub's keeper and the clips it renders into (or, with no keeper, neither: the room is as it was)."""
+    room.speed = speed
+    room.clips = speed.clips if speed is not None else None
+
+
 # ── the program ──
 def build_rooms(env: dict):
     """A Room factory sharing the gate, the house and the spotter's model file; each room gets its own brain memory and timers, and a box
@@ -1409,6 +1918,7 @@ def build_rooms(env: dict):
                     log(f"(nest: {str(e)[:120]})")
                     return None
             routines.extras["thermostat_night"] = thermostat_night   # bedtime: the thermostat's line, and the night set point if he chose one
+    speed = speed_from_env(env, gate, log=log)                   # Skippy Core's prompt kept warm and the brain's fixed phrases rendered ahead, for every room (SATELLITE_SPEED=off: neither)
     connected: dict = {}                                         # room name -> Room, for announcements to the other rooms
 
     def make_room(name, link):
@@ -1434,6 +1944,7 @@ def build_rooms(env: dict):
         room.env = env
         room.daily = routines
         room.stereo = radio.for_room(radio_client.room_kinds(env, name), name)   # Skippy speaking here ducks the whole station (all of it, on every device)
+        attach_speed(room, speed)                                # the keeper knows this room's turns (its prompt's state, the quip's delay); a fixed phrase is served from the clips rendered ahead
         return room
     make_room.radio = radio                                     # esphome_link.serve: each pod is a remote and a speaker of it (PodTuner)
     make_room.homechat = homechat                               # _main runs its sync loop (never under --record)
@@ -1444,6 +1955,7 @@ def build_rooms(env: dict):
     make_room.routine_room = lambda: getattr(routines, "room_name", "") or ""
     make_room.house = house                                     # the heartbeat says which of its backends answer
     make_room.state = state
+    make_room.speed = speed                                     # _main runs it (SpeedKeeper.run); None when SATELLITE_SPEED is off
     return make_room
 
 
@@ -1723,10 +2235,12 @@ async def _main(env: dict, rooms, args) -> int:
         clock = getattr(hub.make_room, "alarm_clock", None)
         cams_watch = getattr(hub.make_room, "cams_watch", None)
         generac_watch = getattr(hub.make_room, "generac_watch", None)
+        speed = getattr(hub.make_room, "speed", None)
         beat = heartbeat(hub, Path(hub.make_room.state) / "hub-status.json", getattr(hub.make_room, "house", None))             if getattr(hub.make_room, "state", None) else None
         await asyncio.gather(hub.run(), *([beat] if beat is not None else []), *([connect.run()] if connect else []), *([homechat.run(hub)] if homechat is not None else []),
                              *([watch.run(hub, hub.make_room.routine_room)] if watch is not None else []),
                              *([clock.run(hub)] if clock is not None else []),
+                             *([speed.run(hub)] if speed is not None else []),
                              *([cams_watch.run(hub, hub.make_room.routine_room)] if cams_watch is not None else []),
                              *([generac_watch.run(hub, hub.make_room.routine_room)] if generac_watch is not None else []))
         return 0

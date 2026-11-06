@@ -178,7 +178,7 @@ class News:
         self.last, self.deeper = {"subject": subject, "when": "day", "items": list(items)[:MAX_ITEMS], "at": self.clock()}, None
 
     def recent(self) -> str:
-        """The headlines found in the last KEEP_S, as a note for the brain's system prompt; "" when none."""
+        """The headlines found in the last KEEP_S, as a note that rides in the brain's context() (the bracketed block at the start of the newest user message, never in the cached system prompt); "" when none."""
         if not self.last or self.clock() - self.last["at"] > KEEP_S:
             return ""
         note = f"\n\nThe news you looked up a little while ago, about {self.last['subject']} (talk only from this):\n{listing(self.last['items'])}"

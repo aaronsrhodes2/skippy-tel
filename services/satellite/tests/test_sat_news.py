@@ -51,7 +51,7 @@ def test_the_answer_to_about_what_searches_that_subject_recent_news():
     assert brain.actions[0]["tool"] == "news" and brain.actions[0]["args"] == {"subject": "Politics"}
     sent = client.calls[0]["messages"][-1]["content"]
     assert "Senate passes bill" in sent and "example.com" in sent and "tools" not in client.calls[0]   # the model only words it
-    assert "Senate passes bill" in brain.system()                     # remembered for the follow-up
+    assert "Senate passes bill" in brain.context() and "Senate passes bill" not in brain.system()          # remembered for the follow-up: in the note that starts his next message, not in the prompt
 
 
 def test_a_quiet_day_widens_to_the_week():
@@ -69,7 +69,7 @@ def test_more_on_the_second_one_searches_that_story_and_keeps_the_list():
     brain.reply("tell me more about the second one")
     assert brain.actions[0]["args"] == {"subject": "Governor signs housing law", "story": 2}
     assert "q=Governor+signs+housing+law" in get.urls[1] and "time_range=week" in get.urls[1]
-    assert "Senate passes bill" in brain.system() and "Housing law details" in brain.system()
+    assert "Senate passes bill" in brain.context() and "Housing law details" in brain.context()
 
 
 def test_a_story_named_by_its_words():

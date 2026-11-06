@@ -153,4 +153,4 @@ def test_skippy_knows_the_house():
     brain.room = "theater"
     text = brain.system()
     assert "## The house" in text and "upstairs: living room" in text and "Enclave speakers" in text
-    assert "talking to you from the theater (downstairs)" in text
+    assert "talking to you from" not in text and "talking to you from the theater (downstairs)" in brain.context()          # where he is rides in the note that starts his message (the floors and rooms stay in the prompt)

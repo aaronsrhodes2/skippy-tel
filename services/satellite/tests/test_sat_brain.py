@@ -36,13 +36,13 @@ def test_the_system_prompt_is_the_persona_plus_how_to_speak_aloud_and_the_time()
     b, c, *_ = make([text("Done.")])
     b.reply("hello")
     system = c.calls[0]["system"]
-    assert system.startswith("PERSONA") and "speaking aloud" in system and "no markdown" in system and "Sunday 09:30" in system
-    assert "replacing his Alexa" in system and c.calls[0]["model"] == "m" and c.calls[0]["max_tokens"] <= 700 and "WHOLE thing" in system
+    assert system.startswith("PERSONA") and "speaking aloud" in system and "no markdown" in system and "Sunday 09:30" not in system      # the clock rides in the note that starts his message (Brain.context)
+    assert "replacing his Alexa" in system and c.calls[0]["model"] == "m" and c.calls[0]["max_tokens"] <= 700 and "WHOLE thing" in system and "Sunday 09:30" in c.calls[0]["messages"][-1]["content"]
 
 
 def test_a_timer_request_runs_the_tool_and_speaks_the_result():
     b, c, timers, _ = make([tool("set_timer", seconds=600, label="pasta")], [text("Ten minutes, on the clock.")])
-    assert b.reply("set a pasta timer for ten minutes") == "Ten minutes, on the clock."
+    assert b.reply("I want a pasta timer for ten minutes") == "Ten minutes, on the clock."          # (a plain "set a pasta timer for ten minutes" is routed now, before the model: test_sat_speed_brain)
     assert timers.remaining() == [("pasta", 600)]
     second = c.calls[1]["messages"]
     assert second[-1]["content"][0]["type"] == "tool_result" and "Timer set: pasta, 10 minutes" in second[-1]["content"][0]["content"]
@@ -64,10 +64,10 @@ def test_it_remembers_the_last_few_exchanges_and_forgets_after_ten_quiet_minutes
     b, c, _, clock = make([text("One.")], [text("Two.")], [text("Three.")])
     b.reply("first")
     b.reply("second")
-    assert [m["content"] for m in c.calls[1]["messages"]] == ["first", "One.", "second"]       # the tool traces are not kept, only the words
+    assert [m["content"] for m in c.calls[1]["messages"][:2]] == ["first", "One."] and c.calls[1]["messages"][2]["content"].endswith("\n\nsecond")       # the tool traces and the context note are not kept, only the words
     clock[0] += FORGET_AFTER_S + 1
     b.reply("third")
-    assert [m["content"] for m in c.calls[2]["messages"]] == ["third"]
+    assert len(c.calls[2]["messages"]) == 1 and c.calls[2]["messages"][0]["content"].endswith("\n\nthird")
 
 
 def test_it_never_loops_forever_on_tools_and_never_returns_nothing(monkeypatch):
@@ -95,7 +95,7 @@ def test_with_home_assistant_the_house_tools_join_the_timers_and_the_prompt_stop
     timers = Timers(clock=lambda: clock[0])
     client = Client([NS(type="tool_use", id="tu_h", name="home_control", input={"name": "kitchen light", "action": "on"})], [text("Kitchen light is on.")])
     b = Brain(client, "m", timers, persona="PERSONA", clock=lambda: clock[0], now=lambda: "Sunday 09:30", hass=ha)
-    assert b.reply("kitchen light on") == "Kitchen light is on."
+    assert b.reply("it is too dark in the kitchen") == "Kitchen light is on."          # (a plain "kitchen light on" and, since fix:brain-routes P1, "I want the kitchen light on" are routed before the model: test_sat_speed_brain)
     assert ha_fake.calls == [("light/turn_on", {"entity_id": "light.kitchen"})]
     assert {t["name"] for t in client.calls[0]["tools"]} == {"set_timer", "cancel_timers", "list_timers", "home_devices", "home_state", "home_control"}
     system = client.calls[0]["system"]
@@ -109,7 +109,7 @@ def test_the_brain_knows_the_date():
     import time
     from brain import Brain
     b = Brain(None, "m", None, persona="P")
-    assert time.strftime("%B %d, %Y") in b.system() and time.strftime("%A") in b.system()
+    assert time.strftime("%B %d, %Y") in b.context() and time.strftime("%A") in b.context() and time.strftime("%B %d, %Y") not in b.system()          # the date rides in the note, not the prompt
 
 
 def test_a_reply_that_claims_an_alarm_with_no_tool_called_is_asked_again_and_never_promises_what_was_not_done():
@@ -141,7 +141,7 @@ def test_the_second_try_never_touches_a_door_and_never_confirms_for_him():
     b, c, *_ = make([text("I cannot operate the garage door from this voice interface.")])
     assert b.reply("can you open the garage door") == "I cannot operate the garage door from this voice interface." and len(c.calls) == 1      # not even asked again
     b, c, *_ = make([text("I cannot do that.")], [tool("set_timer", seconds=60, confirm=True)], [text("A minute.")])
-    assert b.reply("set a one minute timer") == "A minute." and "confirm" not in b.actions[0]["args"] and b.actions[0]["args"]["seconds"] == 60
+    assert b.reply("I want a one minute timer") == "A minute." and "confirm" not in b.actions[0]["args"] and b.actions[0]["args"]["seconds"] == 60
 
 
 def test_the_prompt_says_in_his_words_what_the_tools_are_and_only_while_they_exist():
@@ -355,12 +355,12 @@ def test_an_order_the_model_wrongly_refused_is_done_by_the_second_try_with_a_men
 def test_a_denial_of_a_command_that_reads_like_a_music_command_is_asked_again_all_the_same(tmp_path):
     """The review: musicguard files 'start a timer', 'put on the light', 'crank the heat', 'pause the timer' under the music commands, and its logging-only tier ('elif action') used to win
     over the denial: 26 of 123 logged commands never got their second try."""
-    for i, heard in enumerate(("start a pasta timer for ten minutes", "start the vacuum", "crank the heat up a bit", "pause the timer", "skip my alarm tomorrow", "play Pink Floyd upstairs",
+    for i, heard in enumerate(("start a timer called pasta for ten minutes", "start the vacuum", "crank the heat up a bit", "pause the timer", "skip my alarm tomorrow", "play Pink Floyd upstairs",
                                "put on something sad")):
         b, c, *_ = house_brain(tmp_path / f"case{i}", [text("I cannot do that from here, Captain.")], [text("Still no.")])
         assert b.reply(heard) == "I cannot do that from here, Captain." and len(c.calls) == 2 and b.guard == ("reask", "denial"), heard
     b, c, ran, al, ls, timers = house_brain(tmp_path / "go", [text("I cannot start timers from here.")], [tool("set_timer", seconds=600, label="pasta noodles")], [text("Ten minutes, on the clock.")])
-    assert b.reply("start a pasta noodles timer for ten minutes") == "Ten minutes, on the clock." and ("pasta noodles", 600) in timers.remaining()
+    assert b.reply("start a timer called pasta noodles for ten minutes") == "Ten minutes, on the clock." and ("pasta noodles", 600) in timers.remaining()
 
 
 def test_a_denial_that_names_an_alarm_or_a_list_is_a_denial_not_a_claim_of_having_set_one(tmp_path):

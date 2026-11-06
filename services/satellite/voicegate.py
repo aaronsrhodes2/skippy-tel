@@ -69,9 +69,9 @@ class Gate:
             raise GateError(f"speech to text refused ({r.status_code})")
         return str((r.json() or {}).get("text") or "").strip()
 
-    def tts(self, text: str) -> bytes:
+    def tts(self, text: str, whole: bool = True) -> bytes:
         try:
-            r = self.post(self._url("tts"), json={"text": text[:500]}, timeout=60)
+            r = self.post(self._url("tts"), json={"text": text[:500], **({"whole": True} if whole else {})}, timeout=60)      # "whole": the studio renders a short reply in ONE F5 run (0.35-1.1 s less for 2-3 sentences; every caller plays nothing until it has all of it). whole=False: the sentence-by-sentence take (the studio's default)
         except requests.RequestException as e:
             raise GateError("the voice gate is not answering") from e
         if r.status_code == 429:
