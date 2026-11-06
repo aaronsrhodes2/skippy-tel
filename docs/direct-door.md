@@ -124,6 +124,7 @@ Any one of these, from the least to the most:
 | Failure | What the visitor sees | What brings it back |
 |---|---|---|
 | the edge container is down or unhealthy | nothing: the pages' `/health` test fails and they use the Funnel | Docker (`restart: unless-stopped`); the Status page shows the `edge` card, with its health |
+| the door is cut under a song, a book or a film that is playing | a gap of about 20 s, then it goes on from the Funnel at the same position (Drive, Audiobooks and Nagatha watch the `waiting` state for 20 s; Bilby's signal-lost loop asks the portal again and finds the door shut). Without the watchers Chrome raised the element's error only after 70-98 s, and never for a door that goes quiet without closing | the pages themselves (proved in a real browser, 2026-11-05) |
 | the router forgot the forward (reboot, a lease that ended) | the same: Funnel | the keeper, within 5 minutes |
 | the home address changed and DNS did not follow | the same | the DNS job; a renewal needs the name to point here, and the 90-day certificate is renewed 30 days early, so there is room |
 | a gate is down or restarting | that prefix answers `502 Bad Gateway` (plain text, about 3 s: Docker's DNS has to give up on the name); the rest carry on; the page falls back to the Funnel for it | the gate's own heal |
