@@ -354,17 +354,26 @@
   au.addEventListener("ended", () => { const b = S.cur; if (!b) return; S.places[b.id] = Object.assign({}, S.places[b.id], { finished: true }); savePlace(true); paintAll(); });
   au.addEventListener("error", () => {
     if (!au.src) return;
-    // A book that was coming from skippy-pc's direct door and stopped: the same book goes on from the Funnel, from where it stopped (static/direct.js).
-    const b = S.cur, was = au.src;
-    if (b && S.g && was.startsWith(S.g.url + "/") && leaveDoor()) {
-      const at = au.currentTime || 0;
-      au.src = gu(`a/${b.id}`);
-      au.addEventListener("loadedmetadata", () => { au.currentTime = at; au.playbackRate = S.speed; au.preservesPitch = true; }, { once: true });
-      au.play().catch(() => {});
-      return;
-    }
+    if (resumeOnFunnel()) return;
     notice("This book won't play right now."); setTimeout(() => notice(""), 4000);
   });
+  // A book that was coming from skippy-pc's direct door and stopped: the same book goes on from the Funnel, from where it stopped (static/direct.js). False when it was not on the door.
+  function resumeOnFunnel() {
+    const b = S.cur, was = au.src;
+    if (!(b && S.g && was.startsWith(S.g.url + "/") && leaveDoor())) return false;
+    const at = au.currentTime || 0;
+    au.src = gu(`a/${b.id}`);
+    au.addEventListener("loadedmetadata", () => { au.currentTime = at; au.playbackRate = S.speed; au.preservesPitch = true; }, { once: true });
+    au.play().catch(() => {});
+    return true;
+  }
+  // A door cut under a playing book raises no `error` for a minute and a half (Chrome 152, measured 2026-11-05: 92 s after the cut), and one that goes quiet without closing raises none at all: the element only says `waiting`.
+  // A book that has waited STALL_MS on the door goes on from the Funnel too (the same rule as Drive's page, drive-app.js); resumeOnFunnel does nothing for a book that is not on the door.
+  const STALL_MS = 20000;
+  let stallTimer = 0;
+  const unstall = () => { clearTimeout(stallTimer); stallTimer = 0; };
+  au.addEventListener("waiting", () => { if (!stallTimer) stallTimer = setTimeout(() => { stallTimer = 0; if (!au.paused && au.readyState < 3) resumeOnFunnel(); }, STALL_MS); });
+  ["playing", "pause", "emptied", "ended", "error"].forEach(ev => au.addEventListener(ev, unstall));
   document.addEventListener("visibilitychange", () => { if (document.hidden) savePlace(true); else { refreshPlaces(); pollRooms(); } });
   window.addEventListener("pagehide", () => savePlace(true));
 

@@ -768,6 +768,9 @@
   video.addEventListener("play", () => { paintPlay(); idle.kick(); });
   video.addEventListener("playing", () => { S.lastTimeAt = Date.now(); spin(false); hideMsg(); hideTap(); recoverStop(); });
   video.addEventListener("waiting", () => { S.waitingAt = Date.now(); spin(true); });
+  // A stream that runs dry fires one more `timeupdate` about 250 ms AFTER `waiting` (Chrome 152, measured 2026-11-05 on a film whose direct door was cut), which made the stall rule above (the interval by recoverStart: waitingAt > lastTimeAt)
+  // false for good: the film sat silent until the element's own `error`, 70 s later. `stalled` comes a second after `waiting` and says it again (Bilby's player does the same), so the rule holds.
+  video.addEventListener("stalled", () => { if (P.item && !video.paused) S.waitingAt = Date.now(); });
   video.addEventListener("canplay", () => spin(false));
   video.addEventListener("pause", () => { paintPlay(); idle.kick(); if (P.item && !video.ended) { keepLocal(video.currentTime); report(P.progress.pause(video.currentTime)); } });
   video.addEventListener("seeked", () => { if (P.item && video.paused) report(P.progress.pause(video.currentTime)); });

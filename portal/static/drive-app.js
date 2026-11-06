@@ -17,7 +17,7 @@
   // A call that got no answer from the door is made once more through the Funnel (the door then rests five minutes); an HTTP error from the gate itself is not the door's fault.
   const door = (g, fresh) => (window.SkippyDirect ? SkippyDirect.pick(g, fresh ? { fresh: true } : undefined) : g);
   const noAnswer = e => e instanceof TypeError || e instanceof SyntaxError;
-  const leaveDoor = g => !!(window.SkippyDirect && g && SkippyDirect.demote(g));
+  const leaveDoor = (g, used) => !!(window.SkippyDirect && g && SkippyDirect.demote(g, used));      // used: the address that call went to (default: where g points now)
   async function onceMore(g, call) { try { return await call(); } catch (e) { if (!noAnswer(e) || !leaveDoor(g)) throw e; return call(); } }
   const now = (glyph, text) => { $("#now-g").setAttribute("href", "#g-" + glyph); $("#now-t").textContent = S.nowText = text || ""; };
   const lit = (id, on) => { $(id).dataset.on = on ? "1" : "0"; };
@@ -258,12 +258,15 @@
   }
   au.addEventListener("ended", () => { if (S.mode === "discovery" || S.mode === "library") nextSong(); else if (S.mode === "book") saveBook(true); });
   // The door gave out under a song or a book: the same one goes on from the Funnel, from where it stopped (static/direct.js). False when it was not on the door.
+  // What counts is where the ELEMENT'S own request went, not where the pass points now: the browser gives up on a stalled stream only after a minute or more (the element's `error`
+  // came 63 to 88 s after the door was cut, Chrome 152, 2026-11-05), and a failed place save has long since put the book's pass on the Funnel, so `leaveDoor(g)` alone said "not on the door".
   function resumeOnFunnel() {
     const music = S.mode === "discovery" || S.mode === "library";
     if (!music && S.mode !== "book") return false;
     const it = S.q[S.qi];
     if (music ? !(it && it.path) : !S.cur) return false;
-    if (!leaveDoor(music ? S.music : S.book)) return false;
+    const went = String(au.currentSrc || au.src || "").split("/t/")[0];            // the element's address up to the pass: the door's or the Funnel's
+    if (!leaveDoor(music ? S.music : S.book, went)) return false;
     const at = au.currentTime || 0;
     warmStop(); ours = true; au.src = music ? mu("a", it.path) : bu(`a/${S.cur.id}`);
     if (at > 0) au.addEventListener("loadedmetadata", () => { au.currentTime = at; }, { once: true });
@@ -271,6 +274,13 @@
     return true;
   }
   au.addEventListener("error", () => { if (resumeOnFunnel()) return; if (S.mode === "discovery" || S.mode === "library") setTimeout(nextSong, 800); });
+  // A door that takes a request and never answers, or goes quiet mid-song without closing, raises NO `error`: the element just says `waiting` (Chrome 152, 2026-11-05: nothing for 182 s on a song asked
+  // of such a door; 63 to 88 s for a stream that was cut). A song or a book that has waited STALL_MS on the door goes on from the Funnel; resumeOnFunnel does nothing for an element that is not on the door.
+  const STALL_MS = 20000;
+  let stallTimer = 0;
+  const unstall = () => { clearTimeout(stallTimer); stallTimer = 0; };
+  au.addEventListener("waiting", () => { if (!stallTimer) stallTimer = setTimeout(() => { stallTimer = 0; if (!au.paused && au.readyState < 3) resumeOnFunnel(); }, STALL_MS); });
+  ["playing", "pause", "emptied", "ended", "error"].forEach(ev => au.addEventListener(ev, unstall));
   au.addEventListener("timeupdate", () => {
     $("#now-bar i").style.width = au.duration ? (100 * au.currentTime / au.duration).toFixed(2) + "%" : "0";
     if (S.mode === "book") saveBook(false);

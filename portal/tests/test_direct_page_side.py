@@ -98,6 +98,39 @@ def test_the_drive_page_picks_the_door_for_all_three_of_its_gates_and_goes_on_by
     assert "leaveDoor(g)" in text                                  # the wake word's retry through the Funnel
 
 
+def test_the_drive_page_resumes_a_book_on_the_funnel_even_when_a_failed_place_save_put_its_pass_there_first():
+    """Found in the real browser (Chrome 152, 2026-11-05): a door cut under a playing book makes the next place save fail within 5 s, which puts the
+    book's pass on the Funnel, but the audio element raises its `error` only 63 to 88 s later (it keeps retrying the dead address). `leaveDoor(g)` then
+    said "not on the door", `resumeOnFunnel` gave up and the book stayed silent for good (not one request reached the Funnel). The resume has to ask where
+    the ELEMENT's own request went (its address up to /t/), not where the pass points by then."""
+    text = (STATIC / "drive-app.js").read_text(encoding="utf-8")
+    assert re.search(r"const leaveDoor = \(g, used\) => !!\(window\.SkippyDirect && g && SkippyDirect\.demote\(g, used\)\)", text)
+    body = text[text.index("function resumeOnFunnel"):text.index('au.addEventListener("error"')]
+    assert re.search(r'const went = String\(au\.currentSrc \|\| au\.src \|\| ""\)\.split\("/t/"\)\[0\]', body)
+    assert "leaveDoor(music ? S.music : S.book, went)" in body
+
+
+def test_the_drive_page_does_not_wait_for_an_error_a_stalled_door_never_raises():
+    """Found in the real browser (Chrome 152, 2026-11-05): a door that takes a request and never answers, or goes quiet mid-song without closing the
+    connection, raises no `error` at all (a song asked of such a door: still `waiting` after 182 s; a stream that was cut: 63 to 88 s). The page watches
+    the wait itself: STALL_MS in `waiting` on the door, and the same song goes on from the Funnel."""
+    text = (STATIC / "drive-app.js").read_text(encoding="utf-8")
+    assert re.search(r"const STALL_MS = \d+;", text)
+    assert re.search(r'au\.addEventListener\("waiting",.{0,160}?!au\.paused && au\.readyState < 3\) resumeOnFunnel\(\)', text, re.S)
+    assert re.search(r'\["playing", "pause", "emptied", "ended", "error"\]\.forEach\(ev => au\.addEventListener\(ev, unstall\)\)', text)
+
+
+def test_the_book_and_film_players_do_not_wait_for_an_error_a_cut_door_takes_a_minute_and_a_half_to_raise():
+    """Found in the real browser (Chrome 152, 2026-11-05): a door cut under a playing book raised the audio element's `error` 92 s later and one that went quiet without
+    closing never did; a film's stall rule was defeated by the `timeupdate` Chrome fires about 250 ms AFTER `waiting`, so it too waited for the element's error (74 s)."""
+    books = (STATIC / "audiobooks-app.js").read_text(encoding="utf-8")
+    assert "function resumeOnFunnel" in books and re.search(r"const STALL_MS = \d+;", books)
+    assert re.search(r'au\.addEventListener\("waiting",.{0,160}?!au\.paused && au\.readyState < 3\) resumeOnFunnel\(\)', books, re.S)
+    assert re.search(r'\["playing", "pause", "emptied", "ended", "error"\]\.forEach\(ev => au\.addEventListener\(ev, unstall\)\)', books)
+    films = (STATIC / "nagatha-app.js").read_text(encoding="utf-8")
+    assert re.search(r'video\.addEventListener\("stalled", \(\) => \{ if \(P\.item && !video\.paused\) S\.waitingAt = Date\.now\(\); \}\);', films)
+
+
 def test_every_player_has_a_way_back_to_the_funnel_when_the_door_it_picked_gives_out():
     """Review 2026-11-05: a door that dies AFTER the pick must not leave a page retrying a dead address for the life of its pass."""
     bilby = (STATIC / "bilby-app.js").read_text(encoding="utf-8")
