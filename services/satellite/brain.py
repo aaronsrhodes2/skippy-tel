@@ -471,6 +471,7 @@ _NO_IDIOM = re.compile(r"\b(?:no|not a) (?:problem|worries|worry|trouble|bother|
 
 
 _ASKING = re.compile(r"\b(?:want|wanted|wish|need|needs|should|would|could|can|may|might|shall|please|which)\b", re.I)      # (a request or a question is no claim: 'the alarm you want cancelled', measured on the real Core)
+_CLAIM_OPENS = re.compile(r"^\W*(?:(?:alright|okay|ok|fine|right|well|so|now|and)\W+)*(?:done|handled|all set|i(?:'ve| have| just| already|'ll| will)\b|let me\b)", re.I)      # (a sentence that BEGINS with the claim or the promise, whatever it ends in)
 
 
 def announces(words: str, claims: bool = True) -> bool:
@@ -478,7 +479,7 @@ def announces(words: str, claims: bool = True) -> bool:
     also a claim of what is done (CLAIMED, a DONE_CLAIMS rule) in a sentence that is no question and no request ('Please say which alarm you want cancelled.' is both an honest answer and a CLAIMED match). Without
     `claims` only what the house says in the first person counts: a read answer is full of 'the alarm is set' and 'is on'."""
     for s in musicguard.sentences((words or "").translate(_PLAIN_QUOTES)):
-        if "?" in s or _SAYS_NOT.search(_NO_IDIOM.sub(" ", s)):          # (a question promises and claims nothing: "Which alarm should I cancel?", "What time should I set it for?" are honest, review4:seams)
+        if ("?" in s and not _CLAIM_OPENS.match(s)) or _SAYS_NOT.search(_NO_IDIOM.sub(" ", s)):          # (a question promises and claims nothing: "Which alarm should I cancel?", "What time should I set it for?" are honest, review4:seams; but a sentence that OPENS with the claim and ends in a tag question still claims: "Done, happy now?", "I've cancelled it, okay?", review5)
             continue
         if ANNOUNCES.search(s) or (claims and "?" not in s and not _ASKING.search(s) and (CLAIMED.search(s) or any(rx.search(s) for rx in DONE_CLAIMS.values()))):
             return True
@@ -1220,14 +1221,14 @@ def _call_text(text: str, start: int, tool: str, tail: re.Match, names=()) -> st
     return _call_extent(text, start, tool, tail, names)[0]
 
 
-def _cut_calls(text: str, names, plain=frozenset()) -> str:
+def _cut_calls(text: str, names, plain=frozenset(), gone: str = " ") -> str:
     """`text` with every call written in it cut out: a bracket that starts with the name of one of `names` and, when nothing is inside it, the argument lines after it that _call_extent reads ("[music]" + "action: next",
     + "next", + "/music"). A wiper that took only the bracket left those lines to be SPOKEN (review4:seams: the REASK_MUSIC second try, an unreadable "[music]" + "speaker: kitchen", a reply whose model went away after a
     structured call, all with a call put back from the reasoning). Plain words under a bracket go only when they are an action of the tools (`plain`)."""
     out, pos = [], 0
     while m := _CALL_AT.search(text, pos):
         if m.group(1) in names and (tail := _CALL_END.match(text, m.end())):
-            out += [text[pos:m.start()], " "]
+            out += [text[pos:m.start()], gone]
             pos = _call_extent(text, m.start(), m.group(1), tail, names, plain)[1]
         else:
             out.append(text[pos:m.end()])
@@ -1243,7 +1244,12 @@ def _written_calls(text: str, names, lead: bool = False) -> list[tuple]:
         pos = m.end()
         if m.group(1) in names and (tail := _CALL_END.match(text, pos)):
             call = _call_text(text, m.start(), m.group(1), tail, names)
-            out.append((m.group(1), call, text[text.rfind("\n", 0, m.start()) + 1:m.start()]) if lead else (m.group(1), call))
+            if lead:                                               # (the line before the call, but 120 characters of it at most: _NOT_MEANT reads a negation and three words, and a whole line cost a quadratic time on a line of thousands of calls)
+                low = max(0, m.start() - 120)
+                cut = text.rfind("\n", low, m.start())
+                out.append((m.group(1), call, text[cut + 1 if cut >= 0 else low:m.start()]))
+            else:
+                out.append((m.group(1), call))
             pos = tail.end()
     return out
 
@@ -1258,9 +1264,17 @@ def _undoes(tool: str, call: str) -> bool:
     return tool in RETRY_NEVER or any(re.search(rf"\b{re.escape(action)}\b", call, re.I) for action in RETRY_NEVER_ACTIONS.get(tool, ()))
 
 
-_RETRACTS = re.compile(r"\b(?:did not|didn['’]t|have not|haven['’]t|could not|couldn['’]t|cannot|can['’]t|unable to|nothing was|not done|sorry|apologi[sz]e|my mistake)\b", re.I)
+_RETRACTS = re.compile(r"\b(?:did not|didn['’]t|have not|haven['’]t|(?:could not|couldn['’]t|cannot|can['’]t)(?! (?:believe|help|resist|stand|imagine|wait)\b)|unable to|nothing was|not done|sorry|apologi[sz]e|my mistake)\b", re.I)
 # A negation just before the call, on its line ("nothing is playing, so I should not call [music action=next]", "no need to call [list_timers]", "instead of [music action=next]"): the model ruled that call out (review4:core).
-_NOT_MEANT = re.compile(r"(?:\bnot\b|n't\b|\bnever\b|\bno need to\b|\binstead of\b|\brather than\b|\bavoid\b)\s+(?:[\w']+\s+){0,3}$", re.I)
+_NOT_MEANT = re.compile(r"(?:\bnot\b|n['’]t\b|\bcannot\b|\bnever\b|\bno need to\b|\binstead of\b|\brather than\b|\bavoid\b)\s+(?:[\w'’]+\s+){0,3}$", re.I)      # (the typographic apostrophe too: the model types ’ now and then)
+
+
+def _takes_back(kept: str) -> bool:
+    """Do the words that follow the reasoning take its call back, or only ask about it? EVERY sentence of them is a question or a retraction (_RETRACTS in every clause): "Which speaker, Captain?", "Sorry, I did not do
+    anything.". One statement among them stands by the call ("There. Quieter. Happy now?", "Sorry, my magnificence was too loud. Quieter now."): the tag question and the dig that come with a claim are the persona's own
+    (14 of 95 real replies that wrote a call as text carry a question, 2 a "sorry" or a "didn't": review5)."""
+    sentences = [s for s in ACK_SENTENCES.split(kept) if s.strip()]
+    return bool(sentences) and all("?" in s or all(_RETRACTS.search(c) for c in _CLAUSES.split(s) if c.strip()) for s in sentences)
 
 
 def _reasoned_calls(spans: list[str], names, kept: str) -> str:
@@ -1274,7 +1288,7 @@ def _reasoned_calls(spans: list[str], names, kept: str) -> str:
     # review4:seams: the words after the reasoning are the model's last word. A call of their own is its decision (the reasoning's was a draft: "[music action=quieter]" and then "[music action=louder]" ran both), and so are
     # a denial, a retraction and a question: a call it weighed and then refused is no call ("[home_control name=fridge action=off]", "I cannot do that." switched the fridge off).
     own = _written_calls(kept, names)
-    if own or denies(kept) or "?" in kept or _RETRACTS.search(kept):
+    if own or denies(kept) or _takes_back(kept):
         return ""
     seen, out = set(), []
     for tool, call in found:
@@ -2369,7 +2383,11 @@ class Brain:
     def _phantom(self, text: str) -> str:
         """`text` without a tool call written in it as words, for a call that offers no tools (the wording of a routed answer, Mentat's): a bracket that starts with the name of ANY tool this brain has
         (PHANTOM knew only ask_mentat and car_status), whatever it holds. Any other bracket ("[nonsense a=1]") stays: it is not a call."""
-        return phantom_pattern({t["name"] for t in self.tools()} | {"ask_mentat", "car_status"}).sub("", text)
+        names = {t["name"] for t in self.tools()} | {"ask_mentat", "car_status"}
+        actions = {str(a).lower() for t in self.tools() for a in ((((t.get("input_schema") or {}).get("properties") or {}).get("action") or {}).get("enum") or [])}
+        if "[" in text:
+            text = _cut_calls(text, names, actions, gone="")          # (a bracket takes the argument lines under it with it, as in _wipe_calls: "[music]" + "action: next" was spoken here, review5)
+        return phantom_pattern(names).sub("", text)
 
     def _wipe_calls(self, text: str, names=None, every: bool = False) -> str:
         """`text` without the tool calls written in it as words: every bracket that starts with the name of one of this brain's tools or with an `action` one of them has, whatever it holds ("[music with

@@ -277,7 +277,9 @@ s to read from the cache, 20 to 33 s from scratch. Everything below keeps that p
   tool has run in the reply, so the wording of a routed answer, Mentat's and a call that ran get no calls back. Replayed offline, the real reasoning-wrapped replies of
   the reviews ran the call in 1 of 7 cases before and 7 of 7 now, once each (no live reply carried reasoning on the day it was fixed: 0 of 51).
   **The words after the reasoning are the model's last word** (review4): nothing is put back when they hold a call of their own (the reasoning's was a draft), deny, take it back
-  (`_RETRACTS`) or ask a question, and no call that a negation just before it rules out (`_NOT_MEANT`: "nothing is playing, so I should not call [music action=next]"); a
+  (`_RETRACTS`) or only ask about it (every sentence of them is a question or a retraction, `_takes_back`: "Which speaker, Captain?", "Sorry, I did not do anything."; a tag question
+  or a dig that comes with a claim, "There. Quieter. Happy now?", "Sorry, my magnificence was too loud. Quieter now.", stands by the call: 12 of 13 such replies dropped it
+  before the fifth review), and no call that a negation just before it rules out, the typographic apostrophe too (`_NOT_MEANT`: "nothing is playing, so I should not call [music action=next]"); a
   `home_control` call on a `RISKY_THING` target or a group of plugs is never put back (a lock, a door and the garage still are: the house asks for the yes aloud), and three
   calls at most. `Brain._spoken(resp, restore=...)` puts a call back only where the text-call rescue goes on to read these words: the first reply and the second tries that
   read text calls (a denial's, the backstop's, a claim's, `TEXT_AGAIN`), not the music re-ask and not the wording calls, where the lines of such a call ("action: next") would be spoken.
@@ -316,7 +318,8 @@ s to read from the cache, 20 to 33 s from scratch. Everything below keeps that p
   timer for you." (an apology that promises, `announces`: 3 of about 35 real second tries) get the fixed line (after a denial, the first reply stands), and a look that
   nobody worded no longer makes the first claim true. Of 40 dishonest replies written for the rules 4 were replaced before and all 40 are now, and all 40 honest ones are
   still spoken; of 6,000 random second tries 894 spoke a lie or a read answer right after a refusal, now none. A question promises and claims nothing ("Which alarm should I
-  cancel?" is an honest second try; before, 24 of 109 honest questions were thrown away for the fixed line), "all set" claims only when it opens a sentence ("You're all
+  cancel?" is an honest second try; before, 24 of 109 honest questions were thrown away for the fixed line; but a question that OPENS with the claim or the promise still claims,
+  "Done, happy now?", "I've cancelled it, okay?", `_CLAIM_OPENS`: 6 of 6 such second tries were spoken with nothing changed), "all set" claims only when it opens a sentence ("You're all
   set." claims nothing), and a sentence that is only "Cancelled." claims like "Done." ("Right. Cancelled. What alarm was it?" was spoken with both alarms still set).
 
 * **A tool call written as text** (`Brain._text_calls`): `[list action="read" list="shopping"]`, `[music with action=quieter]`, `[music]next[/music]` or `[music]`
@@ -336,7 +339,8 @@ s to read from the cache, 20 to 33 s from scratch. Everything below keeps that p
   and `music(action='quieter')`. Where no tools are offered (a routed answer's wording, Mentat's) `Brain._phantom` cuts a bracket of ANY tool the brain has
   (`phantom_pattern`; `PHANTOM` itself knows only `ask_mentat` and `car_status`), and both then run `_wipe_calls`, so they cut the dialects too. A wiper takes a bracket together
   with the argument lines under it (`_cut_calls`, `_call_extent`: `[music]` + `action: next`, + `next`, + `/music`; a plain word goes only when it is one of the tools' actions,
-  so "Okay." stays), because a call put back from the reasoning left those lines to be spoken and kept.
+  so "Okay." stays), because a call put back from the reasoning left those lines to be spoken and kept. `_phantom` takes them too (`_cut_calls(..., gone="")`): it used to remove the
+  bracket first, and `action: next` under it was spoken and kept (16 of 275 real replies through the routed wording, 1 now).
 
 * **Short replies.** The prompt asks for one or two short sentences, a few words once a tool has done it. `SPEAK_TOKENS` = 300 is the room of a round that may call a
   tool, `WORDING_TOKENS` = 160 of the model wording a tool's answer (`WORDING_ROOM`: the book's place 200, the headlines 300), and a reply that ran out of room is cut
@@ -388,7 +392,10 @@ starting the library (the stub audio plays nothing) and one claim with no tool t
 (something playing, two chat turns first): "could you skip to the next track" 12 of 12 and "turn the music down a notch" 11 of 12, all 24 first replies written as text, no empty
 call, no markup spoken or kept; the one miss was a bare `[music]` and prose, whose second try did not call, so the fixed line was spoken. Second tries on the claim path: 9 of 9 left
 both alarms, the list and the announcements alone. The spoken yes: 6 of 6 flows did what was said only after the yes, a lone "yes" and a yes after 121 s did nothing, and no
-one-utterance order for a lock or the garage ran. The model's own first call still switched off the router or the fridge in 3 of 4 phrasings (Left undone). A plain turn now
+one-utterance order for a lock or the garage ran. The model's own first call still switched off the router or the fridge in 3 of 4 phrasings (Left undone).
+With the fifth review's fixes in (2026-11-06 06:30): the battery 24, 24, 21 and 23 of 24 (the misses: first calls that named no tool, whose second try did not call one either, and "could you
+skip to the next track" with nothing playing); the text-call rescue 12 of 12 and 10 of 12; the claim path 9 of 9 untouched, with no promise and no false claim spoken; the spoken yes 5 of 6
+flows (in the sixth the model refused the unlock in words, so nothing ran); 30,000 + 10,800 scripted turns and 8,000 confirm scenarios with no violation. A plain turn now
 reads a median 9,855 tokens from Core's cache (10,660 before the persona was cut), 71 fresh, in a median model call of 2.2 s.
 
 **Tests:** `tests/test_sat_speed_{brain,hub}.py` pin the first build, `tests/test_sat_fix_{brain_core,brain_routes,hub}.py` the first review's fixes,
@@ -430,6 +437,16 @@ this file says. CI (`core/ci/ci.py`) runs no `services/satellite/tests`, so run 
 * Two odd shapes of an annotation are cut only as far as the first `]`: one with `}]` inside a JSON string (`[SKIPPY_LEARN: {"note": "a }] b"}]` speaks `b"}]`) and a bare
   tag with its JSON on the next line (the tag goes, the JSON is spoken). Neither was ever seen from Core, and a JSON branch that knew about quotes would lose real words
   when an annotation has an odd number of quotes and another follows.
+* The music re-ask (`REASK_MUSIC`, a first reply that claimed music with no music tool) is answered with a text call the house cannot read in about half its replies on the real Core
+  (`[music with quieter]`, `[music] volume lowered.`, `[music tool: quieter]`, `[music with next]`; 6 of 12 forced re-asks were done, a stronger nudge made no difference, and `tool_choice: any`
+  is ignored by Core). The reply is then the fixed line (`UNCLAIM_MUSIC`), or, when its words are not recognised as a claim ("Quieter now. Try not to strain your ears."), the claim itself.
+  It needs a first reply that claims in words only (2 of 24 trials of "turn the music down a notch") for a phrasing the routes miss. Reading those brackets as calls was left: a bracket
+  that merely contains an action word ("[music next to him]") would then skip a track.
+* A call put back from the reasoning is judged by its own line and the words after it, not by the whole thought: a negation AFTER the call ("[set_alarm time=07:00] but no.") or on the
+  line before it is not read, two different calls in one thought ("could be [music action=next] or [music action=quieter]") both run, and `_undoes` finds `remove` / `clear`
+  anywhere in a call, so a meant `list add "clear tape"` is not put back. All seen in scripted replies only: no live reply carried reasoning on the day it was fixed. Two costs of the
+  plain-words rule: a stage direction with one of a tool's action words in it (`[music volume dips]`, `[music next to him]`) is taken for a call and costs a second model call and the
+  fixed line instead of the answer, and a stage direction in the VISIBLE words that starts with a tool's name counts as a call of their own, so the call in the reasoning is dropped.
 * The thermostat route's older pattern, the one that names a device (`SET_THERMO`), is as it was and still takes some questions and compound requests: "why is the
   thermostat at 60" and "the thermostat is at 70 but it feels cold" set the number named, "set the thermostat to 68 or 70" sets 68, "turn the heat on at 10 pm" sets 10
   (the house accepts 5 to 95 in the thermostat's own unit), "set the thermostat to 72 and turn off the lights" does only the first half, and "turn the thermostat up two
