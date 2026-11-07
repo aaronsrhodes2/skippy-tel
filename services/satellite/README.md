@@ -114,19 +114,31 @@ its radio stays awake. The proof, on the real plug (it switches it, then leaves 
     ./.venv/Scripts/python homectl.py list                                              # HomeKit and Matter together
     ./.venv/Scripts/python homectl.py identify "kitchen light"                           # make it flash: which one on the wall is it
 
-**The storm** (2026-11-06, `lightshow.py`): the colour bulbs (the three LIFX Minis, paired by their sticker codes) drift between deep blue and cool white,
-each on its own random course, like a roiling stormy sky. The bulbs fade themselves (Matter's transition time: a command every few seconds, not a stream),
-a bulb is never sent close to where another is heading, and they are first set to a 6500 K white (the bulb keeps it, so the white end is cold, not warm).
-It runs in a process of its own with a heartbeat in `state/home/storm.json`; a bulb that is off is left alone and **the show ends by itself when every bulb is
-off** ("turn off the lights"); `stop` puts each bulb back exactly as it was (colour, level, power).
+**Light shows** (2026-11-06, `lightshow.py`): the colour bulbs (the three LIFX Minis, paired by their sticker codes) run a routine, each bulb on its own random course and
+never close to where another is heading. The bulbs fade themselves (Matter's transition time: a command now and then, not a stream; a bulb honours a fade of minutes).
 
-    ./.venv/Scripts/python homectl.py storm start                                       # every colour light in the house, or name some: storm start "LIFX 1787"
-    ./.venv/Scripts/python homectl.py storm status
-    ./.venv/Scripts/python homectl.py storm stop                                        # back as they were
-    ./.venv/Scripts/python homectl.py storm run                                         # in this terminal instead (Ctrl-C ends it)
+  * **storm**: deep blue to cool white, a roiling stormy sky: a new look every few seconds, now and then a quick surge. The bulbs are first set to a 6500 K white (a bulb keeps it,
+    so the white end is cold, not warm).
+  * **fortress**: deep purple and violet, so slow you would hardly notice it is changing: each bulb drifts a few degrees and a few points of brightness over 4 to 11 minutes
+    (typically 0.1 to 0.3 degrees of hue a minute), never bright; the first fade into it from the storm takes 4 to 7 minutes.
 
-Tests: `tests/test_sat_lightshow.py` (a fake house and clock, a seeded storm) and the colour cases in `tests/test_sat_matter.py`. Not on a voice trigger yet (that is a
-hub change); the knobs (the blue range, how white, how fast, how far apart) are the constants at the top of `lightshow.py`.
+A show is a plan: `--for 5h --then fortress` runs the storm for five hours and the fortress after it, by itself, the bulbs fading on from wherever they are (no "put back" flash in
+between); `--at 18:30` makes it wait for its time (a bare time is the next one; `tomorrow 18:30` and `2026-11-07 18:30` work) without touching the lights until then. One show at a
+time: a new `show` while one is on (waiting or running) takes over in place, which is how you switch to the fortress whenever you like. It runs in a process of its own
+(`state/home/show.json` is its heartbeat; a scheduled show lives in that process, so if skippy-pc restarts before its time, give the command again). A bulb that is off is left alone and
+**the show ends by itself when every bulb is off** ("turn off the lights"); `show stop` puts each bulb back exactly as it was (colour, level, power).
+
+    ./.venv/Scripts/python homectl.py show storm --for 5h --then fortress --at 18:30   # wait for 18:30, the storm for 5 hours, then the fortress for ever
+    ./.venv/Scripts/python homectl.py show storm                                        # the storm now, until stopped
+    ./.venv/Scripts/python homectl.py show fortress                                     # the fortress now (or, while a show is on, switch to it in place)
+    ./.venv/Scripts/python homectl.py show status                                       # what is on, how long is left, what comes next
+    ./.venv/Scripts/python homectl.py show stop                                         # back as they were (or cancels one that is still waiting)
+        --lights "LIFX 1787" "LIFX E25D"   only these (default: every colour light)        --foreground   in this terminal instead (Ctrl-C ends it)
+
+Tests: `tests/test_sat_lightshow.py` (a fake house and clock, seeded shows: hours of storm and fortress in milliseconds) and the colour cases in `tests/test_sat_matter.py`.
+Not on a voice trigger yet (that is a hub change); the knobs (the blue and violet ranges, how white, how fast, how far apart) are the constants at the top of `lightshow.py`.
+Gotchas: a light that is **off ignores colour commands** (Matter's ExecuteIfOff), which is why a show never wakes a light he switched off and why the restore forces it; and on this
+Windows box Python does not understand Git Bash's `/d/...` paths (a names file given that way is silently not found, and the bulbs lose their LIFX names).
 
 **Every Leviton on his account, with nothing paired** (2026-10-25, `leviton.py`): with `LEVITON_EMAIL` and `LEVITON_PASSWORD` in the vault,
 the hub reaches every Decora Smart Wi-Fi switch through the My Leviton cloud, the same account Google Home and Alexa use (`decora_wifi`,
