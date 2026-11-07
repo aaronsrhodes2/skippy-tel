@@ -257,6 +257,20 @@ def test_the_command_line_pairs_lists_and_proves_matter_devices(house, controlle
     assert homectl.main(["matter-info"], hk=NoKit(), out=lines.append, env={}) == 1 and "MATTER_URL" in lines[-1]
 
 
+def test_a_new_matter_device_joins_the_house_wifi_when_there_is_no_room_wifi(house, controller):
+    lines = []
+
+    class NoKit(Combined.__mro__[1]):
+        def states(self, fresh=False):
+            return []
+    env = {"MATTER_URL": controller.url, "HOME_WIFI": "MakerNet", "HOME_WIFI_PWD": "house-pw"}      # the vault's house network, no ROOM_WIFI_*
+    assert homectl.main(["matter-pair", "34970112332", "Desk Lamp"], hk=NoKit(), out=lines.append, mt=house, env=env) == 0
+    assert controller.wifi == ("MakerNet", "house-pw")
+    env["ROOM_WIFI_SSID"], env["ROOM_WIFI_PASSWORD"] = "RoomNet", "room-pw"                           # a room network, when set, wins
+    assert homectl.main(["matter-pair", "11111111116", "Den Lamp"], hk=NoKit(), out=lines.append, mt=house, env=env) == 0
+    assert controller.wifi == ("RoomNet", "room-pw")
+
+
 def test_the_listener_builds_a_matter_house_from_the_vault(tmp_path, monkeypatch):
     import ear
     house = ear.build_house({"MATTER_URL": "ws://skippy-core:5580/ws", "SKIPPY_HOME_STATE": str(tmp_path)})

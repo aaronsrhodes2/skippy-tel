@@ -151,14 +151,23 @@ def prove(hk: HomeKit, name: str, rounds: int, gap: float, out=print, sleep=time
     return 0 if not failures else 1
 
 
+def new_device_wifi(env: dict) -> tuple[str, str]:
+    """The Wi-Fi a brand-new device joins during Bluetooth setup: ROOM_WIFI_SSID/ROOM_WIFI_PASSWORD, else the house network the vault already
+    names (HOME_WIFI/HOME_WIFI_PWD), the same fallback rooms/flash.sh uses for the pods."""
+    ssid, password = env.get("ROOM_WIFI_SSID", ""), env.get("ROOM_WIFI_PASSWORD", "")
+    if not (ssid and password):
+        ssid, password = env.get("HOME_WIFI", ""), env.get("HOME_WIFI_PWD", "")
+    return ssid, password
+
+
 def matter_import(m, text: str, env: dict, new: bool, out=print) -> int:
     """Pair a list of devices one after another; one that fails doesn't stop the rest; a code already paired is skipped."""
     from matter import parse_import                                 # noqa: PLC0415
     rows = parse_import(text)
     if new:
-        ssid, password = env.get("ROOM_WIFI_SSID", ""), env.get("ROOM_WIFI_PASSWORD", "")
+        ssid, password = new_device_wifi(env)
         if not (ssid and password):
-            raise HomeError("New devices need the Wi-Fi to join: ROOM_WIFI_SSID and ROOM_WIFI_PASSWORD in the vault .env.")
+            raise HomeError("New devices need the Wi-Fi to join: ROOM_WIFI_SSID and ROOM_WIFI_PASSWORD (else HOME_WIFI/HOME_WIFI_PWD) in the vault .env.")
         m.set_wifi(ssid, password)
     done = skipped = failed = 0
     for n, (code, name, area) in enumerate(rows, 1):
@@ -241,10 +250,10 @@ def main(argv=None, hk: HomeKit | None = None, out=print, sleep=time.sleep, mt=N
         elif args.cmd == "matter-pair":
             m = matter()
             if not args.network:
-                ssid, password = env.get("ROOM_WIFI_SSID", ""), env.get("ROOM_WIFI_PASSWORD", "")
+                ssid, password = new_device_wifi(env)
                 if not (ssid and password):
                     raise HomeError("A new device needs the Wi-Fi it should join: put ROOM_WIFI_SSID and ROOM_WIFI_PASSWORD "
-                                    "(a 2.4 GHz network) in the vault .env. (A device already on the network: add --network.)")
+                                    "(a 2.4 GHz network; else HOME_WIFI/HOME_WIFI_PWD) in the vault .env. (A device already on the network: add --network.)")
                 m.set_wifi(ssid, password)
             out("Pairing (a new device over Bluetooth takes a minute or two; keep it close to skippy-core) ...")
             out(m.pair(args.code, args.name, args.area, network_only=args.network))
