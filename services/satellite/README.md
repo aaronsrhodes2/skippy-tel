@@ -114,6 +114,20 @@ its radio stays awake. The proof, on the real plug (it switches it, then leaves 
     ./.venv/Scripts/python homectl.py list                                              # HomeKit and Matter together
     ./.venv/Scripts/python homectl.py identify "kitchen light"                           # make it flash: which one on the wall is it
 
+**The storm** (2026-11-06, `lightshow.py`): the colour bulbs (the three LIFX Minis, paired by their sticker codes) drift between deep blue and cool white,
+each on its own random course, like a roiling stormy sky. The bulbs fade themselves (Matter's transition time: a command every few seconds, not a stream),
+a bulb is never sent close to where another is heading, and they are first set to a 6500 K white (the bulb keeps it, so the white end is cold, not warm).
+It runs in a process of its own with a heartbeat in `state/home/storm.json`; a bulb that is off is left alone and **the show ends by itself when every bulb is
+off** ("turn off the lights"); `stop` puts each bulb back exactly as it was (colour, level, power).
+
+    ./.venv/Scripts/python homectl.py storm start                                       # every colour light in the house, or name some: storm start "LIFX 1787"
+    ./.venv/Scripts/python homectl.py storm status
+    ./.venv/Scripts/python homectl.py storm stop                                        # back as they were
+    ./.venv/Scripts/python homectl.py storm run                                         # in this terminal instead (Ctrl-C ends it)
+
+Tests: `tests/test_sat_lightshow.py` (a fake house and clock, a seeded storm) and the colour cases in `tests/test_sat_matter.py`. Not on a voice trigger yet (that is a
+hub change); the knobs (the blue range, how white, how fast, how far apart) are the constants at the top of `lightshow.py`.
+
 **Every Leviton on his account, with nothing paired** (2026-10-25, `leviton.py`): with `LEVITON_EMAIL` and `LEVITON_PASSWORD` in the vault,
 the hub reaches every Decora Smart Wi-Fi switch through the My Leviton cloud, the same account Google Home and Alexa use (`decora_wifi`,
 Home Assistant's library): dimmers become lights, the rest switches, names straight from the app. It goes through Leviton's servers

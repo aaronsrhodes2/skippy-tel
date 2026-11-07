@@ -27,6 +27,14 @@ def light(node_id=2):
         "1/29/0": [{"0": 257, "1": 1}], "1/6/0": True, "1/8/0": 127}}
 
 
+def color_light(node_id=8, name="Storm Lamp", on=True):
+    """An extended colour light (a LIFX Mini): ColorControl with hue/saturation (FeatureMap 31), set up as the factory leaves it (XY white)."""
+    return {"node_id": node_id, "available": True, "attributes": {
+        "0/29/0": [{"0": 22, "1": 1}], "0/40/5": name,
+        "1/29/0": [{"0": 269, "1": 1}], "1/6/0": on, "1/8/0": 254,
+        "1/768/0": 0, "1/768/1": 0, "1/768/3": 24939, "1/768/4": 24701, "1/768/7": 273, "1/768/8": 1, "1/768/65532": 31}}
+
+
 def leviton(node_id=5):
     """A D2MSD: a dimmer with a motion sensor on a second endpoint, and Identify on the dimmer's."""
     return {"node_id": node_id, "available": True, "attributes": {
@@ -83,8 +91,20 @@ class FakeController:
                     return None
                 key = f"{ep}/6/0"
                 attrs[key] = {"On": True, "Off": False, "Toggle": not attrs[key]}[a["command_name"]]
-            if a["cluster_id"] == 8:
-                attrs[f"{ep}/8/0"], attrs[f"{ep}/6/0"] = a["payload"]["level"], True
+            p = a["payload"]
+            runs = bool(attrs.get(f"{ep}/6/0")) or bool(p.get("optionsOverride", 0) & 1)     # a light that is off ignores a command unless ExecuteIfOff is forced
+            if a["cluster_id"] == 8 and a["command_name"] == "MoveToLevel":
+                if runs:
+                    attrs[f"{ep}/8/0"] = p["level"]
+            elif a["cluster_id"] == 8:
+                attrs[f"{ep}/8/0"], attrs[f"{ep}/6/0"] = p["level"], True
+            if a["cluster_id"] == 768 and runs:
+                if a["command_name"] == "MoveToHueAndSaturation":
+                    attrs[f"{ep}/768/8"], attrs[f"{ep}/768/0"], attrs[f"{ep}/768/1"] = 0, p["hue"], p["saturation"]
+                elif a["command_name"] == "MoveToColorTemperature":
+                    attrs[f"{ep}/768/8"], attrs[f"{ep}/768/7"] = 2, p["colorTemperatureMireds"]
+                elif a["command_name"] == "MoveToColor":
+                    attrs[f"{ep}/768/8"], attrs[f"{ep}/768/3"], attrs[f"{ep}/768/4"] = 1, p["colorX"], p["colorY"]
             return None
         if command == "read_attribute":
             return {a["attribute_path"]: self.nodes[a["node_id"]]["attributes"].get(a["attribute_path"])}
@@ -269,6 +289,67 @@ def test_a_new_matter_device_joins_the_house_wifi_when_there_is_no_room_wifi(hou
     env["ROOM_WIFI_SSID"], env["ROOM_WIFI_PASSWORD"] = "RoomNet", "room-pw"                           # a room network, when set, wins
     assert homectl.main(["matter-pair", "11111111116", "Den Lamp"], hk=NoKit(), out=lines.append, mt=house, env=env) == 0
     assert controller.wifi == ("RoomNet", "room-pw")
+
+
+def test_a_colour_light_is_found_and_driven_by_hue_white_and_level(house, controller):
+    controller.nodes[8] = color_light()
+    assert [x["entity_id"] for x in house.color_lights()] == ["light.storm_lamp"]          # the Reading Lamp is a plain dimmer: no hue
+    house.set_white("light.storm_lamp", 6500, 1.0)
+    house.set_color("light.storm_lamp", 240, 100, 2.5)
+    a = controller.nodes[8]["attributes"]
+    assert (a["1/768/8"], a["1/768/0"], a["1/768/1"], a["1/768/7"]) == (0, 169, 254, 154)   # hue mode, blue, full, and the cool white (6500 K = 154 mireds) is kept
+    sent = [x for c, x in controller.calls if c == "device_command" and x["cluster_id"] == 768]
+    assert sent[-1]["payload"] == {"hue": 169, "saturation": 254, "transitionTime": 25, "optionsMask": 0, "optionsOverride": 0}
+    house.set_color("light.storm_lamp", 240, 0, 0)
+    assert a["1/768/1"] == 0
+    house.set_level("light.storm_lamp", 50, 1)
+    assert a["1/8/0"] == 127
+    with pytest.raises(HomeError, match="do not know"):
+        house.set_color("switch.theater_fan", 240, 100)                                     # a fan has no colour
+
+
+def test_a_light_that_is_off_ignores_a_show_but_is_put_back_all_the_same(house, controller):
+    controller.nodes[8] = color_light()
+    eid, a = "light.storm_lamp", controller.nodes[8]["attributes"]
+    was = house.color_snapshot([eid])[eid]
+    assert was == {"on": True, "level": 254, "mode": 1, "hue": 0, "saturation": 0, "mireds": 273, "x": 24939, "y": 24701}
+    house.switch(eid, False)
+    house.set_color(eid, 240, 100)
+    house.set_level(eid, 40)
+    assert (a["1/768/8"], a["1/8/0"]) == (1, 254)                                           # off: the command is ignored, it does not wake or change
+    house.switch(eid, True)
+    house.set_color(eid, 240, 100)
+    house.set_level(eid, 40)
+    assert (a["1/768/8"], a["1/8/0"]) == (0, 102)
+    house.switch(eid, False)                                                                # he switched it off during the show
+    house.color_restore(eid, was, power=False)
+    assert (a["1/768/8"], a["1/768/3"], a["1/768/4"], a["1/8/0"], a["1/6/0"]) == (1, 24939, 24701, 254, False)     # its old colour is ready, and it stays off
+    house.color_restore(eid, was)
+    assert a["1/6/0"] is True
+
+
+def test_a_colour_is_put_back_the_way_it_was_set(house, controller):
+    controller.nodes[8] = color_light()
+    eid, a = "light.storm_lamp", controller.nodes[8]["attributes"]
+    house.color_restore(eid, {"on": True, "level": 100, "mode": 2, "mireds": 300})
+    assert (a["1/768/8"], a["1/768/7"], a["1/8/0"]) == (2, 300, 100)
+    house.color_restore(eid, {"on": True, "level": 200, "mode": 0, "hue": 10, "saturation": 20})
+    assert (a["1/768/8"], a["1/768/0"], a["1/768/1"]) == (0, 10, 20)
+
+
+def test_the_storm_picks_every_colour_light_or_the_ones_named_and_says_why_not(house, controller):
+    import lightshow
+    controller.nodes[8] = color_light()
+    controller.nodes[9] = color_light(node_id=9, name="Desk Lamp")
+    assert [x["entity_id"] for x in lightshow.resolve(house, [])] == ["light.storm_lamp", "light.desk_lamp"]
+    assert [x["entity_id"] for x in lightshow.resolve(house, ["desk lamp"])] == ["light.desk_lamp"]
+    with pytest.raises(HomeError, match="cannot change colour"):
+        lightshow.resolve(house, ["reading lamp"])
+    with pytest.raises(HomeError, match="cannot find"):
+        lightshow.resolve(house, ["the moon"])
+    del controller.nodes[8], controller.nodes[9]
+    with pytest.raises(HomeError, match="no colour light"):
+        lightshow.resolve(house, [])
 
 
 def test_the_listener_builds_a_matter_house_from_the_vault(tmp_path, monkeypatch):

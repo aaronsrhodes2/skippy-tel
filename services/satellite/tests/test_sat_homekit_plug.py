@@ -89,7 +89,7 @@ def test_prove_switches_it_on_and_off_times_it_and_leaves_it_as_it_was(fan):
     p = plug(fan, lambda acc: Dozy(acc))
     p.values[(2, 20)] = False
     lines = []
-    assert homectl.main(["prove", "theater fan", "--rounds", "2", "--gap", "0"], hk=fan, out=lines.append) == 0
+    assert homectl.main(["prove", "theater fan", "--rounds", "2", "--gap", "0"], hk=fan, out=lines.append, env={}) == 0
     assert lines[0].startswith("1  on") and "second try" in lines[0]
     assert lines[-1].startswith("Theater Fan: 4/4 worked") and "1 needed a second try" in lines[-1]
     assert p.values[(2, 20)] is False                                       # off when we started, off when we finished
@@ -98,5 +98,5 @@ def test_prove_switches_it_on_and_off_times_it_and_leaves_it_as_it_was(fan):
 def test_prove_says_so_when_there_is_no_such_thing(fan):
     plug(fan)
     lines = []
-    assert homectl.main(["prove", "garage heater", "--rounds", "1", "--gap", "0"], hk=fan, out=lines.append) == 1
+    assert homectl.main(["prove", "garage heater", "--rounds", "1", "--gap", "0"], hk=fan, out=lines.append, env={}) == 1
     assert "cannot find" in lines[-1]

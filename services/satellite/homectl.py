@@ -22,6 +22,9 @@ Matter (through skippy-core's controller, MATTER_URL in the vault; core/compose.
     ./.venv/Scripts/python homectl.py identify "kitchen light"                 # make it flash: which switch is which
     ./.venv/Scripts/python homectl.py matter-label <node> --name "..." --area "..."
     ./.venv/Scripts/python homectl.py matter-forget <node>
+    ./.venv/Scripts/python homectl.py storm start                           the colour lights drift between blue and white, each on its own random
+                                                                            course, like a roiling stormy sky (lightshow.py); `storm stop` puts them
+                                                                            back as they were, `storm status`, `storm start "LIFX 1787" ...` for some
 `list`, `say` and `prove` cover HomeKit and Matter together.
 
 The setup code is the 8 digits on the device (a Leviton dimmer: the label on its side and in the Leviton app). It is used once, never stored; what is
@@ -202,6 +205,7 @@ def main(argv=None, hk: HomeKit | None = None, out=print, sleep=time.sleep, mt=N
     p = sub.add_parser("matter-forget"); p.add_argument("node", type=int)
     p = sub.add_parser("matter-import"); p.add_argument("file"); p.add_argument("--new", action="store_true")
     p = sub.add_parser("identify"); p.add_argument("target")
+    p = sub.add_parser("storm"); p.add_argument("action", choices=("start", "stop", "status", "run")); p.add_argument("lights", nargs="*")
     args = ap.parse_args(argv)
     env = env if env is not None else _env()
     hk = hk or HomeKit(Store(store_path(env)))
@@ -276,6 +280,9 @@ def main(argv=None, hk: HomeKit | None = None, out=print, sleep=time.sleep, mt=N
         elif args.cmd == "matter-forget":
             matter().forget(args.node)
             out("Removed from skippy-core's Matter fabric.")
+        elif args.cmd == "storm":
+            import lightshow                                        # noqa: PLC0415
+            return lightshow.command(args.action, args.lights, env, matter_path(env).parent, matter, out)
     except HomeError as e:
         out(str(e))
         return 1

@@ -24,6 +24,8 @@ from homekit import Loop, slug
 from house import House, HomeError
 
 ON_OFF, LEVEL, THERMOSTAT, THERMO_UI, DESCRIPTOR, BASIC, IDENTIFY, OCCUPANCY = 6, 8, 513, 516, 29, 40, 3, 1030
+COLOR_CONTROL = 768                                   # hue and saturation, colour temperature, XY
+HUE_SATURATION = 1                                    # ColorControl's FeatureMap bit 0: the light can take any hue
 LIGHT_TYPES = {0x0100, 0x0101, 0x010C, 0x010D}       # on/off, dimmable, colour temperature, extended colour light
 PLUG_TYPES = {0x010A, 0x010B}                         # on/off and dimmable plug-in units
 THERMOSTAT_TYPES = {0x0301}
@@ -66,6 +68,22 @@ def from_display(value: float, fahrenheit: bool) -> int:
     if not 5 <= c <= 35:
         raise HomeError(f"{value} degrees is outside what a thermostat should be set to.")
     return int(round(c * 100))
+
+
+def color_capable(attrs: dict, ep: int) -> bool:
+    """Can this endpoint's light take any hue (ColorControl with the hue and saturation feature)? A plain dimmer or a warm/cool-white-only bulb cannot."""
+    features = attrs.get(f"{ep}/{COLOR_CONTROL}/65532")
+    return isinstance(features, int) and bool(features & HUE_SATURATION)
+
+
+def _tenths(seconds: float) -> int:
+    """Matter's transition time: tenths of a second, the light does the fading itself."""
+    return max(0, min(65534, int(round(float(seconds) * 10))))
+
+
+def _unit(fraction: float) -> int:
+    """0..1 as Matter's 0..254 (hue and saturation)."""
+    return max(0, min(254, int(round(fraction * 254))))
 
 
 def fingerprint(code: str) -> str:
@@ -278,6 +296,80 @@ class Matter(House):
             self.ask("device_command", node_id=node, endpoint_id=ep, cluster_id=IDENTIFY, command_name="Identify",
                      payload={"identifyTime": int(seconds)})
         return f"It is flashing for {seconds} seconds."
+
+    # ── colour (lightshow.py): the house itself only switches and dims ──────────
+    def color_lights(self) -> list[dict]:
+        """The lights that can take any colour: [{"entity_id", "label", "node", "ep"}]."""
+        rows = self.states(fresh=True)
+        nodes = {n.get("node_id"): n.get("attributes") or {} for n in (self.ask("get_nodes") or [])}
+        out = []
+        for s in rows:
+            i = self._index.get(s["entity_id"])
+            if i and i["kind"] == "light" and color_capable(nodes.get(i["node"], {}), i["ep"]):
+                out.append({"entity_id": s["entity_id"], "label": self._label(s), "node": i["node"], "ep": i["ep"]})
+        return out
+
+    def _light_at(self, eid: str) -> tuple[int, int]:
+        if eid not in self._index:
+            self.states(fresh=True)
+        i = self._index.get(eid)
+        if i is None or i["kind"] != "light":
+            raise HomeError("I do not know that light.")
+        return i["node"], i["ep"]
+
+    def _color_command(self, eid: str, cluster: int, command: str, payload: dict, timeout: float, force: bool = False) -> None:
+        node, ep = self._light_at(eid)
+        flag = 1 if force else 0              # the Options bit ExecuteIfOff: left out, a light that is off ignores the command (a show must never wake a light he switched off)
+        self.ask("device_command", timeout=timeout, node_id=node, endpoint_id=ep, cluster_id=cluster, command_name=command,
+                 payload={**payload, "optionsMask": flag, "optionsOverride": flag})
+
+    def set_color(self, eid: str, hue: float, saturation: float, seconds: float = 0.0, timeout: float = ASK_SECONDS, force: bool = False) -> None:
+        """Hue in degrees (blue is 240), saturation in percent (0 is white): the light fades there itself over `seconds`."""
+        self._color_command(eid, COLOR_CONTROL, "MoveToHueAndSaturation",
+                            {"hue": _unit((hue % 360) / 360), "saturation": _unit(saturation / 100), "transitionTime": _tenths(seconds)}, timeout, force)
+
+    def set_white(self, eid: str, kelvin: float, seconds: float = 0.0, timeout: float = ASK_SECONDS, force: bool = False) -> None:
+        """A white of this colour temperature (6500 is cool daylight). A light keeps it: a desaturated colour afterwards is this white, not a warm one."""
+        self._color_command(eid, COLOR_CONTROL, "MoveToColorTemperature",
+                            {"colorTemperatureMireds": max(1, int(round(1_000_000 / float(kelvin)))), "transitionTime": _tenths(seconds)}, timeout, force)
+
+    def set_level(self, eid: str, percent: float, seconds: float = 0.0, timeout: float = ASK_SECONDS, force: bool = False) -> None:
+        self._color_command(eid, LEVEL, "MoveToLevel",
+                            {"level": max(1, min(254, int(round(float(percent) * 254 / 100)))), "transitionTime": _tenths(seconds)}, timeout, force)
+
+    def switch(self, eid: str, on: bool) -> None:
+        """On or off, read back from the light itself (the same path as `control`)."""
+        self._service("light", "turn_on" if on else "turn_off", {"entity_id": eid})
+        self.invalidate()
+
+    def color_snapshot(self, eids: list[str]) -> dict[str, dict]:
+        """How each light is now, in Matter's own units, to put it back after a show: {entity_id: {on, level, mode, hue, saturation, mireds, x, y}}."""
+        self.states(fresh=True)
+        nodes = {n.get("node_id"): n.get("attributes") or {} for n in (self.ask("get_nodes") or [])}
+        out = {}
+        for eid in eids:
+            node, ep = self._light_at(eid)
+            a = nodes.get(node, {})
+            out[eid] = {"on": bool(a.get(f"{ep}/{ON_OFF}/0")), "level": a.get(f"{ep}/{LEVEL}/0"), "mode": a.get(f"{ep}/{COLOR_CONTROL}/8"),
+                        "hue": a.get(f"{ep}/{COLOR_CONTROL}/0"), "saturation": a.get(f"{ep}/{COLOR_CONTROL}/1"), "mireds": a.get(f"{ep}/{COLOR_CONTROL}/7"),
+                        "x": a.get(f"{ep}/{COLOR_CONTROL}/3"), "y": a.get(f"{ep}/{COLOR_CONTROL}/4")}
+        return out
+
+    def color_restore(self, eid: str, was: dict, seconds: float = 2.0, power: bool = True, timeout: float = ASK_SECONDS) -> None:
+        """Put a light back as `color_snapshot` found it: its colour (set the way it had been: hue, colour temperature or XY), its level, then on or off.
+        Sent even if it is off. power=False leaves it on or off as it is now: a light he switched off during a show stays off, with its old colour ready."""
+        t = _tenths(seconds)
+        mode = was.get("mode")
+        if mode == 2 and was.get("mireds"):
+            self._color_command(eid, COLOR_CONTROL, "MoveToColorTemperature", {"colorTemperatureMireds": was["mireds"], "transitionTime": t}, timeout, True)
+        elif mode == 0 and was.get("hue") is not None and was.get("saturation") is not None:
+            self._color_command(eid, COLOR_CONTROL, "MoveToHueAndSaturation", {"hue": was["hue"], "saturation": was["saturation"], "transitionTime": t}, timeout, True)
+        elif mode == 1 and was.get("x") is not None and was.get("y") is not None:
+            self._color_command(eid, COLOR_CONTROL, "MoveToColor", {"colorX": was["x"], "colorY": was["y"], "transitionTime": t}, timeout, True)
+        if isinstance(was.get("level"), int):
+            self._color_command(eid, LEVEL, "MoveToLevel", {"level": max(1, min(254, was["level"])), "transitionTime": t}, timeout, True)
+        if power:
+            self.switch(eid, bool(was.get("on")))
 
     def _service(self, domain: str, service: str, data: dict) -> None:
         eid = data["entity_id"]

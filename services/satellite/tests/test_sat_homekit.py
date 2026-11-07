@@ -185,7 +185,7 @@ def test_unpair_and_label(kit):
 
 def test_the_command_line_scans_pairs_lists_and_tries_a_control(kit):
     lines = []
-    run = lambda *argv: homectl.main(list(argv), hk=kit, out=lines.append)       # noqa: E731
+    run = lambda *argv: homectl.main(list(argv), hk=kit, out=lines.append, env={})       # noqa: E731  (env={}: never the real vault, whose Matter controller now has real lights)
     assert run("scan") == 0 and any("unpaired: can be paired here" in l for l in lines) and any("paired elsewhere" in l for l in lines)
     assert run("pair", "aa:bb:cc:00:00:01", "123-45-678", "Dimmer", "--area", "Hall") == 0 and lines[-1] == "Paired Dimmer."
     assert run("pair", "aa:bb:cc:00:00:01", "000", "Dimmer") == 1 and "eight digits" in lines[-1]
