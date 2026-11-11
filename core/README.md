@@ -209,12 +209,19 @@ skippy-core sits in the bedroom with the TV on its HDMI. The TV is a console tha
   `nvidia-smi` on every poll. Each call took 0.5-0.9 s and stalled the GPU for over 100 ms: Sunshine's NvEnc logged "encode wait timeout" 0.1-0.2 s
   after 20 of 23 of them (all 7 run by hand while the encoder was up; a call inside a WSL container did not do it), and Sunshine tore its encoder down and
   built it again: ~1.5 s with no picture, an I-frame after it (Moonlight logs the lost frame N, "Sending RFI request", "(I-frame)"), and a hitch in any game
-  on the PC. 190-320 an hour, day and night, since 11-04 ~10:00 (1-65 before); the kiosk's flaps under load ("decoder queue is flooded", 37 on 11-04)
-  are probably the same bursts. The starter now asks NVML in its own process
+  on the PC. 190-320 an hour, day and night, since 11-04 ~10:00 (1-65 before; an NVIDIA video-engine reset, WER `LKD_0x141_Tdr`, is logged at 11-04 10:40
+  and the rate had been climbing since ~09:50). The starter now asks NVML in its own process
   (`Nvml` in `tools/skippy_starter.py`: opened once, 0.1 ms a query); **nothing on a timer may run `nvidia-smi` on this PC**
-  (`test_the_starter_never_runs_nvidia_smi`). **Look:** the count of `encode wait timeout` lines in Sunshine's log must not grow while the PC
-  is idle (`grep -a -c "encode wait timeout" "C:\Program Files\Sunshine\config\sunshine.log"`, a minute apart); if it does, a watcher that logs every new
-  process (poll `[Diagnostics.Process]::GetProcesses()` every 60 ms) lines up with the log's millisecond stamps to find the caller.
+  (`test_the_starter_never_runs_nvidia_smi`). Idle, the timeouts fell to ~44 an hour and the Captain says the stutter is gone. **Look:** the count of
+  `encode wait timeout` lines in Sunshine's log must not grow while the PC is idle (`grep -a -c "encode wait timeout"
+  "C:\Program Files\Sunshine\config\sunshine.log"`, a minute apart; Sunshine keeps the last three logs as `sunshine.log.1-.3` and starts a new one at every restart); if
+  it does, a watcher that logs every new process (poll `[Diagnostics.Process]::GetProcesses()` every 60 ms) lines up with the log's millisecond stamps to find the caller.
+  **Not fixed by this: the kiosk's flaps under heavy content.** The watchdog ended Moonlight 46 times on 11-05 17:38-21:27 ("decoder queue is flooded", every one of
+  them), after the fix, with up to 63 encoder timeouts an hour and a few "DuplicateOutput() test failed" / "No displays were found" lines in Sunshine's log (the projector
+  is the PC's only display). Checked and NOT the cause: skippy-core's CPU (95% idle), its swapping (kills against sar's swap-in/out and major faults per 10 minutes:
+  correlation 0.1-0.25, many kills in buckets with no paging) and the starter. Open: Moonlight's software 4:4:4 decode sat at about one full core when measured
+  on 11-04, which leaves a complex scene little room; 4:2:0, 30 fps or a lower bitrate would trade away what he asked for on 11-01. To settle it, watch `top -H` on
+  Moonlight during a heavy scene (a stream needs the TV's HDMI output: with the TV off cage has none, `grim` says "no wl_output", and Moonlight waits).
 
 ## Status and recovery
 
