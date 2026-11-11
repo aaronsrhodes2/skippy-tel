@@ -1,0 +1,33 @@
+{
+ "n": 41,
+ "title": "Round 16 (vs Haiku's round 4): its best train yet",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8) as a vanilla agent (Claude Code with purple's system prompt, an empty setup, effort high, a 131K window) plus purple's generic help: the eyes, the stop gate's work check (MineBench's runtime as the checker, the renderer as the viewer, an 80K output-token budget), its fix-the-worst-fault loop, and the reference (three real photos found before the run, a list of what they all share, and every review scoring the build against them; 8 of 10 ends the loop)",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 28471,
+ "minutes": 81,
+ "size": "50 x 53 x 211",
+ "verdict": "Haiku won, blind, but closer. The coder built a real train: a locomotive with a chimney and big red spoked wheels, a tender, red and blue cars on rails, a station. Oversized wheels and plain box cars against Haiku's cleaner train by a river. Four sends, the score rising from 4 to 6 as the wheels went on.",
+ "stats": {
+  "started": "2026-11-06T06:49:25.481Z",
+  "minutes": 81,
+  "tokens": {
+   "input": 121639,
+   "cache_read": 2123788,
+   "output": 101116,
+   "total": 2346543
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 121639,
+     "cache_read": 2123788,
+     "output": 101116
+    }
+   }
+  ]
+ },
+ "series": "reference",
+ "request": "experiments/minebench/ref-r16-coder/request.txt"
+}

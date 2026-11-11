@@ -1,0 +1,33 @@
+{
+ "n": 40,
+ "title": "Round 15 (vs Haiku's round 3): a clump between two rails",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8) as a vanilla agent (Claude Code with purple's system prompt, an empty setup, effort high, a 131K window) plus purple's generic help: the eyes, the stop gate's work check (MineBench's runtime as the checker, the renderer as the viewer, an 80K output-token budget), its fix-the-worst-fault loop, and the reference (three real photos found before the run, a list of what they all share, and every review scoring the build against them; 8 of 10 ends the loop)",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 7411,
+ "minutes": 139,
+ "size": "29 x 29 x 111",
+ "verdict": "Haiku won, blind. The coder's build is 29 blocks wide: a clump of grey discs and a roof between two red rails; Haiku's a train in a valley. Five sends, scores 1 to 4: first a speck lost in the frame, then no wheels.",
+ "stats": {
+  "started": "2026-11-05T07:50:19.843Z",
+  "minutes": 139,
+  "tokens": {
+   "input": 166923,
+   "cache_read": 7002714,
+   "output": 142156,
+   "total": 7311793
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 166923,
+     "cache_read": 7002714,
+     "output": 142156
+    }
+   }
+  ]
+ },
+ "series": "reference",
+ "request": "experiments/minebench/ref-r15-coder/request.txt"
+}

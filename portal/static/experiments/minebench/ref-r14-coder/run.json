@@ -1,0 +1,33 @@
+{
+ "n": 39,
+ "title": "Round 14 (vs Haiku's round 2): a station, the engine half hidden",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8) as a vanilla agent (Claude Code with purple's system prompt, an empty setup, effort high, a 131K window) plus purple's generic help: the eyes, the stop gate's work check (MineBench's runtime as the checker, the renderer as the viewer, an 80K output-token budget), its fix-the-worst-fault loop, and the reference (three real photos found before the run, a list of what they all share, and every review scoring the build against them; 8 of 10 ends the loop)",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 79021,
+ "minutes": 49,
+ "size": "251 x 93 x 111",
+ "verdict": "Haiku won, blind. The coder built a station with a locomotive half hidden in it and a tube across the tracks; Haiku's train fills a landscape. Two sends at 4 of 10: no wheels, then no cab or smokebox.",
+ "stats": {
+  "started": "2026-11-04T22:10:30.424Z",
+  "minutes": 49,
+  "tokens": {
+   "input": 197223,
+   "cache_read": 6159206,
+   "output": 104113,
+   "total": 6460542
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 197223,
+     "cache_read": 6159206,
+     "output": 104113
+    }
+   }
+  ]
+ },
+ "series": "reference",
+ "request": "experiments/minebench/ref-r14-coder/request.txt"
+}

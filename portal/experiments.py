@@ -256,6 +256,16 @@ RADIANCE_SHOWCASE_SNIPPET = """
 # Runs come in series (run.json "series", "tuned" when absent), newest series first, each in the order its runs happened. The first
 # eleven are the tuned branch: by the Captain's call (2026-10-31) its tooling had tainted the comparison, so the fresh start began.
 MINEBENCH_SERIES = (
+    ("reference", "Look at the real thing first", "Four rounds, 2026-11-04, after the fault loop's reviewer passed builds a blind judge lost: "
+     "the same coder, message, prompt and loop, and a reference before it starts. Core's big model turns the task into an image search, "
+     "picks the best three real photos (Wikimedia Commons: the web's own search gave cartoon trains with faces) and writes what all three "
+     "share (the Captain: \"they all have wheels, so we need wheels\"); the coder gets that list, and every review sees the three photos "
+     "beside one big view of the build and scores how surely a stranger would name it (8 of 10 ends the loop). Each build faces Haiku's "
+     "from the same head to head round (1-4), judged blind. Result: Haiku 4-0 again, but the reviewer was finally honest: it scored "
+     "the coder's builds 1 to 4 out of 10 and sent it back 2 to 5 times a round, almost always for the same thing, no wheels. The coder "
+     "heard it and couldn't do it: round 13 was told \"no wheels\" four times running. Round 16 is the exception and its best train yet "
+     "(big spoked wheels, a tender, cars on rails), its score rising from 4 to 6. The eyes are no longer the limit; turning \"add "
+     "wheels\" into blocks that read as wheels is."),
     ("fault-loop", "Fix the worst fault", "Four rounds, 2026-11-03, after the new eyes said the hard things and the coder shipped anyway: "
      "the same vanilla coder, message, prompt and work check, and a stop gate that won't let it stop on a picture's faults. Each time it "
      "stops, the project's renderer draws its build, Core's big model (Qwen3.6-35B-A3B with its vision projector) reviews it against the "

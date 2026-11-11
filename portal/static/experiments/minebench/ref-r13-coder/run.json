@@ -1,0 +1,33 @@
+{
+ "n": 38,
+ "title": "Round 13 (vs Haiku's round 1): a red pipe on a plate",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8) as a vanilla agent (Claude Code with purple's system prompt, an empty setup, effort high, a 131K window) plus purple's generic help: the eyes, the stop gate's work check (MineBench's runtime as the checker, the renderer as the viewer, an 80K output-token budget), its fix-the-worst-fault loop, and the reference (three real photos found before the run, a list of what they all share, and every review scoring the build against them; 8 of 10 ends the loop)",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 265124,
+ "minutes": 116,
+ "size": "256 x 95 x 256",
+ "verdict": "Haiku won, blind. The coder's build is a jumble round a giant red pipe on a grey plate, across its rails; Haiku's a steam train with three coaches and smoke. The loop sent it back five times, scores 3 to 4 of 10, four of them for the same fault: no wheels.",
+ "stats": {
+  "started": "2026-11-04T20:10:27.572Z",
+  "minutes": 116,
+  "tokens": {
+   "input": 258755,
+   "cache_read": 11191565,
+   "output": 239882,
+   "total": 11690202
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 258755,
+     "cache_read": 11191565,
+     "output": 239882
+    }
+   }
+  ]
+ },
+ "series": "reference",
+ "request": "experiments/minebench/ref-r13-coder/request.txt"
+}
