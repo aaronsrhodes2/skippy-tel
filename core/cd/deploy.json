@@ -4,7 +4,7 @@
  "region": "us-west1",
  "home_dns": {"_comment": "Public names for home: each A record follows home's public IP (cd.py home_dns: one IP check every 5 minutes, two IP services must agree, Cloud DNS touched only when a record differs). host: the car's telemetry door (the router forwards TCP 7443 to skippy-core). hosts: more names on the same IP; home.makerportal.live is the direct front door (Caddy on skippy-pc: the router forwards TCP 443 to skippy-pc:47443) and is the portal's EDGE_HOST below.", "host": "telemetry.makerportal.live", "hosts": ["home.makerportal.live"], "zone": "makerportal-live"},
  "pins": {
-  "SIGMA_GROUND_REF": "00afc1eaa592638e4e8f6e9fc4a535612da9f29f",
+  "SIGMA_GROUND_REF": "ae34bc6082c4b7cf3e9d32b271c8b9b7329968ba",
   "STARCONTROL_REF": "web-2026-10-02",
   "STARCONTROL_SHA256": "15866e0e94ab0069f02f8c4d0a3bb31bf4fe7a96e54337f29cadc37fe74999b3"
  },
