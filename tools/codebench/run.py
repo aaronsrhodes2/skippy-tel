@@ -69,9 +69,17 @@ def bridge_busy() -> bool:
         return False
 
 
+def wipe(path: Path) -> None:
+    """Remove a folder, git's read-only object files too (rmtree's ignore_errors left them behind on Windows)."""
+    import os
+    import stat
+    if path.exists():
+        shutil.rmtree(path, onexc=lambda fn, p, _e: (os.chmod(p, stat.S_IWRITE), fn(p)))
+
+
 def checkout(task: dict, work: Path) -> None:
     """The task's parent commit as a fresh repo with one commit and no history."""
-    shutil.rmtree(work, ignore_errors=True)
+    wipe(work)
     work.mkdir(parents=True)
     tar = subprocess.run(["git", "archive", "--format=tar", task["parent"]], cwd=DEV / task["repo"], capture_output=True, check=True).stdout
     with tarfile.open(fileobj=io.BytesIO(tar)) as t:
@@ -85,7 +93,7 @@ def checkout(task: dict, work: Path) -> None:
 def setup(task: dict, player: str, run: Path, gates: bool) -> tuple[list, dict, Path]:
     work, config = run / "work", run / "config"
     checkout(task, work)
-    shutil.rmtree(config, ignore_errors=True)
+    wipe(config)
     config.mkdir(parents=True)
     (config / "settings.json").write_text(json.dumps({"env": {"CLAUDE_CODE_ATTRIBUTION_HEADER": "0"}}), encoding="utf-8")
     py = f'"{sys.executable}"'
@@ -117,8 +125,7 @@ def setup(task: dict, player: str, run: Path, gates: bool) -> tuple[list, dict, 
     else:
         env.pop("ANTHROPIC_BASE_URL", None)
         env.update(ANTHROPIC_API_KEY=vault("ANTHROPIC_API_KEY"), ANTHROPIC_SMALL_FAST_MODEL=PLAYERS["haiku"])
-    cmd = [shutil.which("claude") or "claude", "-p", MESSAGE.format(repo=task["repo"], request=task["request"], tests=", ".join(task["tests"])),
-           "--output-format", "stream-json", "--verbose", "--model", PLAYERS[player], "--effort", "high",
+    cmd = [claude_exe(), "-p", "--output-format", "stream-json", "--verbose", "--model", PLAYERS[player], "--effort", "high",
            "--dangerously-skip-permissions", "--append-system-prompt-file", str(prompt), "--settings", str(config / "hooks.json")]
     return cmd, env, work
 
@@ -132,6 +139,13 @@ def put_tests(task: dict, work: Path) -> None:
             (work / t).write_bytes(body.stdout)
 
 
+def claude_exe() -> str:
+    """The native claude.exe purple runs (sdk_engine.native_cli), never npm's .cmd shim: through cmd.exe the prompt arrived cut off
+    at its first newline and every option after it was lost (the pilot's first two runs)."""
+    import sdk_engine
+    return sdk_engine.native_cli([shutil.which("claude") or "claude"])
+
+
 def score(task: dict, work: Path) -> dict:
     """The commit's tests put back as they were (an edited test earns nothing) and run."""
     put_tests(task, work)
@@ -143,18 +157,24 @@ def score(task: dict, work: Path) -> dict:
 
 
 def ending(log: Path) -> dict:
-    """From the stream-json log: the last words, whether they ask the Captain something, turns and output tokens."""
-    final, turns, out = "", 0, 0
+    """From the stream-json log: the last words, whether they ask the Captain something, and turns, output tokens and working
+    minutes summed over every `result` event (a background shell finishing wakes the session again, so one run can have several;
+    the pilot's Haiku had five, and the last one's counts alone said 10 turns for a 32-turn run)."""
+    final, turns, out, ms, results = "", 0, 0, 0, 0
     for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             e = json.loads(line)
         except ValueError:
             continue
         if e.get("type") == "result":
-            final, turns = str(e.get("result") or ""), int(e.get("num_turns") or 0)
-            out = int((e.get("usage") or {}).get("output_tokens") or 0)
+            results += 1
+            final = str(e.get("result") or "")
+            turns += int(e.get("num_turns") or 0)
+            out += int((e.get("usage") or {}).get("output_tokens") or 0)
+            ms += int(e.get("duration_ms") or 0)
     tail = final.strip()[-600:]
-    return {"on_its_own": not ASKED.search(tail[-300:]), "turns": turns, "output_tokens": out, "last_words": tail}
+    return {"on_its_own": bool(tail) and not ASKED.search(tail[-300:]), "turns": turns, "output_tokens": out,
+            "work_minutes": round(ms / 60000, 1), "results": results, "last_words": tail}
 
 
 def play(task: dict, player: str, tag: str, timeout_min: int, gates: bool) -> dict:
@@ -162,8 +182,11 @@ def play(task: dict, player: str, tag: str, timeout_min: int, gates: bool) -> di
     cmd, env, work = setup(task, player, run, gates and player == "coder")
     log = run / "stream.jsonl"
     t0 = time.time()
+    message = MESSAGE.format(repo=task["repo"], request=task["request"], tests=", ".join(task["tests"]))
     with open(log, "w", encoding="utf-8") as f:
-        p = subprocess.Popen(cmd, cwd=work, env=env, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+        p = subprocess.Popen(cmd, cwd=work, env=env, stdout=f, stderr=subprocess.STDOUT, stdin=subprocess.PIPE)
+        p.stdin.write(message.encode("utf-8"))
+        p.stdin.close()
         try:
             code = p.wait(timeout=timeout_min * 60)
         except subprocess.TimeoutExpired:
@@ -171,8 +194,8 @@ def play(task: dict, player: str, tag: str, timeout_min: int, gates: bool) -> di
             code = "timeout"
     row = {"task": task["id"], "repo": task["repo"], "player": player, "tag": tag, "exit": code,
            "minutes": round((time.time() - t0) / 60, 1), **ending(log), **score(task, work)}
-    if code == "timeout":
-        row["on_its_own"] = False
+    if code == "timeout":                                       # cut off while working (no answer yet), or while waiting on a
+        row["on_its_own"] = row["on_its_own"] and row["results"] > 0     # background shell after one: that answer still stands
     return row
 
 
@@ -202,7 +225,7 @@ def main(argv=None) -> int:
         with lock, open(results, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
         print(json.dumps({k: row[k] for k in ("task", "player", "resolved", "fail_to_pass", "pass_to_pass", "on_its_own",
-                                              "minutes", "turns", "output_tokens")}), flush=True)
+                                              "minutes", "work_minutes", "turns", "output_tokens")}), flush=True)
 
     for task in tasks:
         todo = [p for p in a.players.split(",") if (task["id"], p) not in done]
