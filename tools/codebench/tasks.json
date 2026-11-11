@@ -1,0 +1,554 @@
+[
+ {
+  "id": "sigma-ground-ec47de08",
+  "repo": "sigma-ground",
+  "sha": "ec47de0879cb081c99643cdf0fd80c7903d078dc",
+  "parent": "f0f30d5ead3321202ee87807dd052c79f154e69b",
+  "request": "Stage 2 phase 4: along/cross-track sky components in the scorer's rows, the RTN helper extracted from the contest, the growth fitter (constant/linear/quadratic by BIC, 5-sigma nominations into misc/CANDIDATE_QUEUE.md as [AUTO, UNTESTED]) chained into the night's jobs",
+  "tests": [
+   "tests/test_residual_growth.py"
+  ],
+  "code": [
+   "scripts/mpc_sky_ingest.py",
+   "scripts/mpc_sky_score.py",
+   "scripts/residual_growth.py",
+   "sigma_ground/field/interface/rtn.py"
+  ],
+  "code_lines": 197,
+  "fail_to_pass": [
+   "tests/test_residual_growth.py::test_flat_residuals_nominate_nothing",
+   "tests/test_residual_growth.py::test_frame_and_projection",
+   "tests/test_residual_growth.py::test_linear_growth_is_the_start_class",
+   "tests/test_residual_growth.py::test_quadratic_growth_is_found_and_nominated"
+  ],
+  "pass_to_pass": []
+ },
+ {
+  "id": "sigma-ground-32b72374",
+  "repo": "sigma-ground",
+  "sha": "32b72374dbdd59c0fa7b06cede4b0e3ff664449b",
+  "parent": "2ded4344941f2573071c816900e336dd93109b4a",
+  "request": "Clear matter is drawn from n and absorption, not a tuned opacity\n\nappearance() now returns n_refractive and absorption_per_m for a clear dielectric; the matter record carries them and drops the\ndisplay exposure; the mod's renderer draws exact Fresnel reflectance at the real viewing angle plus Beer-Lambert attenuation over\nthe real path length of the body, and skips faces between blocks of one material. The remaining approximations are named in\nKNOWN_GAPS.md (refraction, environment, per-channel tint).",
+  "tests": [
+   "tests/test_skippycraft_matter.py"
+  ],
+  "code": [
+   "sigma_ground/field/interface/block.py",
+   "stage/skippycraft/matter.py"
+  ],
+  "code_lines": 24,
+  "fail_to_pass": [
+   "tests/test_skippycraft_matter.py::test_a_clear_block_carries_the_physics_a_renderer_needs_not_a_tuned_opacity"
+  ],
+  "pass_to_pass": [
+   "tests/test_skippycraft_matter.py::test_a_hot_block_glows_and_lights_its_neighbours",
+   "tests/test_skippycraft_matter.py::test_a_moving_block_needs_a_time",
+   "tests/test_skippycraft_matter.py::test_a_static_record_has_no_clock",
+   "tests/test_skippycraft_matter.py::test_the_mod_sources_exist_and_name_the_frames_the_service_sends",
+   "tests/test_skippycraft_matter.py::test_the_wire_form_is_json_the_mod_reads"
+  ]
+ },
+ {
+  "id": "sigma-ground-c41709af",
+  "repo": "sigma-ground",
+  "sha": "c41709af76d5fc32d7ecb74a9a55baf4b05da043",
+  "parent": "374740faba85389468beecb7165ad17f03d2b53c",
+  "request": "C32: sealed forward predictions for the 32 tracked small bodies (state + geocentric RA/Dec at 2027..2031 Jan 1, Apophis's 2029-04-13/14 approach), hashed and committed before their dates; --check reproduces to 0 km; --judge compares with JPL once an instant has passed",
+  "tests": [
+   "tests/test_forecast_seal.py"
+  ],
+  "code": [
+   "scripts/mpc_forecast_seal.py"
+  ],
+  "code_lines": 192,
+  "fail_to_pass": [
+   "tests/test_forecast_seal.py::test_every_tracked_body_at_every_date",
+   "tests/test_forecast_seal.py::test_rows_carry_state_direction_and_their_start",
+   "tests/test_forecast_seal.py::test_rows_hash_is_order_insensitive_in_keys_and_sensitive_in_values",
+   "tests/test_forecast_seal.py::test_rows_hash_is_the_recorded_one",
+   "tests/test_forecast_seal.py::test_tdb_of_utc_midnight_matches_the_scoreboards_scale"
+  ],
+  "pass_to_pass": []
+ },
+ {
+  "id": "sigma-ground-57acfdda",
+  "repo": "sigma-ground",
+  "sha": "57acfdda58620e7fc14713d400659bc4ee4ecd6f",
+  "parent": "2b91e5cab0f05460426f2c501af353052dbda1eb",
+  "request": "C31: Yarkovsky on the small bodies from JPL's fitted A2 on the (1 au/r)^2 law through the existing non-gravitational routine; parameters applied only above 3 sigma (Apophis's 1-sigma A1 cancelled the drift); predictions met for A2 (1.32 km at 455 d, 10.4 km at the 2029 approach, ahead). Built, not deployed",
+  "tests": [
+   "tests/test_yarkovsky.py"
+  ],
+  "code": [
+   "sigma_ground/field/interface/small_body_position.py"
+  ],
+  "code_lines": 66,
+  "fail_to_pass": [
+   "tests/test_yarkovsky.py::test_apophis_carries_jpls_a2_and_the_law_is_inverse_square",
+   "tests/test_yarkovsky.py::test_apophis_start_carries_the_term_and_eros_does_not",
+   "tests/test_yarkovsky.py::test_bodies_without_a_solution_get_no_term",
+   "tests/test_yarkovsky.py::test_the_drift_matches_the_pre_registered_size_and_runs_ahead"
+  ],
+  "pass_to_pass": []
+ },
+ {
+  "id": "sigma-ground-4fbd0db4",
+  "repo": "sigma-ground",
+  "sha": "4fbd0db49c59f1564d0d0b2e3a771bd978638136",
+  "parent": "72efa8092e93ea34fe2db6c64e0b57524c2fd855",
+  "request": "Served model: restated_math_tide (the Earth's zonals on their reference radius + DE430's time-delayed Earth tide; C26 verdicts), with its own four-start error table against DE442 at 0.0125 d; the previous table kept beside it; the step caveats apply only to a 0.025 d table; merge_hindcast_starts.py folds per-start files into the served table",
+  "tests": [
+   "tests/test_where_when.py"
+  ],
+  "code": [
+   "scripts/merge_hindcast_starts.py",
+   "sigma_ground/field/interface/where_when.py"
+  ],
+  "code_lines": 79,
+  "fail_to_pass": [
+   "tests/test_where_when.py::test_the_answer_shows_its_work_in_a_receipt_with_the_layers_and_their_sources"
+  ],
+  "pass_to_pass": [
+   "tests/test_where_when.py::test_a_date_inside_the_truth_kernels_data_is_known_and_a_date_after_its_edge_is_not",
+   "tests/test_where_when.py::test_a_day_past_the_edge_is_computed_now_and_lands_on_jpls_extrapolation",
+   "tests/test_where_when.py::test_a_julian_date_is_read_as_tdb_unchanged",
+   "tests/test_where_when.py::test_a_second_question_inside_the_memo_is_instant_and_says_so",
+   "tests/test_where_when.py::test_a_table_that_no_longer_matches_its_seal_is_refused",
+   "tests/test_where_when.py::test_an_unreadable_time_says_what_to_write",
+   "tests/test_where_when.py::test_centers_agree_with_each_other",
+   "tests/test_where_when.py::test_earth_at_a_fixture_epoch_equals_the_truth_kernel_read_independently",
+   "tests/test_where_when.py::test_iso_is_utc_and_converted_to_tdb_with_the_leap_seconds",
+   "tests/test_where_when.py::test_loglog_interpolation_and_the_flags_outside_the_measured_leads",
+   "tests/test_where_when.py::test_matching_fingerprint_is_fresh_changed_is_stale_missing_is_unchecked",
+   "tests/test_where_when.py::test_mercury_and_the_moon_carry_the_step_caveat_and_the_others_do_not",
+   "tests/test_where_when.py::test_moon_from_the_earth_has_a_physical_distance_ra_and_dec",
+   "tests/test_where_when.py::test_nicknames_resolve_and_unsupported_bodies_are_refused_with_the_list",
+   "tests/test_where_when.py::test_now_is_the_clock",
+   "tests/test_where_when.py::test_outside_the_kernel_span_is_refused",
+   "tests/test_where_when.py::test_over_budget_says_how_far_it_got_and_gives_no_position_of_ours",
+   "tests/test_where_when.py::test_the_earth_from_the_earth_is_refused",
+   "tests/test_where_when.py::test_the_fingerprint_changes_when_a_body_parameter_changes",
+   "tests/test_where_when.py::test_the_fingerprint_is_stable_and_depends_on_the_predictor",
+   "tests/test_where_when.py::test_the_live_path_from_the_tables_own_start_reproduces_its_first_days",
+   "tests/test_where_when.py::test_the_memo_continues_the_same_integration",
+   "tests/test_where_when.py::test_the_record_stays_readable_and_carries_a_fingerprint",
+   "tests/test_where_when.py::test_tool_labels_a_pre_2020_value_verified_and_refuses_a_moon"
+  ]
+ },
+ {
+  "id": "sigma-ground-74d5fc42",
+  "repo": "sigma-ground",
+  "sha": "74d5fc425bbfe040160ff44de83494ada2526463",
+  "parent": "ba939be562a0791c6be8cf0b5fa031173e394f32",
+  "request": "C27 day one: 154 rows, 31 bodies, 5,706 observations, ours minus JPL <= 0.0015\"; P0, P1 passed, P3 failed (25 of 30 heavies observed), C40's 502s recorded; the scorer splits a refused Horizons request in halves (tested); day mirror and portal JSON; session log; scene 26",
+  "tests": [
+   "tests/test_mpc_live.py"
+  ],
+  "code": [
+   "scripts/mpc_live_score.py"
+  ],
+  "code_lines": 43,
+  "fail_to_pass": [
+   "tests/test_mpc_live.py::test_refused_request_is_split_down_to_the_instants_that_work"
+  ],
+  "pass_to_pass": [
+   "tests/test_mpc_live.py::test_apparent_table_is_refused",
+   "tests/test_mpc_live.py::test_arm_j_reproduces_the_stored_c24_residuals",
+   "tests/test_mpc_live.py::test_backfill_windows_are_30_days_of_observation_date_and_a_later_run_is_one_window",
+   "tests/test_mpc_live.py::test_first_run_starts_at_the_backfill_date_and_stops_before_the_run_date",
+   "tests/test_mpc_live.py::test_observer_url_carries_the_pre_registered_parameters",
+   "tests/test_mpc_live.py::test_probe_response_parses_to_astrometric_positions",
+   "tests/test_mpc_live.py::test_robust_statistics",
+   "tests/test_mpc_live.py::test_unsorted_input_comes_out_oldest_first",
+   "tests/test_mpc_live.py::test_utc_jd_matches_the_pipeline_time_scale",
+   "tests/test_mpc_live.py::test_vector_rows_honour_the_file_units",
+   "tests/test_mpc_live.py::test_vectors_url_is_the_asteroid_group_request_with_one_epoch",
+   "tests/test_mpc_live.py::test_watermark_is_exclusive_and_the_second_run_sees_only_newer_rows"
+  ]
+ },
+ {
+  "id": "AI-factorio-20c9e400",
+  "repo": "AI-factorio",
+  "sha": "20c9e40025a364bdf588a5cfd392d1d72821fd0b",
+  "parent": "d64074cad430aa42f807cda392564cd40d07b701",
+  "request": "WIP purple plan, west bus mirror module, row-ordering notes",
+  "tests": [
+   "tests/test_bus.py"
+  ],
+  "code": [
+   "bridge/factorio/westbus.py",
+   "scripts/build_purple.py"
+  ],
+  "code_lines": 128,
+  "fail_to_pass": [
+   "tests/test_bus.py::test_mirrored_belt_and_directions",
+   "tests/test_bus.py::test_mirrored_splitter_covers_real_trunk_and_west_gap_tile",
+   "tests/test_bus.py::test_virtual_trunk_maps_to_real_trunk"
+  ],
+  "pass_to_pass": [
+   "tests/test_bus.py::test_branch_reaches_the_row_edge_flowing_east",
+   "tests/test_bus.py::test_coal_riser_reaches_trunk_seven",
+   "tests/test_bus.py::test_give_does_not_overlap_taps_or_trunks",
+   "tests/test_bus.py::test_give_ends_on_the_east_side_of_the_trunk_flowing_west",
+   "tests/test_bus.py::test_give_hops_riser_and_each_later_trunk",
+   "tests/test_bus.py::test_splitter_rows",
+   "tests/test_bus.py::test_tap_and_trunk_do_not_overlap",
+   "tests/test_bus.py::test_undergrounds_pair_and_cross_each_trunk_and_the_riser"
+  ]
+ },
+ {
+  "id": "AI-factorio-296b08cf",
+  "repo": "AI-factorio",
+  "sha": "296b08cfd2583e95434110d472d615ff3d9cca40",
+  "parent": "dd5ee39ef797c197f860af90e7c32d64a57e208b",
+  "request": "Electronics rows (cable, EC, AC) back onto the bus; military packs re-routed to the new input port",
+  "tests": [
+   "tests/test_bus.py"
+  ],
+  "code": [
+   "bridge/factorio/blocks.py",
+   "bridge/factorio/bus.py",
+   "scripts/build_electronics.py",
+   "scripts/build_pack_to_ports.py"
+  ],
+  "code_lines": 145,
+  "fail_to_pass": [
+   "tests/test_bus.py::test_give_does_not_overlap_taps_or_trunks",
+   "tests/test_bus.py::test_give_ends_on_the_east_side_of_the_trunk_flowing_west",
+   "tests/test_bus.py::test_give_hops_riser_and_each_later_trunk"
+  ],
+  "pass_to_pass": [
+   "tests/test_bus.py::test_branch_reaches_the_row_edge_flowing_east",
+   "tests/test_bus.py::test_coal_riser_reaches_trunk_seven",
+   "tests/test_bus.py::test_splitter_rows",
+   "tests/test_bus.py::test_tap_and_trunk_do_not_overlap",
+   "tests/test_bus.py::test_undergrounds_pair_and_cross_each_trunk_and_the_riser"
+  ]
+ },
+ {
+  "id": "AI-factorio-86714a4d",
+  "repo": "AI-factorio",
+  "sha": "86714a4d83c92b165605da75435527bf7f22e521",
+  "parent": "00245aee8592431d84023adbfc8df901a9cd63f5",
+  "request": "Flip bus south with coal riser, retap military; coal verified to grenade machines",
+  "tests": [
+   "tests/test_bus.py"
+  ],
+  "code": [
+   "bridge/factorio/bus.py",
+   "bridge/factorio/military.py",
+   "scripts/build_bus2.py"
+  ],
+  "code_lines": 106,
+  "fail_to_pass": [
+   "tests/test_bus.py::test_coal_riser_reaches_trunk_seven",
+   "tests/test_bus.py::test_splitter_rows",
+   "tests/test_bus.py::test_tap_and_trunk_do_not_overlap",
+   "tests/test_bus.py::test_undergrounds_pair_and_cross_each_trunk_and_the_riser"
+  ],
+  "pass_to_pass": [
+   "tests/test_bus.py::test_branch_reaches_the_row_edge_flowing_east"
+  ]
+ },
+ {
+  "id": "AI-factorio-00245aee",
+  "repo": "AI-factorio",
+  "sha": "00245aee8592431d84023adbfc8df901a9cd63f5",
+  "parent": "3cc60813b090b5711c45231227a5962b3541f322",
+  "request": "Military science plant (rows, bus taps, flipped-row support), tests",
+  "tests": [
+   "tests/test_military.py"
+  ],
+  "code": [
+   "bridge/factorio/blocks.py",
+   "bridge/factorio/military.py",
+   "scripts/build_military.py"
+  ],
+  "code_lines": 153,
+  "fail_to_pass": [
+   "tests/test_military.py::test_flipped_grenade_row_outputs_on_the_shared_belt",
+   "tests/test_military.py::test_pack_row_belt_a_is_the_shared_belt",
+   "tests/test_military.py::test_plant_has_no_overlaps_with_bus_and_taps"
+  ],
+  "pass_to_pass": []
+ },
+ {
+  "id": "SkippyTel-999193bf",
+  "repo": "SkippyTel",
+  "sha": "999193bfa48d8df0a74fc466aa3606c1a303dba8",
+  "parent": "f7c0b83924c1105084116e0df69ba4a654f1cb45",
+  "request": "Listener in loud rooms: end-of-speech found in music and fan noise (calibration, loud-room bar, mean-based end, plateau/noise rule), 30 s cap, a tap while heard sends and stays Hands-off, no deaf state after noise; simulated-room tests",
+  "tests": [
+   "portal/tests/js/voice/skippy-voice.test.js",
+   "portal/tests/js/voice/two-modes.test.js"
+  ],
+  "code": [
+   "portal/static/skippy-voice.js"
+  ],
+  "code_lines": 117,
+  "fail_to_pass": [
+   "portal/tests/js/voice/skippy-voice.test.js::a fan switched on after the room was read is a plateau, not a voice: noise after 4 s, and the next voice still counts",
+   "portal/tests/js/voice/skippy-voice.test.js::a loud steady fan (past the old cap of 0.06): the voice begins and ends",
+   "portal/tests/js/voice/skippy-voice.test.js::a soft voice in a quiet room is still an utterance, and a quiet room is read as before",
+   "portal/tests/js/voice/skippy-voice.test.js::music playing: the voice begins once and its pause is found, turn after turn",
+   "portal/tests/js/voice/skippy-voice.test.js::the room's quiet is read from the windows but the loudest, and may grow past 0.06",
+   "portal/tests/js/voice/two-modes.test.js::Hands-off: a tap during the count to send sends now, and stays in Hands-off",
+   "portal/tests/js/voice/two-modes.test.js::Hands-off: a tap while you are heard sends what you said at once and stays in Hands-off (the reply is still spoken)"
+  ],
+  "pass_to_pass": [
+   "portal/tests/js/voice/skippy-voice.test.js::a click is not speech",
+   "portal/tests/js/voice/skippy-voice.test.js::a line that is all in parentheses is an aside: shown, never spoken",
+   "portal/tests/js/voice/skippy-voice.test.js::a long sentence with pauses under a second is one utterance, in music too",
+   "portal/tests/js/voice/skippy-voice.test.js::a short pause inside a sentence does not end it",
+   "portal/tests/js/voice/skippy-voice.test.js::nothing is heard in a quiet room, and a steady noisy room is not speech",
+   "portal/tests/js/voice/skippy-voice.test.js::pickMime takes the first recording type the browser can make, or none",
+   "portal/tests/js/voice/skippy-voice.test.js::room talk without the word never wakes it",
+   "portal/tests/js/voice/skippy-voice.test.js::saying stop alone cancels the send; stop inside a sentence does not",
+   "portal/tests/js/voice/skippy-voice.test.js::speakable drops code chips, links and markdown marks",
+   "portal/tests/js/voice/skippy-voice.test.js::speakable never exceeds the gate's 500 characters and cuts at a sentence",
+   "portal/tests/js/voice/skippy-voice.test.js::the silence detector hears speech begin once, and the end only after a pause",
+   "portal/tests/js/voice/skippy-voice.test.js::the wake word: 'Skippy' anywhere near the start wakes it, and what follows is the message",
+   "portal/tests/js/voice/two-modes.test.js::'Skippy, ...' switches to Hands-off: the reply is spoken, silence doesn't end it, 'thanks' goes back to Typing",
+   "portal/tests/js/voice/two-modes.test.js::Hands-off with wantOriginal: Whisper is asked for the speech in its own words (raw=1) and onHeard gets them",
+   "portal/tests/js/voice/two-modes.test.js::Hands-off: a language Whisper is unsure of stays your message, and without onHeard nothing changes",
+   "portal/tests/js/voice/two-modes.test.js::Hands-off: someone speaking another language is written down as heard, not sent; your English still goes to Skippy",
+   "portal/tests/js/voice/two-modes.test.js::Typing: with the mic already allowed it listens at once, but only for the word, and never speaks",
+   "portal/tests/js/voice/two-modes.test.js::Typing: without permission nothing listens until the key is tapped, and the tap starts Hands-off",
+   "portal/tests/js/voice/two-modes.test.js::a tap in Hands-off goes back to Typing; typing a turn keeps Hands-off and the reply is still spoken",
+   "portal/tests/js/voice/two-modes.test.js::heard(): another language, sure enough",
+   "portal/tests/js/voice/two-modes.test.js::the sleep words, and only said alone",
+   "portal/tests/js/voice/two-modes.test.js::without wantOriginal the gate is never asked for raw (a chat page pays no second pass)"
+  ]
+ },
+ {
+  "id": "SkippyTel-38eb00b6",
+  "repo": "SkippyTel",
+  "sha": "38eb00b6c38d35886933300e31c2fdeeec597452",
+  "parent": "46bf628ab99e05aba951244d4ab10d1529ff4ed7",
+  "request": "homectl: a new Matter device joins HOME_WIFI/HOME_WIFI_PWD when ROOM_WIFI_* is not set (the same fallback flash.sh uses); test",
+  "tests": [
+   "services/satellite/tests/test_sat_matter.py"
+  ],
+  "code": [
+   "services/satellite/homectl.py"
+  ],
+  "code_lines": 17,
+  "fail_to_pass": [
+   "services/satellite/tests/test_sat_matter.py::test_a_new_matter_device_joins_the_house_wifi_when_there_is_no_room_wifi"
+  ],
+  "pass_to_pass": [
+   "services/satellite/tests/test_sat_matter.py::test_a_device_that_ignored_the_first_command_is_asked_again_and_one_that_never_changes_is_reported",
+   "services/satellite/tests/test_sat_matter.py::test_a_motion_dimmer_is_a_light_and_a_read_only_motion_sensor",
+   "services/satellite/tests/test_sat_matter.py::test_brightness_is_a_level_command",
+   "services/satellite/tests/test_sat_matter.py::test_heat_and_cool_keeps_its_band_around_what_he_asked_for",
+   "services/satellite/tests/test_sat_matter.py::test_homekit_and_matter_are_one_house_each_thing_driven_by_its_own_backend",
+   "services/satellite/tests/test_sat_matter.py::test_identify_flashes_the_endpoint_that_has_identify_or_the_things_own",
+   "services/satellite/tests/test_sat_matter.py::test_identify_from_the_command_line_finds_it_by_name_in_whichever_backend_has_it",
+   "services/satellite/tests/test_sat_matter.py::test_matter_import_pairs_them_all_goes_on_past_a_failure_and_skips_the_done_ones_next_time",
+   "services/satellite/tests/test_sat_matter.py::test_nodes_become_a_switch_a_light_and_a_thermostat_in_his_units_and_an_unavailable_one_is_left_out",
+   "services/satellite/tests/test_sat_matter.py::test_one_backend_that_is_down_never_hides_the_other",
+   "services/satellite/tests/test_sat_matter.py::test_pairing_checks_the_code_and_keeps_his_name_for_it",
+   "services/satellite/tests/test_sat_matter.py::test_the_command_line_pairs_lists_and_proves_matter_devices",
+   "services/satellite/tests/test_sat_matter.py::test_the_controllers_refusal_is_said_plainly",
+   "services/satellite/tests/test_sat_matter.py::test_the_fan_switches_by_his_words_and_each_change_is_read_back_from_the_device",
+   "services/satellite/tests/test_sat_matter.py::test_the_import_list_reads_commas_tabs_and_bars_and_says_which_line_is_wrong",
+   "services/satellite/tests/test_sat_matter.py::test_the_listener_builds_a_matter_house_from_the_vault",
+   "services/satellite/tests/test_sat_matter.py::test_the_nest_is_set_in_the_unit_it_shows_and_within_sane_limits"
+  ]
+ },
+ {
+  "id": "SkippyTel-46bf628a",
+  "repo": "SkippyTel",
+  "sha": "46bf628ab99e05aba951244d4ab10d1529ff4ed7",
+  "parent": "29e89a3bd8e855909008e369c5e9417c864cfc7a",
+  "request": "The house brain: \"turn the music down a notch\" is a plain route, and a quip's \"try not to\" no longer makes a claim look honest in the music re-ask\n\nTwo small things the last trials on the real Core showed, after the fifth review's fixes (29e89a3).\n\nmusic_route strips a degree word after a volume command like it strips \"a bit\" and \"a little\": a notch, a touch, a tad, one notch, slightly. \"turn the music down a notch\", the phrase these trials used, went to the model, and in 2 of 24 trials the model claimed it in words only; the re-ask then answered with a text call the house cannot read about half the time (6 of 12 forced re-asks done; a stronger nudge made no difference, and Core ignores tool_choice). Now it is the plain quieter or louder.\n\n_honest took the \"not\" of a quip's \"try not to\" for a retraction, so a second try that claimed again (\"Quieter now. Try not to strain your tiny ears.\") was spoken with nothing done. QUIP_NEGATIONS is taken out first, as everywhere else the claim path looks for a retraction.\n\nThe _tool_brackets docstring now says the plain-words clause (a bracket holding one of the tool's own action words is a call) and what it costs. The README records both changes and what is still open: a question mark still makes a second try honest even when it claims after the question.\n\n30 new tests (15 of them fail without the two changes). Satellite suite and the property runs re-run on this tree.",
+  "tests": [
+   "services/satellite/tests/test_sat_review5_live.py"
+  ],
+  "code": [
+   "services/satellite/brain.py"
+  ],
+  "code_lines": 8,
+  "fail_to_pass": [
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[Skippy, turn the music down a notch please-quieter]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[could you turn the music down a notch-quieter]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[turn it down a notch-quieter]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[turn it down a touch-quieter]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[turn it up a notch-louder]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[turn it up a tad-louder]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[turn the music down a notch-quieter]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[turn the music down slightly-quieter]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[turn the music up a notch-louder]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[turn the volume down one notch-quieter]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[turn the volume up slightly-louder]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_notch_is_routed_the_model_only_words_it",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_quip_with_a_not_in_it_is_no_retraction[Quieter now. Try not to strain your tiny ears.]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_quip_with_a_not_in_it_is_no_retraction[There. Remember not to complain about my taste in music.]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_the_music_re_ask_that_claims_again_with_a_quip_is_the_fixed_line"
+  ],
+  "pass_to_pass": [
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[turn it down a bit-quieter]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_after_a_volume_command_is_the_plain_command[turn it up a little-louder]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_alone_is_no_music_command[set the thermostat up a notch]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_alone_is_no_music_command[take it down a notch]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_alone_is_no_music_command[that was a notch above the rest]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_alone_is_no_music_command[turn the heat up a notch]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_alone_is_no_music_command[turn the lights down a notch]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_degree_word_alone_is_no_music_command[what is a notch]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_quip_with_a_not_in_it_is_no_retraction[Volume lowered. Try not to shout at me about it.]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_real_retraction_or_question_next_to_a_quip_still_stands[I can't from here. Try not to sulk.]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_real_retraction_or_question_next_to_a_quip_still_stands[I did not do it. Try not to worry.]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_real_retraction_or_question_next_to_a_quip_still_stands[Quieter now. Try not to strain your ears. Or did I get that wrong?]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_real_retraction_or_question_next_to_a_quip_still_stands[Sorry, I set nothing. Try not to shout.]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_real_retraction_or_question_next_to_a_quip_still_stands[That was a mistake, monkey. Try not to gloat.]",
+   "services/satellite/tests/test_sat_review5_live.py::test_final5_a_real_retraction_or_question_next_to_a_quip_still_stands[Which speaker? Try not to take all day.]"
+  ]
+ },
+ {
+  "id": "SkippyTel-29e89a3b",
+  "repo": "SkippyTel",
+  "sha": "29e89a3bd8e855909008e369c5e9417c864cfc7a",
+  "parent": "63b528bf2c1ebf28ad8558a6cf39fe674a532f88",
+  "request": "The house brain, fifth review: a call Core wrote in its reasoning is no longer dropped for a tag question, a claim with a tag question no longer passes a second try, and the routed wording cuts the lines under a call\n\nA fresh reviewer attacked the merge of the fourth review's patches and found five things, each reproduced here before it was fixed.\n\nA (high): the words after the reasoning took its call back when they held a question mark or a retraction word anywhere, so \"There. Quieter. Happy now?\" or \"Sorry, my magnificence was too loud. Quieter now.\" dropped the call and the false claim was spoken (12 of 13 such replies). They now take it back only when every sentence is a question or a retraction (_takes_back); \"can't believe\" and \"couldn't resist\" are no retraction.\nD (medium): announces() let any sentence with a question mark through, so \"Done, happy now?\" or \"I've cancelled it, okay?\" passed a second try that had done nothing (6 of 6). A question that opens with the claim or the promise still claims (_CLAIM_OPENS); honest questions stay honest.\nC (low-medium): Brain._phantom removed the bracket first, so the lines under it (\"action: next\") were spoken and kept in the routed wording and Mentat's (16 of 275 real replies, 1 now).\nB (low-medium): _NOT_MEANT missed the typographic apostrophe and \"cannot\" (\"I shouldn\u2019t call [music action=next]\" skipped a track).\nE (low): the line before a call was read whole, quadratic on a line of thousands of calls; it is now at most 120 characters.\n\nOn the real Core: second tries on the claim path 9 of 9 untouched with no promise or false claim spoken; the eight-phrasing battery 24, 24, 21 and 23 of 24; the text-call rescue 22 of 24. Satellite suite 3664 passed; 30,000 + 10,800 scripted turns and 8,000 confirm scenarios with no violation. The README says what is still open (the music re-ask answered with text calls it cannot read, a negation after a reasoning call, two calls in one thought).",
+  "tests": [
+   "services/satellite/tests/test_sat_review5_seams.py"
+  ],
+  "code": [
+   "services/satellite/brain.py"
+  ],
+  "code_lines": 34,
+  "fail_to_pass": [
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_model_meant_is_put_back_whatever_dig_or_tag_question_comes_with_it[<think>He wants it quieter. [music action=quieter]</think>-I have not enjoyed your taste lately, but quieter it is.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_model_meant_is_put_back_whatever_dig_or_tag_question_comes_with_it[<think>He wants it quieter. [music action=quieter]</think>-Nothing was wrong with it, but fine, quieter.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_model_meant_is_put_back_whatever_dig_or_tag_question_comes_with_it[<think>He wants it quieter. [music action=quieter]</think>-Quieter it is. Better, or shall I whisper?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_model_meant_is_put_back_whatever_dig_or_tag_question_comes_with_it[<think>He wants it quieter. [music action=quieter]</think>-You didn't say please, but fine. Quieter.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_model_meant_is_put_back_whatever_dig_or_tag_question_comes_with_it[<think>He wants the music quieter.\\n[music]\\nmusic(action='quieter')\\n</think>\\n\\n-Fine, quieter. I can't believe you're complaining about my taste in music.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_model_meant_is_put_back_whatever_dig_or_tag_question_comes_with_it[<think>He wants the music quieter.\\n[music]\\nmusic(action='quieter')\\n</think>\\n\\n-Sorry, monkey, my magnificence was too loud. Quieter now.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_model_meant_is_put_back_whatever_dig_or_tag_question_comes_with_it[<think>He wants the music quieter.\\n[music]\\nmusic(action='quieter')\\n</think>\\n\\n-There. Quieter. Happy now?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_model_meant_is_put_back_whatever_dig_or_tag_question_comes_with_it[<think>He wants the music quieter.\\n[music]\\nmusic(action='quieter')\\n</think>\\n\\n-There. Quieter. Satisfied? My ears were suffering.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_claim_that_ends_in_a_tag_question_is_still_a_claim[Done, happy now?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_claim_that_ends_in_a_tag_question_is_still_a_claim[Done, monkey, anything else?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_claim_that_ends_in_a_tag_question_is_still_a_claim[Handled, satisfied?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_claim_that_ends_in_a_tag_question_is_still_a_claim[I'll cancel it right away, shall I?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_claim_that_ends_in_a_tag_question_is_still_a_claim[I've cancelled it, okay?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_claim_that_ends_in_a_tag_question_is_still_a_claim[Let me cancel that timer for you, okay?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_negation_with_either_apostrophe_rules_the_call_out[\\u2019]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_second_try_that_claims_with_a_tag_question_is_not_spoken[I do not need the alarm on sunday-Alarm cancelled.-I've cancelled it, okay?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_second_try_that_claims_with_a_tag_question_is_not_spoken[cancel the pasta timer-Timer cancelled.-I'll cancel it right away, shall I?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_second_try_that_claims_with_a_tag_question_is_not_spoken[turn on the bedroom light-Done.-Done, monkey, anything else?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_many_calls_on_one_line_of_the_reasoning_cost_no_quadratic_time",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_the_wording_of_a_routed_command_speaks_and_keeps_no_argument_line[Jazz it is, Captain.\\n[music]\\naction: next]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_the_wording_of_a_routed_command_speaks_and_keeps_no_argument_line[[music] action: next\\nJazz it is, Captain.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_the_wording_of_a_routed_command_speaks_and_keeps_no_argument_line[[music]\\n\\naction: next\\n\\nJazz it is, Captain.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_the_wording_of_a_routed_command_speaks_and_keeps_no_argument_line[[music]\\naction: next\\nJazz it is, Captain.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_the_wording_of_a_routed_command_speaks_and_keeps_no_argument_line[[music]\\nnext\\nJazz it is, Captain.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_the_wording_of_a_routed_command_speaks_and_keeps_no_argument_line[[play_music]\\nwhat: jazz\\nJazz it is, Captain.]"
+  ],
+  "pass_to_pass": [
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_words_take_back_or_only_ask_about_is_still_not_put_back[I couldn't.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_words_take_back_or_only_ask_about_is_still_not_put_back[I did not do it. Which room?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_words_take_back_or_only_ask_about_is_still_not_put_back[My mistake, nothing was changed.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_words_take_back_or_only_ask_about_is_still_not_put_back[Sorry, I did not do anything.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_words_take_back_or_only_ask_about_is_still_not_put_back[Sorry, but I did not do it.]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_call_the_words_take_back_or_only_ask_about_is_still_not_put_back[Which speaker, Captain?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_negation_with_either_apostrophe_rules_the_call_out[']",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_plain_question_is_still_no_claim[Cancelled? Which one, Captain?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_plain_question_is_still_no_claim[Did you want me to cancel it?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_plain_question_is_still_no_claim[Should I clear the list?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_plain_question_is_still_no_claim[What time should I set it for?]",
+   "services/satellite/tests/test_sat_review5_seams.py::test_review5_a_plain_question_is_still_no_claim[Which alarm should I cancel?]"
+  ]
+ },
+ {
+  "id": "SkippyTel-99052659",
+  "repo": "SkippyTel",
+  "sha": "99052659f46311ea0b74b8c41632e3ee8beee4de",
+  "parent": "276e21042f1987ba008965687813b0271f80d428",
+  "request": "The evening alarm check waits for the hub to settle, and tools/tts_bench.py works again\n\nA hub restart after the evening check time (21:30) ran the check at once, a second before the router had opened the Enclave, so at 22:30 on\n2026-11-05 his phone was told \"the upstairs speaker isn't connected\" when it was. AlarmClock now judges only SETTLE_S (120 s) after it was made;\nthe day is not marked checked until then, and a speaker that really is off is still reported once. Two tests (one fails on the old behaviour).\n\ntools/tts_bench.py had been broken since the voice gate dropped gate.LOCAL_VOICES (and changed Voice's arguments): fixed, and \"--whole\" asks for\none run per reply as the house hub does. Measured live on the rebuilt stack, Skippy's voice, single-sentence lines: first audio 1.29 s per\nsentence mode, 0.71 s whole-reply mode.",
+  "tests": [
+   "services/satellite/tests/test_sat_alarm_clock.py"
+  ],
+  "code": [
+   "services/satellite/alarm_clock.py",
+   "tools/tts_bench.py"
+  ],
+  "code_lines": 13,
+  "fail_to_pass": [
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_hub_that_has_just_started_does_not_tell_him_the_speaker_is_off",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_speaker_that_is_really_off_is_still_reported_once_the_hub_has_settled"
+  ],
+  "pass_to_pass": [
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_box_whose_stereo_is_off_rings_loud_from_the_first_ring",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_box_whose_stereo_is_on_rings_silently_until_the_third_ring",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_briefing_that_missed_its_slot_never_starts_over_the_ring_in_the_snooze_he_asked_for_or_the_minutes_before_an_alarm",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_daily_alarm_keeps_its_clock_time_across_dst_and_midnight",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_due_timer_never_holds_up_a_due_alarm_and_is_still_said_when_the_room_is_free",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_line_that_goes_on_too_long_is_rung_over_and_its_lock_is_left_alone",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_morning_alarm_set_in_the_theater_rings_upstairs_louder_each_minute_and_his_phone_hears_it",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_pod_room_with_the_house_clock_answers_stop_without_the_brain",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_pod_whose_room_has_no_stereo_on_does_not_wait_for_another_rooms_stereo",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_reminder_is_rung_on_the_box_at_its_last_ring",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_reminder_that_falls_due_while_the_alarm_rings_joins_the_ring_and_does_not_end_it",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_repeating_alarm_set_after_its_time_today_is_not_todays_but_one_that_has_rung_today_still_is",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_ring_waits_for_the_line_being_said_and_holds_the_floor_while_it_rings",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_room_renamed_still_rings_what_was_set_in_it",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_snoozed_copy_that_has_rung_does_not_hold_the_briefing_when_its_id_goes_to_a_new_alarm",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_stereo_that_cannot_be_looked_at_never_keeps_the_alarm_quiet",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_a_timer_whose_pod_is_away_is_still_said_upstairs",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_an_alarm_and_a_reminder_due_in_the_same_minute_ring_as_one_and_the_alarm_is_never_the_one_dropped",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_an_alarm_named_alarm_is_not_said_alarm_alarm",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_an_alarm_set_without_a_place_keeps_ringing_the_boxs_stereo_when_the_box_joins",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_an_alarm_that_names_a_place_with_no_box_rings_as_before",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_an_answer_that_lands_while_a_ring_plays_sends_no_alert_to_his_phone",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_an_unanswered_alarm_gives_up_after_half_an_hour_and_says_so",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_bedtime_says_the_alarm_or_that_there_is_none_and_warns_when_upstairs_is_off",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_cancelling_one_of_the_alarms_in_a_ring_on_his_phone_leaves_the_ring_to_the_rest",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_plain_alarm_requests_go_to_the_tool_before_the_model",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_snooze_by_voice_rings_again_in_nine_minutes_in_the_same_place",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_stop_from_the_phone_wins_everywhere_and_a_word_to_a_pod_then_finds_nothing_ringing",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_the_alarms_outlive_a_restart_and_the_old_per_room_files_become_the_houses",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_the_bedtime_routine_says_tomorrows_alarm_before_its_goodnight",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_the_box_is_handed_the_stereos_own_ring_and_what_became_of_it",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_the_days_first_alarm_comes_from_the_schedule_not_from_what_is_due",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_the_evening_check_messages_his_phone_when_the_alarm_could_not_be_heard",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_the_first_wake_up_alarm_of_the_day_is_the_first_in_the_morning_hours_not_the_first_of_any_hour",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_the_real_play_outs_says_whether_anything_sounded",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_the_wake_word_stops_a_ringing_alarm_at_once_and_snooze_or_stop_said_next_still_answer",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_the_wake_word_then_snooze_brings_every_alarm_of_the_ring_back_and_not_its_reminder",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_the_whole_bedtime_names_one_briefing_time",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_two_alarms_due_together_for_two_places_ring_in_both_and_a_snooze_brings_both_back",
+   "services/satellite/tests/test_sat_alarm_clock.py::test_two_alarms_for_the_same_place_are_one_ring_and_one_snooze"
+  ]
+ },
+ {
+  "id": "SkippyTel-99cd5b60",
+  "repo": "SkippyTel",
+  "sha": "99cd5b609b371dffca8ec7c6773283541a71c869",
+  "parent": "758cefb8f79e9db025f4a8ee6f8630ab063a6769",
+  "request": "The direct door's pages, proved in a real browser: a door cut under a song, a book or a film now goes on from the Funnel in about twenty seconds, and a book whose place save already moved its pass is no longer left silent\n\nFound by driving the real Drive, Bilby, Audiobooks, Nagatha and chat-upload pages (Chrome 152) against a loopback door and Funnel whose logs say which one every request reached; each fix was proved before and after in the same harness.\n- Drive/HUD: resumeOnFunnel asked where the PASS pointed, not where the audio element's own request went, so after a failed place save had moved the book's pass to the Funnel the book never resumed (0 Funnel requests); it now asks the element's address. A door that takes a request and never answers, or goes quiet mid-stream, raises no audio error at all (182 s with nothing): a 20 s stall watcher on `waiting` sends the same song or book on from the Funnel, at the same position.\n- Audiobooks: the same watcher (a cut door raised its error only 92 s later, a quiet one never).\n- Nagatha: Chrome fires one more `timeupdate` about 250 ms after `waiting`, which defeated the film's stall rule (74 s); a `stalled` listener, as Bilby's player has, restores it (19 s).\nAlso passing in the real browser: the door picked and used when healthy, the Funnel when it is down at load, a catalog fetch that fails after the probe, Bilby's signal-lost loop re-asking the portal and coming back on the Funnel at the same position, Retry re-probing, the chat upload retried once on the Funnel, a pass with no door sending nothing to it, and no uncaught exception anywhere.",
+  "tests": [
+   "portal/tests/test_direct_page_side.py"
+  ],
+  "code": [
+   "portal/static/audiobooks-app.js",
+   "portal/static/drive-app.js",
+   "portal/static/nagatha-app.js"
+  ],
+  "code_lines": 44,
+  "fail_to_pass": [
+   "portal/tests/test_direct_page_side.py::test_the_book_and_film_players_do_not_wait_for_an_error_a_cut_door_takes_a_minute_and_a_half_to_raise",
+   "portal/tests/test_direct_page_side.py::test_the_drive_page_does_not_wait_for_an_error_a_stalled_door_never_raises",
+   "portal/tests/test_direct_page_side.py::test_the_drive_page_resumes_a_book_on_the_funnel_even_when_a_failed_place_save_put_its_pass_there_first"
+  ],
+  "pass_to_pass": [
+   "portal/tests/test_direct_page_side.py::test_a_pass_that_is_picked_is_picked_before_anything_stores_or_uses_its_url",
+   "portal/tests/test_direct_page_side.py::test_base_loads_direct_js_in_the_head_ahead_of_everything_a_page_adds",
+   "portal/tests/test_direct_page_side.py::test_every_page_that_fetches_a_gate_gets_direct_js_before_its_own_script",
+   "portal/tests/test_direct_page_side.py::test_every_player_has_a_way_back_to_the_funnel_when_the_door_it_picked_gives_out",
+   "portal/tests/test_direct_page_side.py::test_every_script_that_builds_gate_addresses_is_known_here",
+   "portal/tests/test_direct_page_side.py::test_the_drive_page_picks_the_door_for_all_three_of_its_gates_and_goes_on_by_the_funnel_when_the_door_gives_out",
+   "portal/tests/test_direct_page_side.py::test_the_portal_warms_the_door_probe_at_start_so_the_first_pass_after_a_deploy_already_knows",
+   "portal/tests/test_direct_page_side.py::test_the_scripts_that_read_a_gate_pass_pick_the_door_and_do_without_direct_js"
+  ]
+ }
+]
