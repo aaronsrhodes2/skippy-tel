@@ -4,9 +4,10 @@
  *   voice.say(replyText);          // reads it aloud if the speaker key is on
  *
  * A NO-TOUCH CONVERSATION: one tap starts it (and turns his voice on). You speak, a pause sends it, Skippy answers aloud, and when he has
- * finished the mic opens again by itself for your next turn, round after round. A tap while he talks is "my turn", a tap while it
- * listens or thinks ends the conversation, and so does saying "goodbye" (or going quiet for 30 s). The page calls voice.say(reply)
- * when a reply lands, and voice.resume() when none will come (an error).
+ * finished the mic opens again by itself for your next turn, round after round. A tap while he talks is "my turn"; a tap while he is
+ * HEARD is "that is all" (it sends what he said, and the conversation goes on: in a loud car the pause may not be found), and so is a tap
+ * during the count to send; a tap while it listens with nothing heard, or thinks, ends the conversation, and so does saying "goodbye"
+ * (or going quiet for 30 s). The page calls voice.say(reply) when a reply lands, and voice.resume() when none will come (an error).
  * STANDBY (the ear key): the microphone stays open and the page hears everything said near it, but only speech is sent to the home Whisper, and
  * it is thrown away unless it begins with "Skippy" ("Hey Skippy, ..." wakes it with the message in the same breath). Like any web page it listens
  * only while the page is open in the foreground (iOS and Android stop microphone capture in the background): a tablet on a stand with the screen on.
@@ -32,7 +33,9 @@
 })(typeof window !== "undefined" ? window : globalThis, function (root) {
   "use strict";
   const MIMES = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4", "audio/aac"];
-  const MAX_SPEECH = 500, MAX_REC_MS = 60000, SPEAK_KEY = "skippy-voice-speak";
+  // MAX_REC_MS: one utterance is cut here (it was 60 s: a room the detector took for speech held a turn that long). A message that goes on is simply continued by the next one,
+  // the count to send listens again. LONG_HEARING_MS: after this long "Hearing you" says what a tap does (the Captain, 2026-11-10: the tap threw the message away).
+  const MAX_SPEECH = 500, MAX_REC_MS = 30000, LONG_HEARING_MS = 7000, SPEAK_KEY = "skippy-voice-speak";
   // The ear (standby / Typing's wake-word listening) was on: reopening the page brings it back (EAR_KEY), and while it waits for the one
   // tap a phone needs before it processes sound, the status strip says so (WAKE_TEXT).
   const EAR_KEY = "skippy-voice-ear", WAKE_TEXT = "Tap anywhere to wake the ear";
@@ -57,36 +60,82 @@
   }
 
   /* Hands-free: when has the speaker started, and when are they done? Feed it one loudness reading (0..1, the RMS of the microphone)
-     with a clock in milliseconds, about every 60 ms; it answers "speech" once (they began), "end" once (a pause after speaking), or
-     null. The bar for "speaking" follows the room: it is a multiple of the quiet level it has seen, never below a small floor. */
+     with a clock in milliseconds, about every 60 ms; it answers "speech" once (they began), then "end" once (a pause after speaking) or
+     "noise" once (what began was the room itself, a gust of the fan, a drum hit, a door: nothing was said), or null. The bar for
+     "speaking" follows the room: it is a multiple of the quiet level it has seen, never below a small floor.
+     A LOUD ROOM (the Captain, 2026-11-10: "when the car's fan is on, or music is playing, it keeps listening forever"). Music was the
+     trouble: its own peaks sat over the "still talking" line and broke every pause, and the room's quiet, read from the quietest 100 ms of
+     the first 400, came out at half its average, so a drum hit began "speech" and a song never ended it (simulated: 41 of 75 turns in
+     light music never ended, 80 of 80 in loud music). Now the room is read from all the windows but the loudest, the quiet may grow to
+     0.35 (it stopped at 0.06 and the bar with it), a pause is ALSO found by the average of the last 1.4 s coming back near the room's
+     level (whatever its peaks did), a "speech" that never rose above the room is called noise, and a steady loud room (a fan) gets a
+     lower multiple of its quiet than music does, since its peaks are small. A room that gets louder after that reading (the fan switched on)
+     is a plateau: 4 s of loudness that hardly varies (speech always does: syllables, words, breaths) is noise, and the room's new level.
+     A quiet room is read exactly as before. */
   function createVad(o) {
     o = o || {};
     const minSpeechMs = o.minSpeechMs || 160, endSilenceMs = o.endSilenceMs || 1400, floorMin = o.floorMin || 0.012, ratio = o.ratio || 3.2;
-    const calMs = o.calMs || 400, quietCap = o.quietCap || 0.06;
+    const calMs = o.calMs || 400, quietCap = o.quietCap || 0.35;
+    const meanRatio = o.meanRatio || 1.8, meanHoldMs = o.meanHoldMs || 500, solidRatio = o.solidRatio || 2.0, noisyAt = floorMin * 2.2;
+    const loudAt = o.loudAt || 0.06, loudRatio = o.loudRatio || 2.3, plateauMs = o.plateauMs || 4000, plateauWin = 2400, steadyCv = o.steadyCv || 0.22;
     let quiet = floorMin, above = 0, speaking = false, quietSince = null, lastT = null, begun = false;
-    let t0 = null, winSum = 0, winN = 0, winT = null, calib = Infinity;      // the first 400 ms learn the room's own noise before anything counts as speech
+    let t0 = null, winSum = 0, winN = 0, winT = null, wins = [];             // the first 400 ms learn the room's own noise before anything counts as speech
+    let rdSum = 0, rdSq = 0, rdN = 0, spread = null;                           // how much the room's loudness moves around its quiet, as a share of it (a fan 0.1, music 0.5)
+    let hist = [], speechT = 0, meanSince = null, solid = 0;                  // speaking: the last readings, when it began, since when their average has been near the room's, the loudest 300 ms
+    const meanOf = function (from) { let sum = 0, n = 0; for (let i = 0; i < hist.length; i++) if (hist[i][0] >= from) { sum += hist[i][1]; n++; } return n ? sum / n : 0; };
+    const barNow = function () {
+      const r = quiet >= loudAt && spread != null ? Math.min(ratio, Math.max(loudRatio, 1.2 + 3.6 * spread)) : ratio;        // (a loud room that is steady: its peaks are small)
+      return Math.max(floorMin * 2.2, quiet * r);
+    };
     return {
       get speaking() { return speaking; },
-      threshold: function () { return Math.max(floorMin * 2.2, quiet * ratio); },
+      get quiet() { return quiet; },
+      threshold: barNow,
       push: function (level, t) {
         const dt = lastT == null ? 0 : t - lastT; lastT = t;
         if (t0 == null) { t0 = t; winT = t; }
-        if (t - t0 < calMs) {                                                  // calibrating: the quietest ~100 ms window is the room
-          winSum += level; winN++;
-          if (t - winT >= 100) { calib = Math.min(calib, winSum / winN); winSum = 0; winN = 0; winT = t; }
+        if (t - t0 < calMs) {                                                  // calibrating: the room is what the ~100 ms windows say, less the loudest of them (a click, a first word)
+          winSum += level; winN++; rdSum += level; rdSq += level * level; rdN++;
+          if (t - winT >= 100) { wins.push(winSum / winN); winSum = 0; winN = 0; winT = t; }
           return null;
         }
-        if (calib !== Infinity) { quiet = Math.max(floorMin, Math.min(quietCap, calib)); calib = Infinity; }
-        const bar = Math.max(floorMin * 2.2, quiet * ratio);
+        if (wins.length) {                                                     // (the quietest window alone read music at half its average: its own peaks then began "speech")
+          const sum = wins.reduce(function (p, q) { return p + q; }, 0), calib = wins.length > 1 ? (sum - Math.max.apply(null, wins)) / (wins.length - 1) : sum;
+          quiet = Math.max(floorMin, Math.min(quietCap, calib)); wins = [];
+          if (rdN >= 4) { const m = rdSum / rdN; spread = Math.sqrt(Math.max(0, rdSq / rdN - m * m)) / Math.max(1e-6, m); }
+        }
+        const bar = barNow();
         if (!speaking) {
-          if (level > bar) { above += dt; if (above >= minSpeechMs) { speaking = true; begun = true; quietSince = null; return "speech"; } }
-          else { above = 0; quiet = Math.max(floorMin, quiet * 0.95 + level * 0.05); }                  // learn how quiet this room is
+          if (level > bar) { above += dt; if (above >= minSpeechMs) { speaking = true; begun = true; quietSince = meanSince = null; speechT = t - above; hist = [[t, level]]; solid = 0; return "speech"; } }
+          else {
+            above = 0; const was = quiet; quiet = Math.max(floorMin, quiet * 0.95 + level * 0.05);               // learn how quiet this room is
+            if (spread != null) spread = spread * 0.97 + 0.03 * 1.25 * Math.abs(level - was) / Math.max(1e-6, was);
+          }
           return null;
         }
-        if (level > bar * 0.7) { quietSince = null; return null; }                                       // still talking (a little hysteresis)
-        if (quietSince == null) quietSince = t;
-        if (t - quietSince >= endSilenceMs) { speaking = false; return begun ? "end" : null; }
-        return null;
+        hist.push([t, level]); while (hist.length > 2 && t - hist[0][0] > Math.max(endSilenceMs, plateauWin)) hist.shift();
+        if (t - speechT >= 300) solid = Math.max(solid, meanOf(t - 300));
+        if (level > bar * 0.7) quietSince = null;                                                          // still talking (a little hysteresis)
+        else if (quietSince == null) quietSince = t;
+        let done = quietSince != null && t - quietSince >= endSilenceMs;
+        if (!done && quiet >= noisyAt && t - speechT >= endSilenceMs) {                                    // a room that is not quiet: its peaks break "quiet", its average does not
+          if (meanOf(t - endSilenceMs) <= quiet * meanRatio) { if (meanSince == null) meanSince = t; } else meanSince = null;
+          if (meanSince != null && t - meanSince >= meanHoldMs) done = true;
+        }
+        let plateau = false;
+        if (!done && t - speechT >= plateauMs) {                                                           // a room that got louder: the same loudness for seconds is no voice
+          let n = 0, sum = 0, sq = 0;
+          for (let i = 0; i < hist.length; i++) if (hist[i][0] >= t - plateauWin) { n++; sum += hist[i][1]; sq += hist[i][1] * hist[i][1]; }
+          if (n >= 30) { const m = sum / n; if (Math.sqrt(Math.max(0, sq / n - m * m)) / Math.max(1e-6, m) < steadyCv) plateau = done = true; }
+        }
+        if (!done) return null;
+        speaking = false;
+        if (!begun) return null;
+        if (plateau || solid < quiet * solidRatio) {                                                       // never louder than the room, for 300 ms, or louder and never varying: it was the room, and this is its level now
+          quiet = Math.max(floorMin, Math.min(quietCap, meanOf(t - endSilenceMs) / 1.2));
+          return "noise";
+        }
+        return "end";
       },
     };
   }
@@ -290,6 +339,10 @@
           try { const t = await transcribe(blob(), type); finish({ spoke: true, text: word(t.text), lang: t.lang, sure: t.sure, raw: word(t.raw) }); } catch (e) { finish({ spoke: true, text: lastInterim, failed: true }); }
         };
         seg.abort = function () { ended = true; clearInterval(timer); try { if (rec.state !== "inactive") { rec.onstop = null; rec.stop(); } } catch (e) {} resolve({ spoke: false, text: "", aborted: true }); };
+        // A tap on the key (the Captain, 2026-11-10: in the car the detector could not tell he was done, and the tap threw his words away and left Hands-off, so no voice came back):
+        // while he is heard it ENDS the utterance, as a pause would (true), and while the count to send runs it SKIPS the count (true); false when it is neither.
+        seg.finish = function () { if (ended || !spoke || rec.state === "inactive") return false; try { rec.stop(); } catch (e) { return false; } return true; };
+        seg.skip = function () { if (ended || spoke || rec.state === "inactive") return false; try { rec.stop(); } catch (e) { return false; } return true; };
         rec.start(250);
         timer = setInterval(async function () {
           if (ended) return;
@@ -307,7 +360,8 @@
             else if (seg.idleMs && now - t0 >= seg.idleMs) { try { rec.stop(); } catch (e) {} return; }
             else if (seg.tick && seg.idleMs) seg.tick(seg.idleMs - (now - t0), lv);
           }
-          if (seg.level) seg.level(lv, spoke);
+          if (spoke && ev === "noise") { spoke = false; speechAt = 0; if (seg.onNoise) seg.onNoise(); }       // what began was the room (a fan, music): nothing was said, listen on
+          if (seg.level) seg.level(lv, spoke, spoke ? now - speechAt : 0);
           if (spoke && ev === "end") { try { rec.stop(); } catch (e) {} return; }
           if (now - t0 >= MAX_REC_MS) { try { rec.stop(); } catch (e) {} return; }
           if (spoke && seg.interim && !busy && (mic_.blind || vad.speaking) && now - speechAt >= 1200 && now - interimAt > 2200 && chunks.length > 4) {      // the words appear while you are still speaking
@@ -342,9 +396,11 @@
         if (message) { show(message); onText(message, true); }    // woken with the message in the same breath: straight to the countdown
         for (;;) {                                               // an utterance, then a count where speaking again continues it
           const seg = ctl.seg = {};
+          ctl.sendNow = false; ctl.counting = !first;            // (a tap sets sendNow while he is heard: that message goes now; counting: the count to send is what runs)
           seg.idleMs = first ? ((o && o.idleMs) || 10000) : SEND_DELAY_MS;
           const listening = chat ? "Listening · " + where() : "Listening";   // Hands-off says where the answer will be heard
-          seg.level = function (lv, speaking) { if (speaking) paintStatus("Hearing you", lv, true); else if (first) paintStatus(listening, lv, true); };   // (the count paints itself, in tick)
+          seg.level = function (lv, speaking, ms) { if (speaking) paintStatus(ms > LONG_HEARING_MS && twoMode ? "Hearing you \u00B7 tap when done" : "Hearing you", lv, true); else if (first) paintStatus(listening, lv, true); };   // (the count paints itself, in tick)
+          seg.onNoise = function () { hearing = false; paint(mic, "on"); };
           seg.tick = function (left, lv) {
             if (first) { paintStatus(listening, lv, true); return; }
             paintStatus("Sending in " + Math.ceil(left / 1000) + ": tap, type or say stop to cancel", lv, true);
@@ -379,8 +435,12 @@
             show(message); paintStatus("Cancelled", 0, false); setTimeout(function () { if (!session) paintStatus(null); }, 1500); return;
           }
           if (r.text) { message = (message ? message + " " : "") + r.text; show(message); onText(message, true); }
-          else if (first) { warn(mic); return; }
+          else if (first) {                                      // nothing in it
+            if (chat && twoMode) { session = null; paint(mic, "on"); setTimeout(listenAgain, 50); return; }      // (a fan or a song taken for speech: Hands-off listens on, it does not go deaf)
+            warn(mic); return;
+          }
           first = false; paint(mic, "on");
+          if (ctl.sendNow) break;                                // he tapped: that is all, no count
         }
         if (!message) return;
         paintStatus("Sending\u2026", 0, chat);
@@ -507,7 +567,7 @@
       mic.setAttribute("aria-pressed", hands ? "true" : "false");
       // one glyph, two looks (a toggle is a hexagon, lit or dark: bridge.css); the ear swapped for a mic was one of the "extra modes"
       const use = mic.querySelector && mic.querySelector("use"); if (use) use.setAttribute("href", "#g-ear");
-      mic.title = mic.ariaLabel = hands ? 'Hands-off (' + where() + '): say "thanks" (or tap) to go back to typing'
+      mic.title = mic.ariaLabel = hands ? 'Hands-off (' + where() + '): tap = done talking, send it; say "thanks" (or tap when idle) to go back to typing'
         : micAllowed ? 'Typing: say "Skippy" (or tap) for hands-off' : "Typing: tap to talk (the browser asks for the microphone once)";
       if (!session || !session.standby || hands) paint(mic, hands ? "on" : micAllowed ? "idle" : null);
       else paint(mic, "idle");
@@ -536,9 +596,14 @@
       } catch (e) { /* no Permissions API (older Safari): the key's first tap asks, or ifRemembered's first tap anywhere */ }
       mic.addEventListener("click", function () {
         unlock();
-        if (chat) {                                               // Hands-off → Typing (a tap while he talks only stops him)
+        if (chat) {                                               // Hands-off: a tap while he talks only stops him; while he is heard it sends what he said, and during the count it sends now; idle, it goes back to Typing
           if (playing) { stopSpeaking(); awaiting = false; listenAgain(); return; }
-          const c = session; if (c && !c.standby) { c.cancelled = true; session = null; if (c.seg && c.seg.abort) c.seg.abort(); }
+          const c = session;
+          if (c && !c.standby && c.seg) {
+            if (c.seg.finish && c.seg.finish()) { c.sendNow = true; return; }       // "that is all": Hands-off goes on, the reply is still spoken
+            if (c.counting && c.seg.skip && c.seg.skip()) return;                    // the count to send: now
+          }
+          if (c && !c.standby) { c.cancelled = true; session = null; if (c.seg && c.seg.abort) c.seg.abort(); }
           endChat("Back to typing"); return;
         }
         const c = session; if (c && c.standby) { c.cancelled = true; session = null; if (c.seg && c.seg.abort) c.seg.abort(); }

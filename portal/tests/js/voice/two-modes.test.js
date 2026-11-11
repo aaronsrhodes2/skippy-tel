@@ -165,3 +165,29 @@ test("heard(): another language, sure enough", () => {
   assert.ok(V.heard("es", 0.9)); assert.ok(V.heard("ja", V.HEARD_SURE));
   for (const [l, p] of [["en", 0.99], ["", 0.99], ["es", 0.5], ["es", undefined], [undefined, 1]]) assert.ok(!V.heard(l, p), l + " " + p);
 });
+
+// ── the tap in a loud room (the Captain, 2026-11-10): a tap while he is HEARD says "that is all" and Hands-off goes on ──
+test("Hands-off: a tap while you are heard sends what you said at once and stays in Hands-off (the reply is still spoken)", async (t) => {
+  const s = setup(t, false);
+  await advance(t, 700);
+  s.key._on.click(); await advance(t, 600);
+  say[recorders.length - 1] = "turn on the kitchen lights";
+  level.v = 0.12; await advance(t, 1500);                                  // he talks, and the room (a fan) never lets the pause be found: no end in sight
+  s.key._on.click(); level.v = 0.004; await advance(t, 800);
+  assert.deepEqual(s.sent, ["turn on the kitchen lights"]);
+  assert.equal(s.voice.chatting(), true);                                  // not thrown away, not back to Typing
+  s.voice.say("Done."); await advance(t, 1200);
+  assert.deepEqual(spoken, ["Done."]); assert.ok(listening());
+});
+
+test("Hands-off: a tap during the count to send sends now, and stays in Hands-off", async (t) => {
+  const s = setup(t, false);
+  await advance(t, 700);
+  s.key._on.click(); await advance(t, 600);
+  say[recorders.length - 1] = "what time is it";
+  await speak(t, 1500); await advance(t, 2200);                            // the pause was found; the 4 s count is running
+  assert.deepEqual(s.sent, []);
+  s.key._on.click(); await advance(t, 800);
+  assert.deepEqual(s.sent, ["what time is it"]);
+  assert.equal(s.voice.chatting(), true);
+});
