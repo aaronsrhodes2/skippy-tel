@@ -6,6 +6,7 @@ namespace esphome {
 namespace skippy_puppet {
 
 static const int W = 480, H = 480, MAX_OPS = 256, MAX_PTS = 64;
+static const int STRIP_PX = 16384;                // one strip is composed in internal RAM (32 KB) and written to the panel once
 
 struct Op {
   uint8_t kind;                       // 1 polyline, 2 box, 3 sprite
@@ -30,12 +31,16 @@ class SkippyPuppet : public Component {
  protected:
   display::Display *display_{nullptr};
   uint16_t *fb_{nullptr};             // the panel's frame buffer (byte-swapped RGB565 words)
-  uint8_t *cov_{nullptr};             // coverage scratch for one polyline, W*H bytes
+  uint16_t *strip_{nullptr};          // internal RAM: the strip being composed
+  uint8_t *cov_{nullptr};             // internal RAM: coverage scratch for one polyline in a strip
+  uint16_t *dst_{nullptr};            // where blend_ writes: the strip, whose top-left is (ox_, oy_) and whose rows are dstride_ words
+  int ox_{0}, oy_{0}, dstride_{W};
   Op *ops_{nullptr};
+  uint32_t *prof_{nullptr};           // microseconds per op, summed over a bench run
   int nops_{0};
   bool shown_{false};
   int parse_(const uint8_t *buf, size_t len);
-  void clear_(const Rect &c);
+  void render_(const Rect &r);        // compose r strip by strip (clear, every op that touches it, in order) and write each strip to the panel
   void draw_ops_(const Rect &c);
   void line_(const Op &o, const Rect &c);
   void box_(const Op &o, const Rect &c);

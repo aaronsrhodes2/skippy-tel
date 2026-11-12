@@ -21,8 +21,10 @@ static inline float fclamp(float v, float lo, float hi) { return v < lo ? lo : (
 
 void SkippyPuppet::setup() {
   this->ops_ = (Op *) heap_caps_malloc(sizeof(Op) * MAX_OPS, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  this->cov_ = (uint8_t *) heap_caps_malloc(W * H, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-  if (this->ops_ == nullptr || this->cov_ == nullptr) { ESP_LOGE(TAG, "no memory"); this->mark_failed(); }
+  this->cov_ = (uint8_t *) heap_caps_malloc(STRIP_PX, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  this->strip_ = (uint16_t *) heap_caps_malloc(STRIP_PX * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  this->prof_ = (uint32_t *) heap_caps_calloc(MAX_OPS, sizeof(uint32_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+  if (this->ops_ == nullptr || this->cov_ == nullptr || this->strip_ == nullptr || this->prof_ == nullptr) { ESP_LOGE(TAG, "no memory"); this->mark_failed(); }
 }
 
 int SkippyPuppet::parse_(const uint8_t *b, size_t len) {
@@ -69,7 +71,7 @@ int SkippyPuppet::parse_(const uint8_t *b, size_t len) {
 }
 
 inline void SkippyPuppet::blend_(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint32_t a) {
-  uint16_t *dst = this->fb_ + y * W + x;
+  uint16_t *dst = this->dst_ + (y - this->oy_) * this->dstride_ + (x - this->ox_);
   if (a >= 255) { uint16_t v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3); *dst = (uint16_t) ((v >> 8) | (v << 8)); return; }
   uint16_t wv = *dst, px = (uint16_t) ((wv >> 8) | (wv << 8));
   uint32_t r0 = (px >> 11) & 31, g0 = (px >> 5) & 63, b0 = px & 31;
@@ -80,12 +82,9 @@ inline void SkippyPuppet::blend_(int x, int y, uint8_t r, uint8_t g, uint8_t b, 
   *dst = (uint16_t) ((v >> 8) | (v << 8));
 }
 
-void SkippyPuppet::clear_(const Rect &c) {
-  for (int y = c.y0; y < c.y1; y++) memset(this->fb_ + y * W + c.x0, 0, (size_t) (c.x1 - c.x0) * 2);
-}
-
 // A polyline of constant width as a capsule chain: each pixel's coverage is how far its centre is inside half the width of the nearest segment (the
-// maximum over the segments, so a joint is not blended twice), then it is mixed in at the op's opacity.
+// maximum over the segments, so a joint is not blended twice), then it is mixed in at the op's opacity. A pixel clearly inside (distance < hw - 0.5) or
+// clearly outside (> hw + 0.5) is decided on the squared distance, so only the one-pixel edge pays for a square root.
 void SkippyPuppet::line_(const Op &o, const Rect &c) {
   if (o.npts < 2 || o.opa == 0) return;
   int x0 = imax(c.x0, o.bx0), y0 = imax(c.y0, o.by0), x1 = imin(c.x1, o.bx1 + 1), y1 = imin(c.y1, o.by1 + 1);
@@ -93,20 +92,24 @@ void SkippyPuppet::line_(const Op &o, const Rect &c) {
   int bw = x1 - x0;
   memset(this->cov_, 0, (size_t) bw * (y1 - y0));
   float hw = o.width / 2.0f;
+  float in2 = hw > 0.5f ? (hw - 0.5f) * (hw - 0.5f) : -1.0f, out2 = (hw + 0.5f) * (hw + 0.5f);
   for (int s = 0; s + 1 < o.npts; s++) {
     float ax = o.pts[2 * s], ay = o.pts[2 * s + 1], bx = o.pts[2 * s + 2], by = o.pts[2 * s + 3];
-    float dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    float dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy, il2 = l2 > 0 ? 1.0f / l2 : 0.0f;
     int sx0 = imax(x0, (int) floorf(fminf(ax, bx) - hw - 1)), sx1 = imin(x1, (int) ceilf(fmaxf(ax, bx) + hw + 2));
     int sy0 = imax(y0, (int) floorf(fminf(ay, by) - hw - 1)), sy1 = imin(y1, (int) ceilf(fmaxf(ay, by) + hw + 2));
     for (int y = sy0; y < sy1; y++) {
       uint8_t *row = this->cov_ + (size_t) (y - y0) * bw - x0;
+      float py = y - ay;
       for (int x = sx0; x < sx1; x++) {
-        float t = l2 > 0 ? fclamp(((x - ax) * dx + (y - ay) * dy) / l2, 0.0f, 1.0f) : 0.0f;
-        float ex = x - (ax + t * dx), ey = y - (ay + t * dy);
+        float px = x - ax;
+        float t = fclamp((px * dx + py * dy) * il2, 0.0f, 1.0f);
+        float ex = px - t * dx, ey = py - t * dy;
         float d2 = ex * ex + ey * ey;
-        if (d2 > (hw + 1) * (hw + 1)) continue;
-        float cv = fclamp(hw + 0.5f - sqrtf(d2), 0.0f, 1.0f);
-        uint8_t cb = (uint8_t) (cv * 255.0f + 0.5f);
+        if (d2 >= out2) continue;
+        uint8_t cb;
+        if (d2 <= in2) cb = 255;
+        else cb = (uint8_t) (fclamp(hw + 0.5f - sqrtf(d2), 0.0f, 1.0f) * 255.0f + 0.5f);
         if (cb > row[x]) row[x] = cb;
       }
     }
@@ -114,7 +117,7 @@ void SkippyPuppet::line_(const Op &o, const Rect &c) {
   for (int y = y0; y < y1; y++) {
     const uint8_t *row = this->cov_ + (size_t) (y - y0) * bw - x0;
     for (int x = x0; x < x1; x++)
-      if (row[x]) this->blend_(x, y, o.r, o.g, o.b, ((uint32_t) row[x] * o.opa + 127) / 255);
+      if (row[x]) this->blend_(x, y, o.r, o.g, o.b, o.opa == 255 ? row[x] : ((uint32_t) row[x] * o.opa + 127) / 255);
   }
 }
 
@@ -122,12 +125,27 @@ static inline float ell_cov(float dx, float dy, float rx, float ry) {
   float fx = dx / rx, fy = dy / ry, f2 = fx * fx + fy * fy;
   if (f2 < 1e-6f) return 1.0f;
   float f = sqrtf(f2);
-  float m = fminf(rx, ry);
-  if (f > 1.0f + 2.0f / m) return 0.0f;
   float gx = dx / (rx * rx), gy = dy / (ry * ry);
   float g = sqrtf(gx * gx + gy * gy) / f;
   return fclamp(0.5f - (f - 1.0f) / g, 0.0f, 1.0f);
 }
+
+// An ellipse's pixels are decided on f2 = (dx/rx)^2 + (dy/ry)^2 first: well inside (f2 < tin) is full coverage, well outside (f2 > tout) is nothing,
+// and only the thin band between them pays for the exact edge.
+struct Ell {
+  float rx, ry, tin, tout;
+  Ell(float rx_, float ry_) : rx(rx_), ry(ry_) {
+    float band = 1.5f / fminf(rx_, ry_);
+    tin = (1.0f - band) > 0 ? (1.0f - band) * (1.0f - band) : -1.0f;
+    tout = (1.0f + band) * (1.0f + band);
+  }
+  inline float cov(float dx, float dy) const {
+    float fx = dx / rx, fy = dy / ry, f2 = fx * fx + fy * fy;
+    if (f2 > tout) return 0.0f;
+    if (f2 < tin) return 1.0f;
+    return ell_cov(dx, dy, rx, ry);
+  }
+};
 
 void SkippyPuppet::box_(const Op &o, const Rect &c) {
   if (o.opa == 0 || o.w == 0 || o.h == 0) return;
@@ -141,15 +159,14 @@ void SkippyPuppet::box_(const Op &o, const Rect &c) {
     return;
   }
   int cx = o.x + o.w / 2, cy = o.y + o.h / 2;
-  float rx = (float) imax(1, o.w / 2), ry = (float) imax(1, o.h / 2);
-  float irx = (float) imax(1, o.w / 2 - o.border), iry = (float) imax(1, o.h / 2 - o.border);
+  Ell outer((float) imax(1, o.w / 2), (float) imax(1, o.h / 2)), inner((float) imax(1, o.w / 2 - o.border), (float) imax(1, o.h / 2 - o.border));
   for (int y = y0; y < y1; y++)
     for (int x = x0; x < x1; x++) {
-      float ao = ell_cov((float) (x - cx), (float) (y - cy), rx, ry);
+      float ao = outer.cov((float) (x - cx), (float) (y - cy));
       if (ao <= 0.0f) continue;
       uint8_t r = o.r, g = o.g, b = o.b;
       if (o.border) {
-        float ai = ell_cov((float) (x - cx), (float) (y - cy), irx, iry);
+        float ai = inner.cov((float) (x - cx), (float) (y - cy));
         r = (uint8_t) (o.br + (o.r - o.br) * ai); g = (uint8_t) (o.bg + (o.g - o.bg) * ai); b = (uint8_t) (o.bb + (o.b - o.bb) * ai);
       }
       this->blend_(x, y, r, g, b, (uint32_t) (ao * o.opa + 0.5f));
@@ -158,11 +175,14 @@ void SkippyPuppet::box_(const Op &o, const Rect &c) {
 
 void SkippyPuppet::sprite_(const Op &o, const Rect &c) {
   if (o.opa == 0 || o.sprite != 0) return;
-  int x0 = imax(c.x0, o.x), y0 = imax(c.y0, o.y), x1 = imin(c.x1, o.x + SPRITE0_W), y1 = imin(c.y1, o.y + SPRITE0_H);
+  int y0 = imax(c.y0, o.y), y1 = imin(c.y1, o.y + SPRITE0_H);
   for (int y = y0; y < y1; y++) {
-    const uint8_t *ar = SPRITE0_A + (size_t) (y - o.y) * SPRITE0_W - o.x;
-    const uint8_t *pr = SPRITE0_RGB + (size_t) (y - o.y) * SPRITE0_W * 2 - o.x * 2;
-    uint16_t *dst = this->fb_ + y * W;
+    int sy = y - o.y;
+    int x0 = imax(c.x0, o.x + (int) SPRITE0_X0[sy]), x1 = imin(c.x1, o.x + (int) SPRITE0_X1[sy] + 1);       // only the columns that hold anything
+    if (x1 <= x0) continue;
+    const uint8_t *ar = SPRITE0_A + (size_t) sy * SPRITE0_W - o.x;
+    const uint8_t *pr = SPRITE0_RGB + (size_t) sy * SPRITE0_W * 2 - o.x * 2;
+    uint16_t *dst = this->dst_ + (y - this->oy_) * this->dstride_ - this->ox_;
     for (int x = x0; x < x1; x++) {
       uint32_t a = ar[x];
       if (o.opa != 255) a = (a * o.opa + 127) / 255;
@@ -183,9 +203,27 @@ void SkippyPuppet::draw_ops_(const Rect &c) {
     const Op &o = this->ops_[i];
     if (o.bx1 < c.x0 || o.bx0 >= c.x1 || o.by1 < c.y0 || o.by0 >= c.y1) continue;
     int64_t t0 = esp_timer_get_time();
-    if (o.kind == 1) { this->line_(o, c); t_line += (uint32_t) (esp_timer_get_time() - t0); }
-    else if (o.kind == 2) { this->box_(o, c); t_box += (uint32_t) (esp_timer_get_time() - t0); }
-    else { this->sprite_(o, c); t_sprite += (uint32_t) (esp_timer_get_time() - t0); }
+    if (o.kind == 1) this->line_(o, c);
+    else if (o.kind == 2) this->box_(o, c);
+    else this->sprite_(o, c);
+    uint32_t dt = (uint32_t) (esp_timer_get_time() - t0);
+    this->prof_[i] += dt;
+    (o.kind == 1 ? t_line : (o.kind == 2 ? t_box : t_sprite)) += dt;
+  }
+}
+
+// Compose a rectangle in internal RAM, strip by strip, and write each strip to the panel with one copy: the panel's frame buffer is in PSRAM, where
+// the read-modify-write of every blended pixel was most of the time.
+void SkippyPuppet::render_(const Rect &r) {
+  int w = r.x1 - r.x0;
+  if (w <= 0 || r.y1 <= r.y0) return;
+  int rows = imax(1, STRIP_PX / w);
+  for (int y = r.y0; y < r.y1; y += rows) {
+    Rect s = {r.x0, y, r.x1, imin(y + rows, r.y1)};
+    this->dst_ = this->strip_; this->ox_ = s.x0; this->oy_ = s.y0; this->dstride_ = w;
+    memset(this->strip_, 0, (size_t) w * (s.y1 - s.y0) * 2);
+    this->draw_ops_(s);
+    for (int yy = s.y0; yy < s.y1; yy++) memcpy(this->fb_ + yy * W + s.x0, this->strip_ + (size_t) (yy - s.y0) * w, (size_t) w * 2);
   }
 }
 
@@ -201,26 +239,27 @@ void SkippyPuppet::bench() {
   Rect full = {0, 0, W, H};
   const int R = 8;
   t_line = t_box = t_sprite = 0;
-  int64_t tc = 0, td = 0;
-  for (int i = 0; i < R; i++) {
-    int64_t a = esp_timer_get_time();
-    this->clear_(full);
-    int64_t b = esp_timer_get_time();
-    this->draw_ops_(full);
-    int64_t e = esp_timer_get_time();
-    tc += b - a; td += e - b;
+  memset(this->prof_, 0, sizeof(uint32_t) * MAX_OPS);
+  int64_t a = esp_timer_get_time();
+  for (int i = 0; i < R; i++) this->render_(full);
+  int64_t e = esp_timer_get_time();
+  ESP_LOGI(TAG, "%d ops: whole scene %u us (lines %u, boxes %u, sprite %u us)", n, (unsigned) ((e - a) / R), (unsigned) (t_line / R), (unsigned) (t_box / R), (unsigned) (t_sprite / R));
+  for (int rank = 0; rank < 6; rank++) {                       // the slowest ops: what is left to speed up
+    int best = -1;
+    for (int i = 0; i < this->nops_; i++) if (this->prof_[i] > 0 && (best < 0 || this->prof_[i] > this->prof_[best])) best = i;
+    if (best < 0) break;
+    const Op &o = this->ops_[best];
+    ESP_LOGI(TAG, "  slow op %d kind %d %dx%d (w %d, pts %d, opa %d): %u us", best, o.kind, o.bx1 - o.bx0, o.by1 - o.by0, o.width ? o.width : o.border, o.npts, o.opa, (unsigned) (this->prof_[best] / R));
+    this->prof_[best] = 0;
   }
-  ESP_LOGI(TAG, "%d ops: whole scene %u us (clear %u us); lines %u, boxes %u, sprite %u us", n, (unsigned) (td / R), (unsigned) (tc / R),
-           (unsigned) (t_line / R), (unsigned) (t_box / R), (unsigned) (t_sprite / R));
   Rect dirty = {176, 192, 304, 288};                           // a 128 x 96 patch around the face's middle
   t_line = t_box = t_sprite = 0;
-  int64_t a = esp_timer_get_time();
+  a = esp_timer_get_time();
   const int D = 40;
-  for (int i = 0; i < D; i++) { this->clear_(dirty); this->draw_ops_(dirty); }
-  int64_t e = esp_timer_get_time();
+  for (int i = 0; i < D; i++) this->render_(dirty);
+  e = esp_timer_get_time();
   ESP_LOGI(TAG, "dirty 128x96: %u us per redraw (lines %u, boxes %u, sprite %u us)", (unsigned) ((e - a) / D), (unsigned) (t_line / D), (unsigned) (t_box / D), (unsigned) (t_sprite / D));
-  this->clear_(full);
-  this->draw_ops_(full);
+  this->render_(full);
   this->shown_ = true;
 }
 

@@ -80,6 +80,23 @@ read-modify-write per pixel, so there is a lot of room; the plan to get there:
 4. opaque boxes (`opa == 255`, most of them) skip the read entirely, and a box fully covered by a later opaque box is dropped by the hub.
 Go/no-go: if the typical frame's dirty area redraws in under ~15 ms after 1-3, puppet mode is a go. Until then the tile stream stays.
 
+## Spike result, round 2 (after the first optimization: internal-RAM strips, no sqrt for interior pixels, sprite row spans)
+
+Whole scene 236 -> 140 ms; a 128x96 patch 27 -> 15.6 ms (about 1.27 us per pixel). The slow ops left are the three 41-point hat polylines
+(28 + 16 + 14 ms: they span 500x300 px) and the can sprite (12 ms).
+
+**But the face changes a lot every frame** (`tools/face_dirty_probe.py`, the real animation): per frame the changed 16 px tiles cover, on average,
+29k px at idle, 38k listening, 42k recording, 45k thinking, 66k speaking (p95 94-113k px). At 1.27 us/px that is 37 / 48 / 53 / 57 / 84 ms mean
+per frame (p95 120-140 ms), even with perfect dirty rectangles, and 90-160 ms with per-op boxes (the hat's outlines move as whole shapes). So the box
+becomes the bottleneck: puppet mode as built would run about 10-25 fps, no better than the tile stream's nominal rate, though with no stale blocks.
+
+**Verdict:** the bandwidth win is real (2 KB a frame, loss-proof) but not a speed win until drawing is several times cheaper. Paths that could
+get there: (a) use both ESP32-S3 cores on strips (~2x); (b) integer/fixed-point coverage (~2x); (c) animate big shapes by moving pixels instead
+of redrawing them (the hat swing as a sprite shift); (d) lower the face's own churn (sub-pixel sway that changes no visible pixel but changes ops).
+Not started: the Captain redirected to the music UI (2026-11-11). **The cheaper fix for the pixelation is on the existing tile stream**
+(option 3 in the first analysis: on loss keep the frame rate and resend exactly the lost tiles, instead of halving the rate), and puppet mode
+stays parked here with the spike firmware on the living pod (opt-in; the tile stream is untouched).
+
 ## What is proven and what is not
 
 - Proven: the face is ~60-80 primitives, the scene is 2-2.5 KB, and the tile stream costs 8-17 times more. (numbers above)

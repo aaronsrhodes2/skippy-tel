@@ -49,6 +49,11 @@ for k, tile in enumerate(big.values()):
     out.append(f"static const int SPRITE{k}_W = {w}, SPRITE{k}_H = {h};")
     out.append(arr(f"SPRITE{k}_RGB", swapped.astype("<u2").tobytes()))
     out.append(arr(f"SPRITE{k}_A", tile[..., 3].astype(np.uint8).tobytes()))
+    opaque = tile[..., 3] > 0                                         # per row: the first and last column that has anything (x0 > x1 for an empty row)
+    x0s = [int(np.argmax(r)) if r.any() else 1 for r in opaque]
+    x1s = [int(len(r) - 1 - np.argmax(r[::-1])) if r.any() else 0 for r in opaque]
+    out.append(f"static const uint16_t SPRITE{k}_X0[] = {{{', '.join(map(str, x0s))}}};")
+    out.append(f"static const uint16_t SPRITE{k}_X1[] = {{{', '.join(map(str, x1s))}}};")
 dest = ROOT / "services" / "satellite" / "rooms" / "components" / "skippy_puppet"
 dest.mkdir(parents=True, exist_ok=True)
 (dest / "scene_data.h").write_text("\n".join(out), encoding="utf-8")
