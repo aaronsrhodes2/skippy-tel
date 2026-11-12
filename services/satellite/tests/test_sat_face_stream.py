@@ -363,8 +363,8 @@ def test_face_sensor_fields_reach_the_renderer():
     assert s.face.mic_off and not s.face.spk_off
 
 
-# ── the stream rides out Wi-Fi loss bursts: half rate while the box's loss counter grows, the whole face again afterwards ──
-def test_loss_burst_slows_the_stream_then_resends_everything():
+# ── the stream rides out Wi-Fi loss bursts: resends (at full rate) while the box's loss counter grows, the whole face again afterwards ──
+def test_loss_burst_resends_the_stream_then_sends_everything():
     from face_stream import FaceStreamer, LOSS_HOLD_S
     s = FaceStreamer("127.0.0.1", send=lambda d: None)
     s.note_loss(100, now=10.0)                                   # the first report is only a baseline
@@ -379,6 +379,27 @@ def test_loss_burst_slows_the_stream_then_resends_everything():
     assert not s.slow_now(13.0 + LOSS_HOLD_S + 0.1)              # the burst is over...
     assert s.enc.keyframes == 2 and s.recoveries == 1            # ...so the whole face is sent again
     assert not s.slow_now(20.0) and s.recoveries == 1
+
+
+def test_while_losing_the_stream_keeps_its_rate_and_sends_recent_tiles_again():
+    import numpy as np
+    from face_stream import Encoder, COLS, ROWS, TH, TW, decode_datagram, REFRESH_TILES, LOSS_REFRESH_TILES
+    from face_render import W, H
+    e = Encoder()
+    base = np.zeros((H, W), np.uint16)
+    e.encode(base)                                               # the keyframe
+    f1 = base.copy(); f1[0:TH, 0:TW] = 7                         # frame 1 changes the top-left tile
+    e.encode(f1)
+    f2 = f1.copy(); f2[0:TH, TW:2 * TW] = 9                      # frame 2 changes its neighbour
+    calm = e.encode(f2)
+    e.resend = True
+    f3 = f2.copy(); f3[TH:2 * TH, 0:TW] = 5
+    lossy = e.encode(f3)
+    def tiles(dgs):
+        fb = np.zeros((H, W), np.uint16)
+        return sum(decode_datagram(d, fb)["tiles"] for d in dgs)
+    assert tiles(lossy) >= 3 + REFRESH_TILES                     # the new tile and the two before it went again, plus the faster refresh
+    assert tiles(lossy) > tiles(calm) and LOSS_REFRESH_TILES > 0
 
 
 def test_loss_counter_wraps_and_a_reboot_does_not_look_like_loss():

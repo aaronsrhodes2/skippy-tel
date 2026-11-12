@@ -20,6 +20,7 @@ import sys
 import threading
 import time
 import zlib
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -32,7 +33,9 @@ MAX_DATAGRAM = 1400
 HEARTBEAT_S = 0.3
 REFRESH_TILES = 8                                  # resent every frame, round robin over the whole screen
 STREAM_PORT = 10803
-LOSS_HOLD_S = 3.0                                  # how long after the last lost datagram the stream stays at half rate
+LOSS_HOLD_S = 3.0                                  # how long after the last lost datagram the stream resends (at full rate: the Captain, 2026-11-12, wants the frame rate kept)
+RESEND_FRAMES = 3                                  # while losing: the tiles of this many past frames go again with each new one
+LOSS_REFRESH_TILES = 16                            # and this many more of the round-robin refresh
 
 
 def deflate(raw: bytes) -> bytes:
@@ -66,6 +69,8 @@ class Encoder:
         self.cursor = 0
         self.keyframes = 0                          # frames still to be sent whole
         self.seq = 0
+        self.recent: deque = deque(maxlen=RESEND_FRAMES)   # the tiles each of the last few frames carried (a lost datagram is one of these)
+        self.resend = False                                # the air is dropping datagrams: send those again, and refresh faster
 
     def keyframe(self, n: int = 1) -> None:
         self.keyframes = max(self.keyframes, n)
@@ -79,9 +84,14 @@ class Encoder:
             mask = np.ones((ROWS, COLS), bool)
         else:
             mask = (cur565 != self.sent).reshape(ROWS, TH, COLS, TW).any(axis=(1, 3))
-            for _ in range(REFRESH_TILES):
+            new = mask.copy()
+            if self.resend:                                # loss: the frame rate stays, the last frames' tiles go again (a lost one heals in a frame or two)
+                for m in self.recent:
+                    mask |= m
+            for _ in range(REFRESH_TILES + (LOSS_REFRESH_TILES if self.resend else 0)):
                 mask[self.cursor // COLS, self.cursor % COLS] = True
                 self.cursor = (self.cursor + 1) % (ROWS * COLS)
+            self.recent.append(new)
         be = cur565.astype(">u2")
         tiles = cur565.reshape(ROWS, TH, COLS, TW)
         solid = tiles.min(axis=(1, 3)) == tiles.max(axis=(1, 3))
@@ -204,12 +214,14 @@ class FaceStreamer(threading.Thread):
         self.loss_total = total
 
     def slow_now(self, now: float) -> bool:
-        """True while the stream should run at half rate; the first call after the burst ends sends the whole face again (a half-drawn face never lingers)."""
+        """True while the air is dropping datagrams: the encoder resends recent tiles and refreshes faster (the frame rate is NOT cut). The first call after the
+        burst ends sends the whole face again (a half-drawn face never lingers)."""
         bad = now < self.loss_until
         if self.degraded and not bad:
             self.enc.keyframe(2)
             self.recoveries += 1
         self.degraded = bad
+        self.enc.resend = bad
         return bad
 
     def set_music(self, heard: bool) -> None:
@@ -247,7 +259,7 @@ class FaceStreamer(threading.Thread):
                 time.sleep(min(next_tick - now, 0.01))
                 continue
             next_tick += 0.05
-            slow = self.slow_now(now)
+            self.slow_now(now)
             self._tick_n = getattr(self, "_tick_n", 0) + 1
             if now - next_tick > 0.25:                         # fell far behind (a stall): do not run ticks to catch up
                 next_tick = now + 0.05
@@ -256,8 +268,6 @@ class FaceStreamer(threading.Thread):
             try:
                 self.face.tick(self.now_ms())
                 img = to565(self.face.render())
-                if slow and self._tick_n % 2:
-                    continue                                   # half rate: draw it but do not encode: the next frame carries what changed since the last one sent
                 while keys and now - t_start >= keys[0]:
                     keys.pop(0)
                     self.enc.keyframe(1)
