@@ -1,0 +1,16 @@
+{
+  "model": "coder",
+  "base": "https://skippy-core.tailab2cc7.ts.net",
+  "images": "send",
+  "describe_seconds": 0.0,
+  "seconds": 37.4,
+  "stop_reason": "end_turn",
+  "input_tokens": 4,
+  "output_tokens": 1795,
+  "tokens_per_second": 48.0,
+  "thinking_chars": 0,
+  "answer_found": true,
+  "answer_bytes": 8031,
+  "grade": "31/40",
+  "timings": null
+}

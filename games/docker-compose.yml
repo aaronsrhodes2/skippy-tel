@@ -1,0 +1,160 @@
+# Skippy game servers: Valheim, Factorio, Satisfactory, RuneScape: Dragonwilds, Garry's Mod.
+# (ARK deferred: too heavy.)
+#
+# Same file runs anywhere Docker runs: the GCP on-demand VM (infra/gcp-games/),
+# a Hetzner box, or the home PC. Each game is a compose *profile*, so only the
+# games you ask for start:
+#
+#   docker compose --profile valheim --profile factorio up -d
+#   docker compose --profile satisfactory up -d
+#   docker compose --profile valheim --profile factorio --profile satisfactory stop
+#
+# All world data lives under ${DATA_DIR} (default ./data); back that up and
+# you've backed up everything. Copy .env.example → .env first.
+#
+# RAM guide: Valheim ~4 GB, Factorio ~1-2 GB, Satisfactory 8-12 GB,
+# Dragonwilds 2 GB + 1 GB per player (8 GB for its max of 6), Garry's Mod ~4 GB (more with a big Workshop collection).
+#
+# Ports: Satisfactory keeps its default 7777; Dragonwilds moves to 7778 so both
+# can run at once (Dragonwilds players find the server by its SERVER_NAME in
+# the in-game browser, so the port is invisible to them). Dragonwilds also
+# needs its beacon on 8888/udp (Satisfactory's 8888 is tcp; no clash).
+
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "3" }
+
+services:
+
+  valheim:
+    <<: *common
+    profiles: [valheim]
+    image: ghcr.io/lloesche/valheim-server:latest
+    container_name: valheim
+    cap_add: [sys_nice]
+    ports:
+      - "2456-2457:2456-2457/udp"
+    environment:
+      SERVER_NAME: ${VALHEIM_SERVER_NAME:-Skippy Valheim}
+      WORLD_NAME: ${VALHEIM_WORLD_NAME:-Skippy}
+      SERVER_PASS: ${VALHEIM_PASSWORD:-}          # required; games.sh checks it
+      SERVER_PUBLIC: ${VALHEIM_PUBLIC:-false}
+      # Crossplay: a 6-digit join code (new every boot; Join Game → Add server, paste it; diag.sh reads it from the
+      # log for the portal) INSTEAD of the IP: the server stops listening on 2456, and the idle watchdog, which counts
+      # packets on 2456, can't see the players. Off until the watchdog handles that (portal/catalog.py valheim_crossplay).
+      CROSSPLAY: ${VALHEIM_CROSSPLAY:-false}
+      TZ: ${TZ:-America/Los_Angeles}
+      BACKUPS: "true"
+      BACKUPS_MAX_AGE: "7"
+      # Server-side mods (docs/games/MODS_AND_UPDATES.md): true installs BepInEx at every start and loads the plugins in
+      # data/valheim/config/bepinex/plugins. Off, as the image itself defaults. The server files update from Steam on every start regardless.
+      BEPINEX: ${VALHEIM_BEPINEX:-false}
+    volumes:
+      - ${DATA_DIR:-./data}/valheim/config:/config
+      - ${DATA_DIR:-./data}/valheim/server:/opt/valheim
+    stop_grace_period: 2m          # lets the world save before the container dies
+
+  factorio:
+    <<: *common
+    profiles: [factorio]
+    # The tag is the server version: stable (blank), latest, or an exact one such as 2.0.77 to hold it there.
+    image: factoriotools/factorio:${FACTORIO_VERSION:-stable}
+    container_name: factorio
+    ports:
+      - "34197:34197/udp"
+      # RCON (27015/tcp) deliberately not published.
+    environment:
+      SAVE_NAME: ${FACTORIO_SAVE_NAME:-skippy}
+      GENERATE_NEW_SAVE: "true"    # only generates if SAVE_NAME doesn't exist yet
+      LOAD_LATEST_SAVE: "false"
+      # Mod updates at every start (docs/games/MODS_AND_UPDATES.md), off unless FACTORIO_UPDATE_MODS=true. The image's own
+      # names: USERNAME and TOKEN are the factorio.com account the downloads are made as (blank: they fail with 403).
+      UPDATE_MODS_ON_START: ${FACTORIO_UPDATE_MODS:-false}
+      UPDATE_IGNORE: ${FACTORIO_UPDATE_IGNORE:-}
+      USERNAME: ${FACTORIO_USERNAME:-}
+      TOKEN: ${FACTORIO_TOKEN:-}
+    volumes:
+      - ${DATA_DIR:-./data}/factorio:/factorio
+    stop_grace_period: 1m
+
+  satisfactory:
+    <<: *common
+    profiles: [satisfactory]
+    image: wolveix/satisfactory-server:latest
+    container_name: satisfactory
+    ports:
+      - "7777:7777/udp"
+      - "7777:7777/tcp"
+      - "8888:8888/tcp"
+    environment:
+      MAXPLAYERS: ${SATISFACTORY_MAX_PLAYERS:-4}
+      PUID: "1000"
+      PGID: "1000"
+      STEAMBETA: "false"
+      SKIPUPDATE: ${SATISFACTORY_SKIP_UPDATE:-false}    # false: the server files update from Steam at every start
+    volumes:
+      - ${DATA_DIR:-./data}/satisfactory:/config
+    mem_limit: ${SATISFACTORY_MEM_LIMIT:-12g}
+    stop_grace_period: 2m
+
+  dragonwilds:
+    <<: *common
+    profiles: [dragonwilds]
+    # Community image wrapping Jagex's official server (Steam app 4019830,
+    # anonymous download). Console players (Xbox/PS5/Switch 2) can join
+    # dedicated servers since the 1.0 launch (Sept 2026).
+    image: indifferentbroccoli/runescape-dragonwilds-server-docker:latest
+    container_name: dragonwilds
+    ports:
+      - "${DRAGONWILDS_PORT:-7778}:${DRAGONWILDS_PORT:-7778}/udp"
+      # World-settings beacon: the client uses it to create/edit worlds and
+      # negotiate their settings. Internal and external ports must match.
+      - "${DRAGONWILDS_BEACON_PORT:-8888}:${DRAGONWILDS_BEACON_PORT:-8888}/udp"
+    environment:
+      # Required by the image (it refuses to start without them); 1000 owns
+      # data/dragonwilds (infra/gcp-games/startup.sh chowns it).
+      PUID: "1000"
+      PGID: "1000"
+      DEFAULT_PORT: ${DRAGONWILDS_PORT:-7778}
+      BEACON_PORT: ${DRAGONWILDS_BEACON_PORT:-8888}
+      OWNER_ID: ${DRAGONWILDS_OWNER_ID:-}      # required; games.sh checks it
+      ADMIN_PASSWORD: ${DRAGONWILDS_ADMIN_PASSWORD:-} # required; games.sh checks it
+      SERVER_NAME: ${DRAGONWILDS_SERVER_NAME:-Skippy}
+      DEFAULT_WORLD_NAME: ${DRAGONWILDS_WORLD_NAME:-Ashenfall}
+      WORLD_PASSWORD: ${DRAGONWILDS_WORLD_PASSWORD:-}
+      MAX_PLAYERS: ${DRAGONWILDS_MAX_PLAYERS:-6}
+      UPDATE_ON_START: ${DRAGONWILDS_UPDATE_ON_START:-true}      # server version must match the game client
+    volumes:
+      - ${DATA_DIR:-./data}/dragonwilds:/home/steam/server-files
+    stop_grace_period: 1m
+
+  garrysmod:
+    <<: *common
+    profiles: [garrysmod]
+    # Community image (ceifa/garrysmod-docker) around Valve's dedicated server (Steam app 4020, anonymous download).
+    # The server is Source: players connect to 27015/udp. Its extra command-line arguments come in one variable (ARGS);
+    # it is built here from the settings that are set, so a blank setting adds nothing. A Workshop collection (the id,
+    # not an addon's id) is downloaded by the server at every start. 27015/tcp is RCON and deliberately not published.
+    image: ceifa/garrysmod:latest
+    container_name: garrysmod
+    # srcds only writes its console to stdout when it has a terminal: without one the log stops after Steam's start-up lines
+    # and portal/readiness.py never sees the server come up (seen on the first real boot, 2026-10-10).
+    tty: true
+    stdin_open: true
+    ports:
+      - "27015:27015/udp"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      NAME: ${GARRYSMOD_SERVER_NAME:-SkippyVerse}      # one word: the image puts it on the command line unquoted, so a space cuts it short (seen live)
+      GAMEMODE: ${GARRYSMOD_GAMEMODE:-sandbox}
+      MAP: ${GARRYSMOD_MAP:-gm_construct}
+      MAXPLAYERS: ${GARRYSMOD_MAX_PLAYERS:-16}
+      ARGS: "${GARRYSMOD_WORKSHOP_COLLECTION:+ +host_workshop_collection ${GARRYSMOD_WORKSHOP_COLLECTION}}${GARRYSMOD_PASSWORD:+ +sv_password ${GARRYSMOD_PASSWORD}}${GARRYSMOD_EXTRA_ARGS:+ ${GARRYSMOD_EXTRA_ARGS}}"
+    volumes:
+      - ${DATA_DIR:-./data}/garrysmod/data:/home/gmod/server/garrysmod/data
+      - ${DATA_DIR:-./data}/garrysmod/addons:/home/gmod/server/garrysmod/addons
+    mem_limit: ${GARRYSMOD_MEM_LIMIT:-6g}
+    stop_grace_period: 1m

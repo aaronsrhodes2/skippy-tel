@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Alarms — Maker Portal{% endblock %}
+{% block app %}alarms{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}bell{% endblock %}
+{% block content %}
+{# Alarms & timers (alarms.py, the Captain only): the house's alarm clock (services/satellite/alarm_clock.py), one screen. Ringing, the whole
+   screen is Stop and Snooze. Else a control per alarm and timer (paged, never scrolled) and the add key. Words only for times and names. #}
+<style>
+  #alarms { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  #alarms .big { position: relative; z-index: 1; font: 700 clamp(26px, 8vw, 54px) var(--mono); color: var(--ink); letter-spacing: .02em; pointer-events: none; }
+  #alarms .unit.ring .big { font-size: clamp(34px, 12vw, 88px); }
+  #alarms .unit.ring .g { width: 38%; max-width: 120px; }
+  #alarms .unit .x { position: absolute; top: 6px; right: 6px; z-index: 3; }
+  #alarms .unit .sub { position: absolute; left: 10px; right: 44px; top: 12px; z-index: 1; font: 600 11px var(--mono); color: var(--muted); text-align: left;
+                       overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; padding-left: 18px; }
+  #alarms .unit[data-s="warn"] .plate { animation: alarmflash 1s steps(2, jump-none) infinite; }
+  @keyframes alarmflash { 50% { opacity: .25; } }
+  #alarms .pager { flex: none; display: flex; justify-content: center; align-items: center; gap: 12px; padding: 2px 0 6px; font: 600 12px var(--mono); color: var(--muted); }
+  #alarms .pager[hidden] { display: none; }
+  #add-sheet { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.94); display: flex; align-items: center; justify-content: center; }
+  #add-sheet[hidden] { display: none; }
+  #add-sheet .panel { width: min(420px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: 14px; padding: 18px; position: relative;
+                      border: 2px solid var(--accent); clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); }
+  #add-sheet .row { display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; }
+  #add-sheet input[type=time] { font: 700 40px var(--mono); color: var(--ink); background: #05090b; border: 1px solid var(--line); padding: 4px 10px; width: 100%; text-align: center; color-scheme: dark; }
+  #add-sheet input[type=text] { font: 600 15px var(--mono); color: var(--ink); background: #05090b; border: 1px solid var(--line); padding: 10px; width: 100%; }
+  #add-sheet .chip { font: 700 14px var(--mono); color: var(--accent); background: #05090b; border: 1px solid var(--accent); min-width: 40px; height: 40px; padding: 0 8px; cursor: pointer;
+                     clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px); display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+  #add-sheet .chip .g { width: 20px; height: 20px; }
+  #add-sheet .chip.on { background: var(--accent); color: #000; }
+  #add-sheet .top { display: flex; justify-content: flex-end; gap: 8px; }
+</style>
+<section id="alarms" data-state-url="{{ url_for('alarms.state') }}" data-do-url="{{ url_for('alarms.do') }}">
+  <div class="deck" id="alarm-deck" style="--rows: 1"></div>
+  <div class="pager" id="alarm-pager" hidden>
+    <button class="key sm" type="button" id="pg-prev" aria-label="Earlier" data-tel="alarms:pg-prev"><svg class="g"><use href="#g-prev"/></svg></button>
+    <span id="pg-n"></span>
+    <button class="key sm" type="button" id="pg-next" aria-label="Later" data-tel="alarms:pg-next"><svg class="g"><use href="#g-next"/></svg></button>
+  </div>
+</section>
+<div id="add-sheet" hidden>
+  <div class="panel">
+    <div class="top">
+      <button class="key" type="button" id="add-close" aria-label="Close" data-tel="alarms:add-close"><svg class="g"><use href="#g-x"/></svg></button>
+    </div>
+    <input type="time" id="add-time" value="06:30" aria-label="Time">
+    <div class="row" id="add-days" aria-label="Days (none: once)">
+      {% for d, l in [('mon','M'),('tue','T'),('wed','W'),('thu','T'),('fri','F'),('sat','S'),('sun','S')] %}<button type="button" class="chip" data-day="{{ d }}" aria-label="{{ d }}" data-tel="alarms:day">{{ l }}</button>{% endfor %}
+    </div>
+    <div class="row" id="add-where">
+      <button type="button" class="chip on" data-where="upstairs" aria-label="Upstairs" data-tel="alarms:upstairs"><svg class="g"><use href="#g-up"/></svg></button>
+      <button type="button" class="chip" data-where="downstairs" aria-label="Downstairs" data-tel="alarms:downstairs"><svg class="g"><use href="#g-down"/></svg></button>
+      <button type="button" class="chip" data-where="everywhere" aria-label="Everywhere" data-tel="alarms:everywhere"><svg class="g"><use href="#g-home"/></svg></button>
+    </div>
+    <input type="text" id="add-label" maxlength="60" placeholder="…" aria-label="Label">
+    <div class="row">
+      <button type="button" class="chip" id="add-set" aria-label="Set the alarm" data-tel="alarms:add-set"><svg class="g"><use href="#g-bell"/></svg><svg class="g"><use href="#g-send"/></svg></button>
+    </div>
+    <div class="row" id="add-timer" aria-label="Start a timer">
+      <svg class="g" style="width:22px;height:22px;color:var(--accent)" aria-hidden="true"><use href="#g-clock"/></svg>
+      {% for m in [1, 5, 10, 15, 30, 60] %}<button type="button" class="chip" data-min="{{ m }}" aria-label="{{ m }} minute timer" data-tel="alarms:minute-timer">{{ m }}</button>{% endfor %}
+    </div>
+  </div>
+</div>
+<script>
+(() => {
+  const root = document.getElementById("alarms"), deck = document.getElementById("alarm-deck");
+  const pager = document.getElementById("alarm-pager"), sheet = document.getElementById("add-sheet");
+  let S = null, page = 0, pending = new Set(), timer = null;
+  const busy = (what) => [...pending].some((m) => m.split("#")[0] === what);
+  const PER = () => (matchMedia("(orientation: landscape) and (max-height: 520px)").matches ? 9 : (matchMedia("(min-width: 760px) and (orientation: landscape)").matches ? 7 : 5));
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+  const clock = (hhmm) => { const [h, m] = hhmm.split(":").map(Number); return `${h % 12 || 12}:${String(m).padStart(2, "0")}`; };
+  const left = (due) => { const s = Math.max(0, Math.round(due - Date.now() / 1000)); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+                          return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`; };
+  const unit = (o) => `<div class="unit named${o.cls ? " " + o.cls : ""}"${o.s ? ` data-s="${o.s}"` : ""} title="${esc(o.title)}">
+      <i class="plate"></i>${o.op ? `<button data-tel="alarms:esc" class="hit" type="button" data-op="${o.op}" aria-label="${esc(o.title)}"></button>` : ""}
+      <i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      ${o.sub ? `<span class="sub">${esc(o.sub)}</span>` : ""}
+      ${o.big ? `<span class="big">${esc(o.big)}</span>` : `<svg class="g" aria-hidden="true"><use href="#g-${o.glyph}"/></svg>`}
+      ${o.name ? `<span class="name">${esc(o.name)}</span>` : ""}
+      ${o.x ? `<button data-tel="alarms:cancel" class="key sm x" type="button" data-op="${o.x}" aria-label="Cancel"><svg class="g"><use href="#g-trash"/></svg></button>` : ""}</div>`;
+
+  function render() {
+    if (!S) return;
+    let units = [];
+    if (!S.online) units.push({glyph: "server", name: "skippy-pc", s: "off", title: "skippy-pc isn't reporting: the house can't ring. The portal will message your phone at alarm time."});
+    if (S.ringing) {
+      const r = S.ringing, lamp = busy("stop") || busy("snooze") ? "idle" : "warn";
+      units.push({cls: "ring", glyph: "x", s: lamp, op: "stop", name: clock(r.hhmm) + (r.label ? " · " + r.label : ""), title: "Stop"});
+      units.push({cls: "ring", glyph: "moon", s: lamp, op: "snooze", name: "9", title: "Snooze 9 minutes"});
+      deck.innerHTML = units.map(unit).join("");
+      deck.style.setProperty("--rows", units.length); deck.style.setProperty("--rows-wide", 1); deck.style.setProperty("--rows-side", 1);
+      pager.hidden = true;
+      return;
+    }
+    for (const a of S.alarms) units.push({big: clock(a.hhmm), sub: [a.kind === "reminder" ? "✎ " + a.label : "", a.repeat || a.when, a.where].filter(Boolean).join(" · "),
+                                         name: a.kind === "alarm" ? a.label : "", s: busy("cancel:" + a.id) ? "idle" : "on",
+                                         x: "cancel:" + a.id, title: `${a.kind} ${a.when}`});
+    for (const t of S.timers) units.push({big: left(t.due), cls: "tmr", sub: "◷ " + t.room, name: t.label, s: "on", x: "cancel_timer:" + t.label + "|" + t.room, title: "timer " + t.label});
+    const per = PER(), pages = Math.max(1, Math.ceil((units.length + 1) / per));
+    page = Math.min(page, pages - 1);
+    let shown = units.slice(page * per, page * per + per - 1);
+    if (page === pages - 1) shown.push({glyph: "new", op: "add", title: "Set an alarm or a timer"});
+    else shown.push(units[page * per + per - 1]);
+    deck.innerHTML = shown.map(unit).join("");
+    const n = shown.length;
+    deck.style.setProperty("--rows", Math.ceil(n / 2)); deck.style.setProperty("--rows-wide", Math.ceil(n / 4)); deck.style.setProperty("--rows-side", Math.ceil(n / 5));
+    pager.hidden = pages < 2;
+    document.getElementById("pg-n").textContent = `${page + 1}/${pages}`;
+  }
+
+  async function tick() {
+    try {
+      const r = await fetch(root.dataset.stateUrl, {headers: {"Accept": "application/json"}});
+      if (r.ok) {
+        S = await r.json();
+        for (const m of [...pending]) if (m.includes("#") && !S.pending.includes(m.split("#")[1])) pending.delete(m);
+        render();
+      }
+    } catch (e) { /* a dead zone: next time */ }
+    clearTimeout(timer);
+    timer = setTimeout(tick, document.hidden ? 15000 : (S && (S.ringing || pending.size) ? 1500 : 5000));
+  }
+
+  async function act(body, mark) {
+    pending.add(mark);
+    render();
+    try {
+      const r = await fetch(root.dataset.doUrl, {method: "POST", headers: {"Content-Type": "application/json", "X-Alarms": "1"}, body: JSON.stringify(body)});
+      if (r.ok) { const v = await r.json(); pending.delete(mark); pending.add(mark.split("#")[0] + "#" + v.id); }
+      else pending.delete(mark);
+    } catch (e) { pending.delete(mark); }
+    tick();
+  }
+
+  deck.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-op]");
+    if (!b) return;
+    const op = b.dataset.op;
+    if (op === "add") { sheet.hidden = false; return; }
+    if (op === "stop" || op === "snooze") return act({op}, op);
+    if (op.startsWith("cancel:")) return act({op: "cancel", id: Number(op.slice(7))}, op);
+    if (op.startsWith("cancel_timer:")) { const [label, room] = op.slice(13).split("|"); return act({op: "cancel_timer", label, room}, op); }
+  });
+  document.getElementById("pg-prev").onclick = () => { page = Math.max(0, page - 1); render(); };
+  document.getElementById("pg-next").onclick = () => { page += 1; render(); };
+  let x0 = null;
+  deck.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; }, {passive: true});
+  deck.addEventListener("touchend", (e) => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null;
+                                             if (Math.abs(dx) > 50) { page = Math.max(0, page + (dx < 0 ? 1 : -1)); render(); } });
+
+  // the add sheet
+  document.getElementById("add-close").onclick = () => { sheet.hidden = true; };
+  sheet.addEventListener("click", (e) => {
+    const c = e.target.closest(".chip");
+    if (!c) return;
+    if (c.dataset.day) c.classList.toggle("on");
+    if (c.dataset.where) { for (const w of sheet.querySelectorAll("[data-where]")) w.classList.toggle("on", w === c); }
+    if (c.dataset.min) { sheet.hidden = true; act({op: "timer", seconds: Number(c.dataset.min) * 60}, "timer"); }
+  });
+  document.getElementById("add-set").onclick = () => {
+    const days = [...sheet.querySelectorAll("[data-day].on")].map((d) => d.dataset.day);
+    const repeat = !days.length ? "once" : days.length === 7 ? "daily" : days.join(",") === "mon,tue,wed,thu,fri" ? "weekdays" : days.join(",") === "sat,sun" ? "weekends" : days.join(",");
+    const where = (sheet.querySelector("[data-where].on") || {}).dataset?.where || "upstairs";
+    sheet.hidden = true;
+    act({op: "add", time: document.getElementById("add-time").value, repeat, where, label: document.getElementById("add-label").value}, "add");
+  };
+  setInterval(() => { if (S && S.timers.length && !S.ringing) render(); }, 1000);   // the timers count down between syncs
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
+  tick();
+})();
+</script>
+{% endblock %}

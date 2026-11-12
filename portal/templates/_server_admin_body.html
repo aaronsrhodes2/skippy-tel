@@ -1,0 +1,38 @@
+{# The body of the Server admin card, rendered inside the page (_server_admin.html) and by the admin-only refresh route.
+   Needs `panel` (admin_panel.build) and `game`. Everything is autoescaped: mod names come from files on the server disk. #}
+{% if panel.have_facts %}
+  <div class="facts">
+    <div><b>Installed version</b>{{ panel.version or 'not reported by this server' }}</div>
+    <div><b>Image</b>{{ panel.image or 'unknown' }}
+      {% if panel.image_age %}<br><span class="muted">built {{ panel.image_age }} ({{ panel.image_built }})</span>{% endif %}</div>
+    <div><b>Last updated</b>
+      {% if panel.updated_ago %}server files {{ panel.updated_ago }} <span class="muted">({{ panel.updated }})</span>
+      {% elif panel.image_age %}with its image, built {{ panel.image_age }}
+      {% else %}unknown{% endif %}</div>
+    <div><b>Running since</b>{{ panel.started_ago or 'unknown' }}</div>
+  </div>
+  <p class="help">Read from the server {{ panel.as_of or 'a moment ago' }}{% if panel.stale %} &mdash; that snapshot is stale, so these may be out of date{% endif %}.</p>
+{% elif panel.on %}
+  <p class="help">Waiting for the server's first snapshot (about a minute after it boots).</p>
+{% else %}
+  <p class="help">The server isn't running {{ game.name }} right now, so installed versions aren't available. The policy below is what the next start will do.</p>
+{% endif %}
+
+<h4>Mods</h4>
+{% if panel.mods %}
+  <table>
+    <tr><th>Mod</th><th>Version</th><th></th></tr>
+    {% for m in panel.mods %}
+      <tr><td>{{ m.name }}</td><td class="ver">{{ m.version }}</td><td class="muted">{{ m.role }}</td></tr>
+    {% endfor %}
+  </table>
+{% endif %}
+{% if panel.mods_note %}<p class="help">{{ panel.mods_note }}</p>{% endif %}
+{% if panel.mod_update %}<p class="help">{{ panel.mod_update }}</p>{% endif %}
+
+<h4>Update policy</h4>
+<ul class="policy">
+  {% for p in panel.policy %}
+    <li><span class="pill state state-{{ p.state }}">{{ p.state }}</span> <b>{{ p.what }}.</b> {{ p.text }}</li>
+  {% endfor %}
+</ul>

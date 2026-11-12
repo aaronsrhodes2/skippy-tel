@@ -1,0 +1,875 @@
+"""The private Skippy: the Captain's chat on his dashboard, backed by Claude Code
+(Sonnet 5.5, medium effort, full permissions) running on skippy-pc through the bridge.
+
+Only an admin can reach it (the portal's Google login plus ADMIN_EMAILS). The
+portal can't reach skippy-pc, so a message becomes a job in the home queue; the
+home reporter carries it to the bridge, reads the run's events back and pushes
+them here (`push`), and the browser polls `read`. Nothing about the run lives
+only in this process: the bridge keeps the truth and the reporter re-sends
+whatever a fresh portal instance is missing, so a deploy of this very portal,
+mid-task, loses nothing. A deploy also wipes the home job queue, so the reporter
+does not wait to be asked: it compares what the bridge holds with what `listing`
+says this portal holds, every few seconds, and pushes the difference (the
+reconciler in services/home-reporter/reporter.py). Events are text and short
+activity lines (tool name and its command or path), never tool output.
+"""
+from __future__ import annotations
+
+import base64
+import binascii
+import json
+import re
+import secrets
+import threading
+import time
+
+MAX_MESSAGE = 120_000          # ~30K tokens: a pasted log or file fits; the same in the portal, the bridge and the log
+MAX_EVENTS = 5000
+MAX_TEXT = 4000
+MAX_LISTED = 50            # records `listing` shows the reporter's reconciler
+KEEP_S = 6 * 3600          # how long a finished task stays readable
+JOB_TTL = 2 * 3600         # how long the home queue keeps offering an unanswered task
+OFFLINE_S = 30             # no push at all for this long: skippy-pc isn't picking it up
+BRIEF_SILENCE_S = 300      # home silent no longer than this (a reporter restart, a portal deploy): a message waits for it
+WAIT_NOTE = "In line: Skippy is finishing another run first."
+# A run that has gone this long, of another conversation in the same line, is paused for a message that waits behind it, and carries on right after (the
+# Captain, 2026-11-05: a Core run of eleven hours held every chat "in line", purple and orange alike, and none ever came back).
+PREEMPT_AFTER_S = 300
+PAUSED_TEXT = "Paused so another chat could go first. I'll carry on right after."
+CONTINUE_MESSAGE = ("[The house: you were paused so the Captain's other chat could use Skippy first. Carry on with the task from where you stopped; "
+                    "do not start over. Look at the repository first to see what is already done.]")
+QUEUE_KEY = "workshop/queue.json"      # the messages still in line, kept in the bucket: a deploy wipes this process's memory, and with it the line
+QUEUE_MAX = 20
+RESTORE_MAX_AGE_S = 2 * 3600           # a message older than this is not worth running when the portal comes back
+_TASK = re.compile(r"[0-9a-f]{16}")
+STALL_S = 120              # a running task silent for this long: the link to skippy-pc broke
+WANT_S = 120               # a person's "check again" is still worth answering for this long
+_CLIENT_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")          # a message id the page made (crypto.randomUUID, dashes kept or dropped)
+CLIENT_ID_KEEP_S = 900                                  # the same id within this long is the same message
+_CONV = re.compile(r"[A-Za-z0-9-]{8,64}")
+MAX_ATTACHED = 4                   # pictures that may go with one message (pasted screenshots, mostly)
+MAX_IMAGE_B64 = 1_200_000          # one picture, as base64 (the page shrinks each to about a megabyte)
+MAX_IMAGES_B64 = 3_200_000         # all of them together
+_DATA_URL = re.compile(r"data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/]+={0,2})")
+_MAGIC = {"jpeg": b"\xff\xd8\xff", "png": b"\x89PNG\r\n\x1a\n", "webp": b"RIFF"}
+
+
+def clean_images(raw) -> list[dict]:
+    """The pictures that came with a message, as [{"mime", "b64"}], or ValueError saying what is wrong. Nothing is trusted
+    from the page: each must be a base64 data URL of a jpeg, png or webp whose first bytes say so, within the size limits."""
+    if not raw:
+        return []
+    if not isinstance(raw, list) or len(raw) > MAX_ATTACHED:
+        raise ValueError(f"At most {MAX_ATTACHED} pictures to a message.")
+    out, total = [], 0
+    for item in raw:
+        m = _DATA_URL.fullmatch(item) if isinstance(item, str) else None
+        if not m:
+            raise ValueError("A picture wasn't a jpeg, png or webp.")
+        kind, b64 = m.group(1), m.group(2)
+        total += len(b64)
+        if len(b64) > MAX_IMAGE_B64 or total > MAX_IMAGES_B64:
+            raise ValueError("Those pictures are too big: try fewer or smaller ones.")
+        try:
+            head = base64.b64decode(b64[:16] + "=" * (-len(b64[:16]) % 4))[:8]
+            base64.b64decode(b64, validate=True)
+        except ValueError:
+            raise ValueError("A picture was damaged.") from None
+        if not head.startswith(_MAGIC[kind]):
+            raise ValueError("A picture wasn't what it said it was.")
+        out.append({"mime": "image/" + kind, "b64": b64})
+    return out
+_PROJECT = re.compile(r"[a-z0-9][a-z0-9-]{0,39}")
+_STATES = ("running", "done", "error")
+_FINAL = ("done", "error")
+DEFAULT_PROJECT = "skippytel"   # every message before projects, and the one a home that doesn't list projects offers
+LIST_TTL = 120                  # how long a Conversations-list (or one-conversation) job waits for skippy-pc
+MAX_LISTED_CONVERSATIONS = 50
+
+
+class Busy(Exception):
+    """Skippy is still on the last message."""
+
+
+class NotReady(Exception):
+    """skippy-pc's bridge isn't reporting the workshop."""
+
+
+class Paused(NotReady):
+    """The Captain paused the private Skippy from the Admin page (recovery.py). A NotReady, so the chat's send route
+    answers it as it answers any other "can't take a message now": a plain sentence, 503."""
+
+
+PAUSED_MESSAGE = ("The private Skippy is paused (Admin page, Private Skippy card). Turn it back on there to send messages. "
+                  "A deploy of the portal also turns it back on.")
+
+
+def _clean(event) -> dict | None:
+    """One event from home, reduced to what the chat may show; anything odd is dropped."""
+    if not isinstance(event, dict):
+        return None
+    if event.get("t") == "text" and isinstance(event.get("text"), str):
+        return {"t": "text", "text": event["text"][:MAX_TEXT]}
+    if event.get("t") == "tool" and isinstance(event.get("name"), str):
+        return {"t": "tool", "name": event["name"][:40],
+                "detail": str(event.get("detail") or "")[:(1200 if event["name"] == "TodoWrite" else 200)]}      # (a checklist is long)
+    if event.get("t") == "ship":
+        return ship_event(event)
+    if event.get("t") == "chain":                 # the reply's toolchain (services/claude-bridge/toolchain.py): the strip under the reply
+        return chain_event(event)
+    if event.get("t") == "retry":                 # the model (or the bridge) went away: the run waits and goes on (workshop_engine)
+        attempt = event.get("attempt")
+        return {"t": "retry", "attempt": attempt if isinstance(attempt, int) and 0 < attempt < 10_000 else 1,
+                "why": str(event.get("why") or "")[:200]}
+    if (event.get("t") == "picture" and isinstance(event.get("id"), str) and re.fullmatch(r"[0-9a-f]{16}", event["id"])
+            and isinstance(event.get("prompt"), str) and event["prompt"].strip()):
+        return {"t": "picture", "id": event["id"], "prompt": " ".join(event["prompt"].split())[:900],   # a picture to make (patient.py)
+                **({"tier": "hq"} if event.get("tier") == "hq" else {})}                                  # (the quality tier)
+    if (event.get("t") == "popup" and isinstance(event.get("id"), str) and re.fullmatch(r"[0-9a-f]{16}", event["id"])
+            and isinstance(event.get("name"), str) and re.fullmatch(r"[a-z][a-z0-9_]{2,39}", event["name"])
+            and isinstance(event.get("args"), dict) and len(json.dumps(event["args"])) <= MAX_POPUP_ARGS):
+        return {"t": "popup", "id": event["id"], "name": event["name"], "args": event["args"]}      # a pop-up job (popups.py)
+    return None
+
+
+CHAIN_KINDS = ("read", "edit", "shell", "git", "web", "deploy", "house", "other")   # toolchain.KINDS: the strip's colours
+MAX_CHAIN_CALLS = 240
+_FLAG_RULE = re.compile(r"[a-z][a-z-]{1,30}")
+
+
+def chain_event(event: dict) -> dict:
+    """A run's toolchain, checked: each call's name, summary, kind, time and outcome, and the claims its words made that its calls
+    don't show. Always an event (an empty chain at worst), so the relay's count stays in step with the bridge's list."""
+    calls = []
+    for c in (event.get("calls") if isinstance(event.get("calls"), list) else [])[:MAX_CHAIN_CALLS]:
+        if not isinstance(c, dict) or not isinstance(c.get("n"), str):
+            continue
+        ms = c.get("ms")
+        call = {"n": c["n"][:40], "d": str(c.get("d") or "")[:160], "k": c.get("k") if c.get("k") in CHAIN_KINDS else "other"}
+        if isinstance(ms, int) and not isinstance(ms, bool) and 0 <= ms < 86_400_000:
+            call["ms"] = ms
+        if isinstance(c.get("ok"), bool):
+            call["ok"] = c["ok"]
+        calls.append(call)
+    flags = [{"rule": f["rule"], "text": str(f.get("text") or "")[:200]}
+             for f in (event.get("flags") if isinstance(event.get("flags"), list) else [])[:12]
+             if isinstance(f, dict) and isinstance(f.get("rule"), str) and _FLAG_RULE.fullmatch(f["rule"])]
+    more = event.get("more")
+    return {"t": "chain", "calls": calls, "flags": flags,
+            **({"more": more} if isinstance(more, int) and not isinstance(more, bool) and 0 < more < 1_000_000 else {})}
+
+
+MAX_POPUP_ARGS = 4000          # a SKIPPY_POPUP line's JSON arguments (the bridge caps them at the same)
+MAX_POPUP_INPUT_B64 = 1_400_000  # the file a SKIPPY_POPUP line names, as base64: what a chat attachment may be (attachments.MAX_B64_EACH)
+
+
+def popup_input(event: dict) -> dict | None:
+    """The file that came with a pop-up event (the bridge read it from the path the agent named), checked, or None."""
+    given = event.get("input")
+    if (isinstance(given, dict) and isinstance(given.get("ref"), str) and re.fullmatch(r"[0-9a-f]{32}", given["ref"])
+            and isinstance(given.get("type"), str) and re.fullmatch(r"(image|audio)/[a-z0-9.+-]{1,40}", given["type"])):
+        return {"ref": given["ref"], "type": given["type"], "name": re.sub(r"[^\w .()+-]", "_", str(given.get("name") or "file"))[:80]}
+    if not isinstance(given, dict) or not isinstance(given.get("b64"), str) or len(given["b64"]) > MAX_POPUP_INPUT_B64:
+        return None
+    if not isinstance(given.get("type"), str) or not re.fullmatch(r"(image|audio)/[a-z0-9.+-]{1,40}", given["type"]):
+        return None
+    try:
+        base64.b64decode(given["b64"], validate=True)
+    except ValueError:
+        return None
+    return {"b64": given["b64"], "type": given["type"], "name": re.sub(r"[^\w .()+-]", "_", str(given.get("name") or "file"))[:80]}
+
+
+_SHA = re.compile(r"[0-9a-f]{40}")
+_REPO = re.compile(r"[A-Za-z0-9-]{1,39}/[A-Za-z0-9._-]{1,100}")
+_BRANCH = re.compile(r"[A-Za-z0-9._/-]{1,100}")
+MAX_SHIPS = 200                 # commits the ship card may ask about (the newest the portal has seen pushed)
+
+
+MAX_IMAGE_BYTES = 12 * 1024 * 1024   # a picture the agent shows (was 400 KB: the event pipe's need, not the Captain's)
+MAX_IMAGES_PER_TASK = 3
+MAX_IMAGES = 40                 # held in memory across all tasks...
+IMAGES_BUDGET = 150_000_000     # ...and at most this many bytes of them; the oldest go first
+MAX_PUSH = 20 * 1024 * 1024     # one push from home (POST /home/workshop/<task>): room for one full-size picture as base64
+_B64 = re.compile(r"[A-Za-z0-9+/]+={0,2}")
+
+
+# What the agent may show, by its own first bytes: a picture, a 3D model (binary glTF 2, from tools/voxel/render.py --glb), sound,
+# video, or a file to save. The chat shows each inline (an image, a model to rotate, a player) or as a one-tap download: the browser
+# is only a window, everything is made on skippy-pc (the Captain, 2026-10-25). Served as exactly that type with nosniff: never
+# anything a browser would run. The bridge's workshop_engine.image_mime has the same rules (a test keeps them equal).
+def sniff(data: bytes) -> str | None:
+    if data[:4] == b"glTF" and data[4:8] == b"\x02\x00\x00\x00":
+        return "model/gltf-binary"
+    if data[:3] == b"ID3" or (len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0):
+        return "audio/mpeg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return "audio/wav"
+    if data[:4] == b"OggS":
+        return "audio/ogg"
+    if data[:4] == b"fLaC":
+        return "audio/flac"
+    if data[4:8] == b"ftyp":
+        return "video/mp4"
+    if data[:4] == b"MThd":
+        return "audio/midi"
+    if data[:4] == b"PK\x03\x04":
+        return "application/zip"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    return None
+
+
+MAGICS = ("image/png", "image/jpeg", "model/gltf-binary", "audio/mpeg", "audio/wav", "audio/ogg", "audio/flac", "video/mp4",
+          "audio/midi", "application/zip")
+SAVE_ONLY = ("audio/midi", "application/zip")            # nothing a browser plays: a download card
+
+
+def image_event(event) -> tuple[dict, bytes] | None:
+    """A screenshot from the bridge ({"t": "image", mime, name, b64}), or None. Exactly that shape; the bytes must decode,
+    be at most MAX_IMAGE_BYTES, and BE the type they claim by their own first bytes (PNG or JPEG only): the portal serves
+    them as that type with nosniff, so nothing else (an HTML page, a script) can ever be served from here."""
+    if not isinstance(event, dict) or set(event) != {"t", "mime", "name", "b64"} or event["t"] != "image":
+        return None
+    mime, name, b64 = event["mime"], event["name"], event["b64"]
+    if mime not in MAGICS or not isinstance(name, str) or not isinstance(b64, str):
+        return None
+    if len(b64) > (MAX_IMAGE_BYTES * 4) // 3 + 4 or not _B64.fullmatch(b64):
+        return None
+    try:
+        data = base64.b64decode(b64, validate=True)
+    except (ValueError, binascii.Error):
+        return None
+    if sniff(data) != mime or len(data) > MAX_IMAGE_BYTES:
+        return None
+    clean_name = re.sub(r"[^A-Za-z0-9._-]", "_", name)[:80] or "screenshot"
+    return {"t": "image", "mime": mime, "name": clean_name}, data
+
+
+def ship_event(event) -> dict | None:
+    """The run pushed a commit (services/claude-bridge: Workshop._ship_check). Exactly this shape or nothing: every field
+    a string matching its pattern (a 40-hex sha, an owner/name repo...), the subject one line of at most 200 characters.
+    The page shows the subject as text and builds links only from the checked repo and sha."""
+    if not isinstance(event, dict) or set(event) != {"t", "project", "repo", "branch", "sha", "subject", "workflow"}:
+        return None
+    if not all(isinstance(event[k], str) for k in event):
+        return None
+    if not (_PROJECT.fullmatch(event["project"]) and _REPO.fullmatch(event["repo"]) and _BRANCH.fullmatch(event["branch"])
+            and _SHA.fullmatch(event["sha"]) and event["workflow"] in ("", "deploy.yml", "deploy.yaml")):
+        return None
+    return {"t": "ship", "project": event["project"], "repo": event["repo"], "branch": event["branch"],
+            "sha": event["sha"], "subject": " ".join(event["subject"].split())[:200], "workflow": event["workflow"]}
+
+
+def _str(value, limit: int) -> str:
+    return " ".join(value.split())[:limit] if isinstance(value, str) else ""
+
+
+def _when(value) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else None
+
+
+def _conversation_summary(raw) -> dict | None:
+    """One row of the Conversations list, from skippy-pc's answer, or None if it isn't one."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("conv"), str) or not _CONV.fullmatch(raw["conv"]):
+        return None
+    project = raw.get("project") if isinstance(raw.get("project"), str) and _PROJECT.fullmatch(raw["project"]) else DEFAULT_PROJECT
+    turns = raw.get("turns")
+    return {"conv": raw["conv"], "project": project, "who": _str(raw.get("who"), 200),
+            "title": _str(raw.get("title"), 90) or "(no message)", "started": _when(raw.get("started")),
+            "last": _when(raw.get("last")) or _when(raw.get("started")),
+            "turns": turns if isinstance(turns, int) and not isinstance(turns, bool) and 0 <= turns < 100000 else 0,
+            "state": raw.get("state") if raw.get("state") in ("running", "done", "error") else "done"}
+
+
+def _conversation(raw) -> dict | None:
+    """A whole conversation from skippy-pc, reduced to what the chat shows: his messages, and Skippy's events as _clean
+    allows them."""
+    head = _conversation_summary({**raw, "turns": 0}) if isinstance(raw, dict) else None
+    if head is None or not isinstance(raw.get("turns"), list):
+        return None
+    turns = []
+    for t in raw["turns"][-200:]:
+        if not isinstance(t, dict):
+            continue
+        events = [e for e in (_clean(x) for x in (t.get("events") if isinstance(t.get("events"), list) else [])[-MAX_EVENTS:]) if e]
+        task = t.get("task") if isinstance(t.get("task"), str) and re.fullmatch(r"[a-f0-9]{8,32}", t["task"]) else None
+        turns.append({"task": task,                # lets the page follow a turn that is still running
+                      "message": t["message"][:MAX_MESSAGE] if isinstance(t.get("message"), str) else "",
+                      "events": events, "at": _when(t.get("at")),
+                      "state": t.get("state") if t.get("state") in ("running", "done", "error") else "done",
+                      "error": t["error"][:500] if isinstance(t.get("error"), str) else None})
+    trimmed = raw.get("trimmed")
+    return {"conv": head["conv"], "project": head["project"], "who": head["who"], "title": head["title"],
+            "turns": turns, "trimmed": trimmed if isinstance(trimmed, int) and trimmed > 0 else 0}
+
+
+class Workshop:
+    def __init__(self, home, clock=time.time, store=None):
+        self.home, self.clock = home, clock
+        self.started = clock()                   # (a portal that just started hasn't heard from home yet)
+        self._tasks: dict[str, dict] = {}
+        self._lock = threading.Lock()
+        self.store = store                       # the bucket (tabletop.store_from_env), or None: the line is then kept in memory only, as it always was
+        self._restored = store is None           # the stored line is read back once, by the first call after a start
+        self._qseq, self._qwritten, self._qlock = 0, 0, threading.Lock()
+        # The Admin page's kill switch. In this process's memory on purpose: the agent can't reach it (its only way into
+        # the portal is a push and a deploy, and pausing cancels its run first). A deploy forgets it; the card says so.
+        self.paused: dict | None = None          # {"by": email, "at": epoch s} while paused
+        # The commits a run said it pushed, by (owner, sha): the ship card asks about these and nothing else, so a page
+        # (or anyone with the Captain's cookie) can't make the portal query GitHub for an arbitrary commit.
+        self._ships: dict[tuple[str, str], dict] = {}
+        self.on_final = None                     # (news: dict) -> None: a run this process saw going has ended (notify.py)
+        self.on_picture = None                   # (owner, id, prompt, tier) -> None: the agent asked for a picture (patient.py, app.py)
+        self.on_popup = None                     # (owner, id, name, args, input) -> None: the agent asked for a pop-up job (popups.py)
+        self._images: dict[tuple[str, int], tuple[str, str, bytes]] = {}   # (task, n) -> (owner, mime, bytes)
+        # A message the page sent carries a client id; sending the same one again (a double tap, a retry after a slow or lost reply)
+        # returns the task it already made, never a second one (2026-10-27: a slow send looked unsent, was tried twice, and queued twice).
+        self._client_ids: dict[tuple[str, str], tuple[str, float]] = {}      # (owner, client_id) -> (task, when)
+
+    def _keep_image(self, task: str, rec: dict, got) -> dict:
+        """Hold a checked screenshot (call with the lock held) and return the event the chat gets: {"t":"image","n":..}
+        (the page loads it from /me/workshop/image), or a plain line when it was refused or the task has its three."""
+        n = sum(1 for e in rec["events"] if e["t"] == "image")
+        if got is None or n >= MAX_IMAGES_PER_TASK:
+            return {"t": "text", "text": "(a screenshot couldn't be shown)"}
+        event, data = got
+        self._images[(task, n)] = (rec["owner"], event["mime"], data)
+        while len(self._images) > MAX_IMAGES or (len(self._images) > 1 and sum(len(v[2]) for v in self._images.values()) > IMAGES_BUDGET):
+            self._images.pop(next(iter(self._images)))
+        return {**event, "n": n}
+
+    def image(self, owner: str, task: str, n: int) -> tuple[str, bytes] | None:
+        """(mime, bytes) of a screenshot in one of `owner`'s tasks, else None."""
+        with self._lock:
+            held = self._images.get((task, n))
+        if held is None or held[0] != owner:
+            return None
+        return held[1], held[2]
+
+    def remember_ship(self, owner: str, ship: dict) -> None:
+        with self._lock:
+            self._ships.pop((owner, ship["sha"]), None)
+            self._ships[(owner, ship["sha"])] = ship
+            while len(self._ships) > MAX_SHIPS:
+                self._ships.pop(next(iter(self._ships)))
+
+    def ship(self, owner: str, sha: str) -> dict | None:
+        with self._lock:
+            return self._ships.get((owner, sha))
+
+    def ready(self) -> bool:
+        return self.home.can("workshop")
+
+    def _prune(self) -> None:
+        now = self.clock()
+        for task in [t for t, r in self._tasks.items() if now - r["touched"] > KEEP_S]:
+            del self._tasks[task]
+
+    def _live_state(self, rec: dict) -> str:
+        """The record's state, corrected for a link that went quiet."""
+        state, now = rec["state"], self.clock()
+        if state == "queued" and now - rec["created"] > OFFLINE_S:
+            return "offline"
+        if state == "running" and now - rec["pushed_at"] > STALL_S:
+            return "stalled"
+        return state
+
+    def projects(self) -> list[dict]:
+        """The projects the chat offers: what skippy-pc lists, else just SkippyTel (a home reporter older than projects)."""
+        return self.home.workshop_projects() or [{"id": DEFAULT_PROJECT, "name": "SkippyTel",
+                                                  "repo": "aaronsrhodes2/skippy-tel", "branch": "main"}]
+
+    def brains(self) -> list[dict]:
+        """Who the agent can think with: what skippy-pc lists, else Claude alone (a home reporter older than brains)."""
+        return self.home.workshop_brains() or [{"id": "core", "label": "Skippy Core", "ready": True}]
+
+    def project(self, pid: str | None) -> dict | None:
+        """One offered project by id ("" = the default), or None when skippy-pc doesn't offer it."""
+        pid = pid or DEFAULT_PROJECT
+        return next((p for p in self.projects() if p["id"] == pid), None)
+
+    def send(self, owner: str, conv: str, message: str, project: str = "", images=None, brain: str = "core", client_id: str = "") -> str:
+        return self.send_once(owner, conv, message, project, images, brain, client_id)[0]
+
+    def send_once(self, owner: str, conv: str, message: str, project: str = "", images=None, brain: str = "core",
+                  client_id: str = "") -> tuple[str, bool]:
+        """send(), and whether this was the same message again (its client id was already sent: the task it made is returned, nothing new)."""
+        client_id = (client_id or "").strip()
+        if client_id and not _CLIENT_ID.fullmatch(client_id):
+            raise ValueError("Bad message id.")
+        if client_id:
+            with self._lock:
+                self._prune_client_ids()
+                seen = self._client_ids.get((owner, client_id))
+                if seen and seen[0] in self._tasks:
+                    return seen[0], True
+        message = (message or "").strip()
+        pictures = clean_images(images)
+        if not message and not pictures:
+            raise ValueError("Say something.")
+        if len(message) > MAX_MESSAGE:
+            raise ValueError(f"That's too long: keep it under {MAX_MESSAGE} characters.")
+        if not _CONV.fullmatch(conv or ""):
+            raise ValueError("Bad conversation id.")
+        chosen = self.project(project)
+        if chosen is None:                       # only a project skippy-pc lists can be worked on: never a typed repo
+            raise ValueError("skippy-pc doesn't offer that project.")
+        project = chosen["id"]
+        brain = brain or "core"
+        if self.paused:
+            raise Paused(PAUSED_MESSAGE)
+        if self.briefly_silent():
+            # Home went quiet a moment ago (the reporter or the bridge restarting, this portal just deployed): what it offers
+            # isn't known right now, so a known brain is taken on trust and the message waits for home to come back. The
+            # bridge checks the brain again; refusing here only made the Captain send it twice (2026-10-24).
+            if brain not in ("claude", "core"):
+                raise ValueError("skippy-pc doesn't offer that brain.")
+        else:
+            offered = next((b for b in self.brains() if b["id"] == brain), None)
+            if offered is None:                      # only a brain skippy-pc lists: never a typed model
+                raise ValueError("skippy-pc doesn't offer that brain.")
+            if not offered["ready"]:
+                raise NotReady(f"{offered['label']} isn't reachable from skippy-pc right now.")
+            if not self.ready():
+                why = self.home.capability_reason("workshop")        # the bridge's own words, when it said why
+                raise NotReady(f"skippy-pc's workshop isn't ready: {why}" if why else
+                               "skippy-pc's workshop isn't answering: is the bridge running, and is home reporting?")
+        job = {"conv": conv, "message": message, "who": owner, "project": project, "brain": brain,
+               **({"images": pictures} if pictures else {})}
+        with self._lock:
+            self._restore()
+            self._prune()
+            # One run at a time per brain on skippy-pc (Core's coder, Claude): a message sent while another of its line runs (another
+            # conversation, another device, the voice) waits in line here and goes when that one ends, instead of being refused. The
+            # job id is the task id everywhere: here, in the reporter and in the bridge.
+            task = secrets.token_hex(8)
+            now = self.clock()
+            self._tasks[task] = {"owner": owner, "conv": conv, "events": [], "state": "waiting", "error": None,
+                                 "created": now, "pushed_at": now, "touched": now, "stop": False, "project": project, "brain": brain,
+                                 "message": message[:200], "job": job}   # its first words, for the notification (never shown to others)
+            if client_id:
+                self._client_ids[(owner, client_id)] = (task, now)
+            self._preempt_for(task)               # a long run of another chat in this line is paused so this message goes first, and carries on after it
+            self._advance()
+        return task, False
+
+    def _prune_client_ids(self) -> None:
+        now = self.clock()
+        for key in [k for k, (_, at) in self._client_ids.items() if now - at > CLIENT_ID_KEEP_S]:
+            del self._client_ids[key]
+
+    @staticmethod
+    def _lane(rec: dict) -> str:
+        """Who thinks decides the line (the Captain, 2026-11-05: 'even on auto orange it stuck me in line and never followed up'): Skippy Core's coder is one
+        resource and Claude is another, so a long Core run no longer holds up a Claude message, and the other way round."""
+        return rec.get("brain") or "core"
+
+    def ahead_of(self, task: str) -> int:
+        """(lock held) How many other tasks are in front of this waiting one in its own line: the running or queued one, and any waiting longer.
+        Counts only; never what they are or whose."""
+        rec = self._tasks.get(task)
+        if not rec or rec["state"] != "waiting":
+            return 0
+        lane = self._lane(rec)
+        busy = sum(1 for t, r in self._tasks.items() if t != task and r["state"] in ("queued", "running") and self._lane(r) == lane)
+        line = [t for t, r in sorted(((t, r) for t, r in self._tasks.items() if r["state"] == "waiting" and self._lane(r) == lane),
+                                     key=lambda tr: tr[1]["created"])]   # as _advance orders it
+        return busy + line.index(task)
+
+    def briefly_silent(self) -> bool:
+        """Home isn't reporting, but only for a moment: a restart or a deploy, not a skippy-pc that is off."""
+        if self.home.online():
+            return False
+        age = self.home.age()
+        return age < BRIEF_SILENCE_S if age is not None else self.clock() - self.started < BRIEF_SILENCE_S
+
+    def _advance(self) -> None:
+        """(lock held) In each line (Skippy Core's, Claude's), when nothing of that line is queued or running, hand its oldest message to skippy-pc."""
+        self._restore()
+        for lane in sorted({self._lane(r) for r in self._tasks.values() if r["state"] == "waiting"}):
+            if any(r["state"] in ("queued", "running") and self._lane(r) == lane for r in self._tasks.values()):
+                continue
+            line = sorted(((t, r) for t, r in self._tasks.items() if r["state"] == "waiting" and self._lane(r) == lane), key=lambda tr: tr[1]["created"])
+            if not line:
+                continue
+            task, rec = line[0]
+            job = rec["job"]
+            self.home.start("workshop", rec["owner"], ttl=JOB_TTL, _id=task, **job)
+            rec["job"] = {k: v for k, v in job.items() if k != "images"}      # (kept until skippy-pc has taken it up, for a restart of this process: see push; the pictures are home's now)
+            now = self.clock()
+            rec["state"], rec["created"], rec["pushed_at"] = "queued", now, now
+        self._persist()
+
+    def front_age(self, task: str) -> int:
+        """(lock held) How long the oldest run in front of this waiting message's line has been going, in seconds (0: none)."""
+        rec = self._tasks.get(task)
+        if not rec:
+            return 0
+        lane, now = self._lane(rec), self.clock()
+        return max([int(now - r["created"]) for t, r in self._tasks.items() if t != task and r["state"] in ("queued", "running") and self._lane(r) == lane] or [0])
+
+    def _preempt_for(self, new_task: str) -> None:
+        """(lock held) A message that would wait behind a LONG run of another conversation in its line goes first: that run is paused (stopped, the way the Stop key
+        stops it) and queued to carry on right after, instead of the message waiting hours (the Captain, 2026-11-05: an eleven-hour Core run held every chat
+        "in line", purple and orange alike, and none ever came back). A run younger than PREEMPT_AFTER_S is left to finish, and so is one of the same conversation
+        (a follow-up queues behind its own chat, as before)."""
+        new = self._tasks.get(new_task)
+        if not new:
+            return
+        lane, now = self._lane(new), self.clock()
+        for task, rec in list(self._tasks.items()):
+            if (task == new_task or rec["state"] != "running" or self._lane(rec) != lane or rec["conv"] == new["conv"]
+                    or rec.get("preempted") or now - rec["created"] < PREEMPT_AFTER_S):
+                continue
+            self._withdraw(task, rec, "paused")
+            rec["preempted"] = True
+            again = secrets.token_hex(8)
+            self._tasks[again] = {"owner": rec["owner"], "conv": rec["conv"], "events": [], "state": "waiting", "error": None,
+                                  "created": new["created"] + 0.001, "pushed_at": now, "touched": now, "stop": False, "project": rec.get("project") or DEFAULT_PROJECT,
+                                  "brain": rec.get("brain") or "core", "message": "(carrying on)", "auto": True,
+                                  "job": {"conv": rec["conv"], "message": CONTINUE_MESSAGE, "who": rec["owner"], "project": rec.get("project") or DEFAULT_PROJECT,
+                                          "brain": rec.get("brain") or "core"}}
+
+    # ── the line survives a deploy ──
+    def _restore(self) -> None:
+        """(lock held) The messages that were still in line when the last instance of this portal ended come back into line, once. A deploy wipes this process's
+        memory, and a message that was waiting (or handed to home and not yet taken up) was simply gone: the chat stayed "in line" for ever."""
+        if self._restored:
+            return
+        self._restored = True
+        try:
+            raw = self.store.get(QUEUE_KEY)
+            items = json.loads(raw) if raw else []
+        except Exception:  # noqa: BLE001 — a bucket that doesn't answer: the line starts empty, as it always did
+            return
+        now = self.clock()
+        for it in items if isinstance(items, list) else []:
+            try:
+                task, owner, conv, created = str(it["task"]), str(it["owner"]), str(it["conv"]), float(it["created"])
+                raw_job = it["job"]
+                job = {"conv": conv, "message": str(raw_job["message"])[:MAX_MESSAGE], "who": owner,
+                       "project": str(raw_job.get("project") or DEFAULT_PROJECT), "brain": str(raw_job.get("brain") or "core")}
+            except (KeyError, TypeError, ValueError):
+                continue
+            if (not _TASK.fullmatch(task) or task in self._tasks or not _CONV.fullmatch(conv) or not owner or now - created > RESTORE_MAX_AGE_S
+                    or not _PROJECT.fullmatch(job["project"]) or job["brain"] not in ("core", "claude") or not job["message"].strip()):
+                continue
+            self._tasks[task] = {"owner": owner, "conv": conv, "events": [], "state": "waiting", "error": None, "created": created, "pushed_at": now,
+                                 "touched": now, "stop": False, "project": job["project"], "brain": job["brain"], "message": job["message"][:200],
+                                 "job": job, **({"auto": True} if it.get("auto") else {})}
+
+    def _persist(self) -> None:
+        """(lock held) Write the line down (messages waiting, or handed to home and not yet taken up), off this thread so the bucket never slows a poll. No
+        pictures: they are big and rare."""
+        if self.store is None:
+            return
+        items = []
+        for t, r in sorted(self._tasks.items(), key=lambda kv: kv[1]["created"]):
+            if r["state"] in ("waiting", "queued") and isinstance(r.get("job"), dict):
+                job = {k: r["job"][k] for k in ("conv", "message", "who", "project", "brain") if k in r["job"]}
+                items.append({"task": t, "owner": r["owner"], "conv": r["conv"], "created": r["created"], "project": r.get("project"),
+                              "brain": r.get("brain"), "message": r.get("message", ""), "auto": bool(r.get("auto")), "job": job})
+        items = items[:QUEUE_MAX]
+        sig = json.dumps([i["task"] for i in items])
+        if sig == getattr(self, "_qsig", None):
+            return
+        self._qsig = sig
+        self._qseq += 1
+        th = threading.Thread(target=self._write_queue, args=(self._qseq, items), daemon=True)
+        self._qthreads = [x for x in getattr(self, "_qthreads", []) if x.is_alive()] + [th]
+        th.start()
+
+    def _write_queue(self, seq: int, items: list) -> None:
+        with self._qlock:
+            if seq < self._qwritten:
+                return                                # a newer line has been written since
+            try:
+                if items:
+                    self.store.put(QUEUE_KEY, json.dumps(items, separators=(",", ":")).encode(), "application/json")
+                else:
+                    self.store.delete(QUEUE_KEY)
+            except Exception:  # noqa: BLE001 — a line that can't be kept is as good as no line, which is how it was
+                return
+            self._qwritten = seq
+
+    def flush(self) -> None:
+        """Wait for the line's writes to finish (tests, and a clean stop)."""
+        for th in list(getattr(self, "_qthreads", [])):
+            th.join(5)
+
+    def read(self, owner: str, task: str, after: int = 0) -> dict:
+        """What the browser polls: events from index `after`, and the state. A task that is still going also says
+        `quiet_s`, how long since skippy-pc last pushed anything, so the page can tell "no word for 45 s" from a
+        slow task. `next` never goes below `after`: a record rebuilt by a fresh portal holds fewer events for a
+        moment, and a page that took `next` at its word would show the same events twice."""
+        with self._lock:
+            self._restore()                       # (the line a deploy wiped comes back before anyone is told "unknown")
+            rec = self._tasks.get(task)
+            if not rec or rec["owner"] != owner:
+                return {"state": "unknown", "events": [], "next": max(0, after), "error": None}
+            now = self.clock()
+            rec["touched"] = now
+            self._advance()                       # (a run that ended, or a deploy that lost it: the next in line goes)
+            state = self._live_state(rec)
+            if state in ("queued", "running", "waiting"):
+                self.home.touch_chat()            # keep the reporter's quick poll going while someone watches
+            after = max(0, after)
+            out = {"state": state, "error": rec["error"], "events": rec["events"][after:],
+                   "next": max(after, len(rec["events"])), "project": rec.get("project") or DEFAULT_PROJECT}
+            if rec.get("preempted") and state in _FINAL:
+                out["error"] = PAUSED_TEXT        # not "stopped": nobody pressed Stop, it carries on by itself behind the message that went first
+            if state == "waiting":
+                out["ahead"] = self.ahead_of(task)                 # "2 ahead of you" (another chat, another device): counts only
+                out["front_s"] = self.front_age(task)              # ... and how long the run in front has been going
+            if rec["state"] in ("queued", "running"):          # the raw state: "stalled" and "offline" are these, gone quiet
+                out["quiet_s"] = max(0, int(now - rec["pushed_at"]))
+            return out
+
+    def _withdraw(self, task: str, rec: dict, why: str) -> None:
+        """Stop a task from the portal's side (call with the lock held). `stop` rides back to the bridge on the next push
+        (the reporter relays it), and the home job is finished so the queue never offers it again: a message still waiting
+        for skippy-pc (home off, the reporter down) is then never delivered, not delivered hours later beside the next one
+        (audit L06). A task skippy-pc never acknowledged ends here, since nothing else will end it; a running one ends when
+        the bridge says it stopped."""
+        rec["stop"] = True
+        self.home.finish(task, {"error": why})
+        rec.pop("job", None)                      # a message still in line never goes
+        if rec["state"] in ("queued", "waiting"):
+            rec["state"], rec["error"] = "error", "stopped"
+            rec["touched"] = self.clock()
+
+    def stop(self, owner: str, task: str) -> bool:
+        with self._lock:
+            rec = self._tasks.get(task)
+            if not rec or rec["owner"] != owner or rec["state"] not in ("queued", "running", "waiting"):
+                return False
+            if rec["state"] == "waiting":         # still in line: it just leaves it
+                rec["state"], rec["error"], rec["touched"] = "error", "stopped", self.clock()
+                rec.pop("job", None)
+            else:
+                self._withdraw(task, rec, "stopped")
+            self._advance()
+            self._persist()
+        return True
+
+    # ── the Admin page's controls (recovery.py; admin only, like everything here) ──────────────────────
+    def current(self) -> dict | None:
+        """The newest task that hasn't ended, else the newest one: what the Private Skippy card shows."""
+        now = self.clock()
+        with self._lock:
+            if not self._tasks:
+                return None
+            ordered = sorted(self._tasks.items(), key=lambda kv: kv[1]["created"], reverse=True)
+            task, rec = next(((t, r) for t, r in ordered if r["state"] not in _FINAL), ordered[0])
+            return {"task": task, "state": self._live_state(rec), "error": rec["error"], "owner": rec["owner"],
+                    "age_s": max(0, int(now - rec["created"])), "quiet_s": max(0, int(now - rec["pushed_at"])),
+                    "stopping": rec["stop"] and rec["state"] not in _FINAL, "open": rec["state"] not in _FINAL}
+
+    def cancel_current(self) -> list[str]:
+        """Stop every task that hasn't ended (normally the one current run), for anyone. Returns their ids."""
+        with self._lock:
+            open_ = [(t, r) for t, r in self._tasks.items() if r["state"] in ("queued", "running", "waiting")]
+            for task, rec in open_:
+                self._withdraw(task, rec, "cancelled from the Admin page")
+        return [t for t, _ in open_]
+
+    def clear_stuck(self) -> list[str]:
+        """End every unfinished record in the portal now, whatever skippy-pc last said: the chat stops spinning on it and
+        Send comes back. Anything still running at home is told to stop (and a late "running" from it can't reopen an
+        ended record: see push). Returns the ids cleared."""
+        with self._lock:
+            open_ = [(t, r) for t, r in self._tasks.items() if r["state"] not in _FINAL]
+            for task, rec in open_:
+                self._withdraw(task, rec, "cleared from the Admin page")
+                rec["state"], rec["error"], rec["touched"] = "error", "Cleared from the Admin page.", self.clock()
+        return [t for t, _ in open_]
+
+    def pause(self, by: str) -> list[str]:
+        """Refuse new messages and cancel the current run. Returns the ids cancelled."""
+        self.paused = {"by": by, "at": self.clock()}
+        return self.cancel_current()
+
+    def resume(self) -> bool:
+        was, self.paused = self.paused is not None, None
+        return was
+
+    def resync(self, owner: str, task: str) -> dict:
+        """The browser's "check again": ask skippy-pc to look at this task now. Marks it (so the home listing shows
+        `want`) and starts the reporter's quick polling; the reporter's reconciler answers within seconds."""
+        with self._lock:
+            rec = self._tasks.get(task)
+            if rec is not None and rec["owner"] == owner:
+                rec["resync"] = self.clock()
+        self.home.touch_chat()
+        seen = self.read(owner, task, 0)                 # state only: the browser keeps the events it already has
+        return {"state": seen["state"], "error": seen["error"]}
+
+    # ── conversations: the Captain's history, read from skippy-pc (the bridge keeps it, conversation_log.py) ──────
+    # A job each time (the portal can't reach home; a report carrying every conversation would be big for nothing), and
+    # the browser polls `history_result` for the answer. What comes back is checked and cut here, field by field, since
+    # it comes from whatever holds the home token, and only conversations the asker owns are shown.
+    def ask_history(self, owner: str, conv: str | None = None) -> str:
+        if conv is not None and not _CONV.fullmatch(conv):
+            raise ValueError("Bad conversation id.")
+        if conv is None:
+            return self.home.start("workshop_conversations", owner, ttl=LIST_TTL)
+        return self.home.start("workshop_conversation", owner, ttl=LIST_TTL, conv=conv)
+
+    # ── New folder: D:/Aaron/development/<name>, its git repo and the private GitHub repo (services/claude-bridge/new_folder.py) ──
+    def new_folder(self, owner: str, name: str) -> str:
+        name = str(name or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 _-]{1,59}", name):
+            raise ValueError("A folder name is letters, digits, spaces or hyphens (2 to 60).")
+        return self.home.start("workshop_new_folder", owner, ttl=200, name=name)
+
+    def new_folder_result(self, owner: str, job: str) -> dict:
+        """{"state", "folder": {id, name, repo, remote, why}} once done; only the fields the picker needs, checked."""
+        if not re.fullmatch(r"[a-f0-9]{8,32}", job or "") or self.home.owner_of(job) != owner:
+            return {"state": "unknown"}
+        seen = self.home.peek(job)
+        if seen["state"] != "done":
+            return {"state": seen["state"], "error": seen.get("error")}
+        body = seen.get("result") if isinstance(seen.get("result"), dict) else {}
+        folder = {k: str(body.get(k) or "")[:300] for k in ("id", "name", "repo", "remote", "why")}
+        if not _PROJECT.fullmatch(folder["id"]) or folder["remote"] not in ("created", "pending"):
+            return {"state": "error", "error": "skippy-pc's answer didn't look like a new folder."}
+        return {"state": "done", "folder": folder}
+
+    def history_result(self, owner: str, job: str) -> dict:
+        """{"state": "running"|"done"|"error"|"unknown", ...}: for a finished list job `conversations`, for a finished
+        one-conversation job `conversation`."""
+        if not re.fullmatch(r"[a-f0-9]{8,32}", job or "") or self.home.owner_of(job) != owner:
+            return {"state": "unknown"}
+        seen = self.home.peek(job)
+        if seen["state"] != "done":
+            return {"state": seen["state"], "error": seen.get("error")}
+        body = seen.get("result") if isinstance(seen.get("result"), dict) else {}
+        if isinstance(body.get("conversations"), list):
+            listed = [c for c in (_conversation_summary(x) for x in body["conversations"]) if c and c["who"] == owner]
+            return {"state": "done", "conversations": [{k: v for k, v in c.items() if k != "who"}
+                                                       for c in listed[:MAX_LISTED_CONVERSATIONS]]}
+        conv = _conversation(body)
+        if conv is None or conv.pop("who") != owner:
+            return {"state": "error", "error": "That conversation isn't yours, or skippy-pc doesn't have it."}
+        for turn in conv["turns"]:                       # a reopened conversation's ship cards may be asked about too
+            for event in turn["events"]:
+                if event["t"] == "ship":
+                    self.remember_ship(owner, event)
+        return {"state": "done", "conversation": conv}
+
+    def listing(self) -> dict:
+        """What this portal holds, for the reporter's reconciler (GET /home/workshop, home token): every record, newest
+        first. `state` is the live one (so "stalled" shows), `have` is how many events it holds, `final` says it ended
+        (done or error: its events are all it will ever get), `quiet_s` is the time since the last push and `want` says a
+        person pressed "check again" lately. The owner is included: the caller holds the home token, the one that
+        pushes records for any owner anyway."""
+        now = self.clock()
+        with self._lock:
+            self._prune()
+            newest_first = sorted(reversed(list(self._tasks.items())), key=lambda kv: kv[1]["created"], reverse=True)
+            tasks = [{"task": task, "state": self._live_state(rec), "have": len(rec["events"]),
+                      "final": rec["state"] in _FINAL, "owner": rec["owner"],
+                      "quiet_s": max(0, int(now - rec["pushed_at"])),
+                      "want": rec.get("resync") is not None and now - rec["resync"] <= WANT_S}
+                     for task, rec in newest_first[:MAX_LISTED]]
+        return {"tasks": tasks}
+
+    def push(self, task: str, who: str, conv: str, start: int, events: list, state: str, error: str | None,
+             project: str = "", finished_age_s=None) -> dict:
+        """From skippy-pc (the home reporter). `start` is the index of events[0] in the run's own list; if this
+        portal is missing earlier ones (it was redeployed), the reply's `have` tells the reporter to send them.
+
+        Several things push the same run (the streaming relay, and the reconciler that repairs whatever the relay
+        missed), so a push is idempotent and can arrive late:
+          * a push is a heartbeat: any accepted one refreshes `pushed_at`, running or not, even with no new event;
+          * events are only ever appended at `have`, so repeating or overlapping a push adds nothing twice;
+          * a task that ended stays ended against a stale "running" (a relay that read the run a moment before
+            the reconciler delivered its end must not reopen it); a new end may still replace an old one, because
+            the bridge is the truth and the reporter's own guess ("lost contact") may have been wrong;
+          * only a push that really made the record final stops the home queue offering the job: one that left a
+            gap (`start` beyond `have`) said nothing about the end;
+          * a task nobody owns can't be created: no one could ever read it."""
+        if not isinstance(events, list) or not isinstance(start, int) or start < 0 or state not in _STATES:
+            raise ValueError("bad push")
+        now = self.clock()
+        ended = False
+        age = finished_age_s if isinstance(finished_age_s, (int, float)) and not isinstance(finished_age_s, bool) else None
+        with self._lock:
+            rec = self._tasks.get(task)
+            created = rec is None
+            if rec is None:                       # a fresh instance: rebuild the record from what home says
+                if not str(who or "").strip():
+                    raise ValueError("a task with no owner")
+                rec = self._tasks[task] = {"owner": str(who), "conv": str(conv), "events": [], "state": "running",
+                                           "error": None, "created": now, "pushed_at": now, "touched": now,
+                                           "stop": False,
+                                           "project": project if _PROJECT.fullmatch(project or "") else DEFAULT_PROJECT}
+            if created and age is not None:
+                rec["relearned"] = True           # a run that was already over when this portal first heard of it
+            was = rec["state"]
+            have = len(rec["events"])
+            shipped, pictures, wanted = [], [], []
+            if start <= have:
+                for event in events[have - start:]:
+                    if isinstance(event, dict) and event.get("t") == "image":
+                        if len(rec["events"]) < MAX_EVENTS:
+                            # Always one event in its place (a picture, or a line saying it couldn't be shown), so the
+                            # reporter's `have` count stays in step with the bridge's list.
+                            rec["events"].append(self._keep_image(task, rec, image_event(event)))
+                        continue
+                    cleaned = _clean(event)
+                    if cleaned and len(rec["events"]) < MAX_EVENTS + (cleaned["t"] == "chain"):   # (the bridge keeps one place past the cap for it)
+                        rec["events"].append(cleaned)
+                        if cleaned["t"] == "ship":
+                            shipped.append(cleaned)
+                        if cleaned["t"] == "picture" and self.on_picture:
+                            pictures.append((rec["owner"], cleaned["id"], cleaned["prompt"], cleaned.get("tier", "")))
+                        if cleaned["t"] == "popup" and self.on_popup:
+                            wanted.append((rec["owner"], cleaned["id"], cleaned["name"], cleaned["args"], popup_input(event)))
+                if state != "running":
+                    rec["state"], rec["error"], ended = state, (str(error)[:500] if error else None), True
+                elif rec["state"] not in _FINAL:
+                    rec["state"], rec["error"] = "running", None
+            elif state == "running" and rec["state"] == "queued":
+                rec["state"] = "running"          # a gap, but skippy-pc is on it: it is no longer waiting to be picked up
+            rec["pushed_at"], rec["touched"] = now, now
+            rec.pop("resync", None)               # this is the answer to anyone's "check again"
+            if rec["state"] != "queued":
+                rec.pop("job", None)              # skippy-pc has taken it up (or it is over): no need to keep it for a restart of this process
+            if ended:
+                self._advance()                   # the next message in line goes now
+            else:
+                self._persist()
+            reply = {"have": len(rec["events"]), "stop": rec["stop"]}
+            owner = rec["owner"]
+            # Tell the Captain (portal/notify.py) only when THIS process saw the run going and now sees it end: a record
+            # rebuilt from a run that was already over (a deploy, then the reporter catching up) is never news.
+            final_news = None
+            if ended and not created and was in ("queued", "running") and not rec.get("relearned") and not rec.get("preempted"):
+                last_text = next((e["text"] for e in reversed(rec["events"]) if e["t"] == "text"), "")
+                final_news = {"owner": owner, "task": task, "project": rec.get("project") or DEFAULT_PROJECT,
+                              "request": rec.get("message") or "", "state": state, "error": rec["error"],
+                              "last_text": last_text, "finished_age_s": age}
+        for ship in shipped:
+            self.remember_ship(owner, ship)
+        for who, picture_id, prompt, tier in pictures:              # outside the lock: it writes to the bucket
+            try:
+                self.on_picture(who, picture_id, prompt, tier)
+            except Exception as exc:  # noqa: BLE001 — a picture that can't be queued must never fail the reporter's push
+                print(json.dumps({"event": "agent_picture_failed", "job": picture_id, "why": str(exc)[:300]}), flush=True)
+        for who, job_id, name, args, given in wanted:                # the same for pop-ups
+            try:
+                self.on_popup(who, job_id, name, args, given)
+            except Exception as exc:  # noqa: BLE001 — a pop-up that can't be queued must never fail the reporter's push
+                print(json.dumps({"event": "agent_popup_failed", "job": job_id, "why": str(exc)[:300]}), flush=True)
+        if final_news is not None and self.on_final is not None:
+            try:
+                self.on_final(final_news)
+            except Exception:  # noqa: BLE001 — a notification must never fail the reporter's push
+                pass
+        if ended:
+            self.home.finish(task, {"result": {"state": state}})     # stop offering the job to the reporter
+        return reply

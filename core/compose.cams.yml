@@ -1,0 +1,40 @@
+# The Captain's cameras on SkippyCore (2026-11-01: Reolink PoE doorbell and cameras, all local, no vendor account; Ring is off the list).
+#
+# Deployed with the rest of the stack when /etc/skippy-core/core.env says CORE_CAMS=1 (core/install/cams.sh sets it, once cams.json names
+# at least one camera: Frigate won't start with none). The simulator and CI leave it out.
+#
+#   frigate   the open-source recorder (pinned): records around what it sees, finds people and cars on the CPU (OpenVINO), keeps a
+#             snapshot of each. Its config is made by core/cams/frigate_config.py from /etc/skippy-core/cams.json into
+#             ${CORE_STATE}/frigate/config. Its API and page (5000, no login) are on 127.0.0.1 and reach the tailnet only through
+#             `tailscale serve` :7355 (install/cams.sh), never the Funnel. skippy-pc's hub reads its events there (services/satellite/cams.py)
+#             and says them on the pods. The doorbell's button press does not come through here: the hub hears it from the doorbell itself.
+x-logging: &cams-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  frigate:
+    image: ghcr.io/blakeblackshear/frigate:0.18.2@sha256:fd60f99ffd4eb6c42360ed4e14953e270586f239309ab3983e55b2e97ffac09a
+    restart: unless-stopped
+    logging: *cams-logging
+    shm_size: "512mb"                            # Frigate's frame buffers: ~64 MB a camera at the detect size, room for a few
+    env_file: ${CAMS_ENV:-/etc/skippy-core/cams.env}   # FRIGATE_REOLINK_PASSWORD only (install/cams.sh copies it from vault.env)
+    environment:
+      - LIBVA_DRIVER_NAME=radeonsi               # the Radeon decodes the streams (preset-vaapi)
+      - TZ=America/Los_Angeles
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${VIDEO_GID:-44}"
+      - "${RENDER_GID:-992}"
+    ports:
+      - "127.0.0.1:7355:5000"
+    volumes:
+      - ${CORE_STATE:-/var/lib/skippy-core}/frigate/config:/config
+      - ${CORE_STATE:-/var/lib/skippy-core}/frigate/media:/media/frigate
+      - type: tmpfs                              # the recording cache: in memory, not the SSD
+        target: /tmp/cache
+        tmpfs:
+          size: 1000000000

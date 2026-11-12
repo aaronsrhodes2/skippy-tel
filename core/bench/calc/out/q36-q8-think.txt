@@ -1,0 +1,933 @@
+<thinking>
+Here's a thinking process:
+
+1.  **Understand the Goal**: The user wants a Python module with a function `evaluate(expr: str) -> float` that evaluates arithmetic expressions. Constraints:
+   - No `eval`, `exec`, `compile`, or `ast` module.
+   - Support: integers, decimals (3, 0.5, .5, 2.), binary operators (+, -, *, /, %, **), unary (+, -), parentheses, spaces.
+   - Precedence & Associativity: Python's standard rules.
+   - Specific behavior for `**`: right-associative, binds tighter than unary minus on its left (e.g., `-2**2 == -4`, `2**-1 == 0.5`). Wait, Python's actual behavior: `-2**2` is `-(2**2) = -4`. `2**-1` is `2**(-1) = 0.5`. So unary minus has lower precedence than `**`. This matches standard Python.
+   - Error handling: `ValueError` for malformed input (empty, unbalanced parens, dangling operator, two numbers in a row, unknown chars). `ZeroDivisionError` for div/mod by zero.
+   - Output: Single Python code block.
+
+2.  **Key Challenges**:
+   - Implementing a recursive descent parser or Pratt parser for proper precedence and associativity without `ast`.
+   - Handling tokenization correctly (numbers, operators, parentheses, spaces).
+   - Handling unary operators correctly, especially distinguishing unary minus from binary minus.
+   - Handling the specific `**` precedence rule (right-associative, higher than unary minus).
+   - Error handling for malformed expressions.
+
+3.  **Design - Tokenizer**:
+   - Scan the string, skip spaces.
+   - Identify tokens: NUMBER, PLUS, MINUS, STAR, SLASH, PERCENT, POW, LPAREN, RPAREN.
+   - Number format: optional digits, optional dot, optional digits. Must match Python's float literal rules roughly, but we can just use regex or manual parsing. The prompt says: integers and decimals like 3, 0.5, .5, 2.
+   - Let's use regex for tokenization: `r'\d+\.\d*|\d*\.\d+|\d+|[+\-*/%()]|\*\*|\s+'`
+   - Wait, `**` should be checked before `*`. Order matters in regex.
+   - Let's refine: `r'\d+\.\d*|\d*\.\d+|\d+|\*\*|[+\-*/%()]|\s+'`
+   - Actually, Python's float literals can also have exponents, but the prompt only mentions "integers and decimals like 3, 0.5, .5, 2." I'll stick to that.
+   - I'll parse tokens manually to have better control and error reporting.
+
+   Manual tokenizer approach:
+   - Iterate through string.
+   - Skip whitespace.
+   - If digit or dot: parse number.
+   - If `*` and next is `*`: POW.
+   - Else if `+`, `-`, `*`, `/`, `%`, `(`, `)`: respective tokens.
+   - Else: raise ValueError.
+   - Store tokens in a list.
+
+4.  **Design - Parser (Recursive Descent)**:
+   Precedence levels (lowest to highest):
+   1. Addition/Subtraction (`+`, `-`)
+   2. Multiplication/Division/Modulo (`*`, `/`, `%`)
+   3. Exponentiation (`**`) - Right associative
+   4. Unary (`+`, `-`)
+   5. Primary (numbers, parentheses)
+
+   Wait, Python's precedence:
+   `**` (right associative)
+   `+x`, `-x`, `~x` (unary)
+   `*`, `/`, `//`, `%`
+   `+`, `-` (binary)
+   Actually, in Python: `-2**2` is `-4`, meaning `**` binds tighter than unary `-`. So precedence: `**` > unary `-` > `*`/`/`/`%` > `+`/`-`.
+   Let's verify: Python docs say: "The power operator ** binds less tightly than a unary operator on its left...". So `**` > unary `-`.
+   So precedence order (lowest to highest):
+   - expr: `+` `-` (binary)
+   - term: `*` `/` `%`
+   - power: `**` (right associative)
+   - unary: `+` `-`
+   - atom: number, `( expr )`
+
+   Wait, right associativity for `**` means we parse it recursively from the right. In recursive descent, this is typically handled by:
+   ```python
+   def parse_power():
+       base = parse_unary()
+       if match('**'):
+           exponent = parse_power() # right associative
+           return base ** exponent
+       return base
+   ```
+   But wait, if `**` is right associative, `2**3**4` should be `2**(3**4)`. The above handles it.
+   What about unary minus? `-2**2` -> `-(2**2)`. So `parse_unary` should handle `-`, and call `parse_power`. That matches: `parse_unary` -> `-` -> `parse_power` -> `2**2` -> 4 -> result -4. Correct.
+   What about `2**-1`? `parse_power` gets base `2`, sees `**`, calls `parse_power` recursively, which sees `-`, calls `parse_unary`, which sees `-`, calls `parse_power`, gets `1`, returns -1. `2**-1` = 0.5. Correct.
+
+   Let's define the grammar clearly:
+   ```
+   expr     -> term (('+' | '-') term)*
+   term     -> power (('*' | '/' | '%') power)*
+   power    -> unary ('**' power)?   # right associative
+   unary    -> ('+' | '-') unary | primary
+   primary  -> NUMBER | '(' expr ')'
+   ```
+   Wait, is `power -> unary ('**' power)?` correct for right associativity?
+   Let's trace `2**3**4`:
+   `parse_power` calls `parse_unary` -> returns 2.
+   Sees `**`, calls `parse_power` recursively.
+   Inner `parse_power` calls `parse_unary` -> returns 3.
+   Sees `**`, calls `parse_power` recursively.
+   Innermost `parse_power` calls `parse_unary` -> returns 4.
+   No `**`, returns 4.
+   Inner returns `3**4` = 81.
+   Outer returns `2**81`. Correct.
+
+   What about `-2**3`?
+   `parse_unary` sees `-`, calls `parse_power`.
+   `parse_power` calls `parse_unary` -> returns 2.
+   Sees `**`, calls `parse_power` -> returns 3.
+   Returns `2**3` = 8.
+   `parse_unary` returns -8. Correct.
+
+   What about `2*-3`?
+   `parse_term` calls `parse_power` -> returns 2.
+   Sees `*`, calls `parse_power` -> calls `parse_unary` -> sees `-`, calls `parse_power` -> returns 3. Returns -3.
+   Returns `2 * -3` = -6. Correct.
+
+   This grammar matches Python's precedence and associativity exactly.
+
+5.  **Implementation Details**:
+   - Tokenizer: I'll create a list of tokens. Each token is a tuple `(type, value)`.
+   - Types: `NUMBER`, `PLUS`, `MINUS`, `STAR`, `SLASH`, `PERCENT`, `POW`, `LPAREN`, `RPAREN`, `EOF`.
+   - Parser class or functions with index pointer.
+   - Need to handle errors: empty input, unbalanced parens, dangling operator, two numbers in a row, unknown chars.
+   - Two numbers in a row: e.g., `2 3`. The grammar will catch this because after a primary/number, we expect an operator or end/`/`. If we see another number, it's a syntax error.
+   - Dangling operator: e.g., `2 +`. After `+`, we expect a term/power/unary/primary. If we hit EOF or `)`, it's an error.
+   - Unbalanced parens: checked during parsing or tokenization.
+   - I'll implement a simple recursive descent parser with an index.
+
+   Let's draft the tokenizer:
+   ```python
+   def tokenize(expr: str):
+       tokens = []
+       i = 0
+       n = len(expr)
+       while i < n:
+           if expr[i].isspace():
+               i += 1
+               continue
+           if expr[i].isdigit() or expr[i] == '.':
+               j = i
+               has_dot = False
+               while j < n and (expr[j].isdigit() or (expr[j] == '.' and not has_dot)):
+                   if expr[j] == '.':
+                       has_dot = True
+                   j += 1
+               # Validate number format: must have at least one digit
+               num_str = expr[i:j]
+               if not any(c.isdigit() for c in num_str):
+                   raise ValueError("Invalid number")
+               tokens.append(('NUMBER', float(num_str)))
+               i = j
+           elif expr[i] == '*':
+               if i + 1 < n and expr[i+1] == '*':
+                   tokens.append(('POW', '**'))
+                   i += 2
+               else:
+                   tokens.append(('STAR', '*'))
+                   i += 1
+           elif expr[i] in '+-*/%()':
+               tokens.append((expr[i], expr[i]))
+               i += 1
+           else:
+               raise ValueError(f"Unknown character: {expr[i]}")
+       tokens.append(('EOF', None))
+       return tokens
+   ```
+   Wait, the prompt says "Raise ValueError for anything malformed: empty input, unbalanced parentheses, a dangling operator, two numbers in a row, unknown characters."
+   I should check for empty input explicitly.
+   Also, number validation: `.5` and `2.` are allowed. My tokenizer handles them. But I need to ensure it doesn't accept just `.`. The condition `not any(c.isdigit() for c in num_str)` handles that.
+   What about `1.2.3`? The loop stops at the second dot because `has_dot` becomes True. So it parses `1.2`, leaves `.3` for next iteration, which will fail as unknown char or dangling dot. That's fine.
+
+   Now the parser:
+   ```python
+   class Parser:
+       def __init__(self, tokens):
+           self.tokens = tokens
+           self.pos = 0
+
+       def current(self):
+           return self.tokens[self.pos]
+
+       def consume(self, expected_type=None):
+           tok = self.current()
+           if expected_type and tok[0] != expected_type:
+               raise ValueError(f"Expected {expected_type}, got {tok[0]}")
+           self.pos += 1
+           return tok
+
+       def parse(self):
+           if self.current()[0] == 'EOF':
+               raise ValueError("Empty expression")
+           result = self.parse_expr()
+           if self.current()[0] != 'EOF':
+               raise ValueError(f"Unexpected token: {self.current()[0]}")
+           return result
+
+       def parse_expr(self):
+           left = self.parse_term()
+           while self.current()[0] in ('+', '-'):
+               op = self.consume()[0]
+               right = self.parse_term()
+               if op == '+':
+                   left = left + right
+               else:
+                   left = left - right
+           return left
+
+       def parse_term(self):
+           left = self.parse_power()
+           while self.current()[0] in ('*', '/', '%'):
+               op = self.consume()[0]
+               right = self.parse_power()
+               if op == '*':
+                   left = left * right
+               elif op == '/':
+                   if right == 0:
+                       raise ZeroDivisionError("division by zero")
+                   left = left / right
+               else: # '%'
+                   if right == 0:
+                       raise ZeroDivisionError("modulo by zero")
+                   left = left % right
+           return left
+
+       def parse_power(self):
+           base = self.parse_unary()
+           if self.current()[0] == 'POW':
+               self.consume()
+               exponent = self.parse_power() # right associative
+               return base ** exponent
+           return base
+
+       def parse_unary(self):
+           if self.current()[0] in ('+', '-'):
+               op = self.consume()[0]
+               operand = self.parse_unary()
+               if op == '-':
+                   return -operand
+               return operand
+           return self.parse_primary()
+
+       def parse_primary(self):
+           tok = self.current()
+           if tok[0] == 'NUMBER':
+               self.consume()
+               return tok[1]
+           elif tok[0] == '(':
+               self.consume()
+               val = self.parse_expr()
+               if self.current()[0] != ')':
+                   raise ValueError("Unbalanced parentheses")
+               self.consume()
+               return val
+           else:
+               raise ValueError(f"Unexpected token: {tok[0]}")
+   ```
+
+   Wait, I need to check for "two numbers in a row" and "dangling operator". The grammar naturally handles these:
+   - Two numbers: `parse_expr` -> `parse_term` -> `parse_power` -> `parse_unary` -> `parse_primary` consumes number. Then `parse_unary` returns. `parse_power` returns. `parse_term` sees next token is NUMBER, not `*`/`/`/`%`, so loop ends. Returns to `parse_expr`. `parse_expr` sees NUMBER, not `+`/`-`, loop ends. Returns to `parse`. `parse` checks for EOF, but finds NUMBER -> raises ValueError. Good.
+   - Dangling operator: e.g., `2 +`. `parse_expr` consumes `+`, calls `parse_term` -> `parse_power` -> `parse_unary` -> `parse_primary`. `parse_primary` sees EOF or `)` or operator -> raises ValueError. Good.
+   - Unbalanced parens: handled in `parse_primary` or `parse`.
+   - Empty input: handled at start of `parse`.
+   - Unknown chars: handled in tokenizer.
+
+   One detail: `2.` is a valid number in Python. My tokenizer handles it.
+   What about `.5`? Handled.
+   What about `0.5`? Handled.
+   What about spaces? Tokenizer skips them.
+   What about `**` right associativity? Handled.
+   What about `-2**2`? `parse_unary` sees `-`, calls `parse_power`. `parse_power` gets base 2, sees `**`, calls `parse_power` recursively which gets 2. Returns `2**2`=4. `parse_unary` returns -4. Correct.
+   What about `2**-1`? `parse_power` gets 2, sees `**`, calls `parse_power`. `parse_unary` sees `-`, calls `parse_power` which gets 1. Returns -1. `2**-1` = 0.5. Correct.
+
+   Let's double check precedence rules. Python's precedence:
+   1. `**` (right associative)
+   2. `+x`, `-x`, `~x`
+   3. `*`, `/`, `//`, `%`
+   4. `+`, `-`
+   My grammar:
+   `expr` -> `+` `-` (binary)
+   `term` -> `*` `/` `%`
+   `power` -> `**`
+   `unary` -> `+` `-`
+   `primary` -> number, `(...)`
+   This matches exactly.
+
+   Wait, is there any case where `parse_power` should handle right associativity differently?
+   Standard recursive descent for right-associative operators:
+   ```python
+   def parse_power():
+       base = parse_unary()
+       if match('**'):
+           return base ** parse_power()
+       return base
+   ```
+   This is correct.
+
+   Let's test mentally: `10/2**3`
+   `parse_term` calls `parse_power` -> gets 10.
+   Sees `/`, calls `parse_power` -> gets `2**3` = 8.
+   Returns `10/8` = 1.25. Correct.
+
+   `10/2/3`
+   `parse_term` gets 10, sees `/`, calls `parse_power` -> 2. `left = 5`.
+   Sees `/`, calls `parse_power` -> 3. `left = 1.666`. Correct.
+
+   `2**3**4`
+   `parse_power` gets 2, sees `**`, calls `parse_power` -> gets 3, sees `**`, calls `parse_power` -> gets 4. Returns 81. Returns `2**81`. Correct.
+
+   One potential issue: `parse_unary` might consume multiple unary operators like `--2`. Python allows `--2` -> 2. My grammar allows it recursively. That's fine.
+
+   What about `2**`? Dangling operator. `parse_power` sees `POW`, consumes it, calls `parse_power`. Eventually `parse_primary` sees EOF -> ValueError. Good.
+
+   What about `(2+3`? `parse_primary` sees `(`, consumes, calls `parse_expr`, returns 5. Then expects `)`. Sees EOF -> ValueError. Good.
+
+   What about `2 3`? Tokenizer produces `NUMBER 2`, `NUMBER 3`. Parser: `parse_expr` -> `parse_term` -> `parse_power` -> `parse_unary` -> `parse_primary` consumes 2. Returns. `parse_unary` returns. `parse_power` returns. `parse_term` loop checks next token `NUMBER`, not `*`/`/`/`%`, so loop ends. Returns. `parse_expr` loop checks next token `NUMBER`, not `+`/`-`, loop ends. Returns. `parse` checks EOF, sees `NUMBER` -> ValueError. Good.
+
+   What about `2 + + 3`? `parse_expr` consumes `+`, calls `parse_term` -> `parse_power` -> `parse_unary` sees `+`, consumes, calls `parse_unary` -> `parse_primary` consumes 3. Returns 3. `parse_unary` returns 3. `parse_term` returns 3. `parse_expr` does `2+3=5`. Correct.
+
+   One thing: The prompt says "Raise ValueError for anything malformed: empty input, unbalanced parentheses, a dangling operator, two numbers in a row, unknown characters."
+   My implementation raises ValueError for all these.
+   Should I check for empty string explicitly? Yes, `if not expr.strip(): raise ValueError(...)` or let the parser handle it. The parser checks `if self.current()[0] == 'EOF': raise ValueError("Empty expression")`. That works if tokenizer produces only EOF for empty string. My tokenizer: if `expr` is empty, loop doesn't run, appends EOF. So `current()` is EOF. Raises ValueError. Good.
+
+   Wait, what about spaces only? `expr = "   "`. Tokenizer skips spaces, appends EOF. Parser raises ValueError. Good.
+
+   Let's consider number parsing edge cases. `0.5`, `.5`, `2.` are explicitly mentioned. My tokenizer:
+   `while j < n and (expr[j].isdigit() or (expr[j] == '.' and not has_dot)):`
+   This allows `.5` (starts with dot, `has_dot` becomes True, continues for digits).
+   Allows `2.` (starts with digit, `has_dot` becomes True, continues, but no more digits, loop ends).
+   Allows `0.5`.
+   What about `.` alone? `num_str = "."`, `any(c.isdigit())` is False -> raises ValueError. Good.
+   What about `1.2.3`? Parses `1.2`, leaves `.3`. `.3` will be parsed as number next iteration? Wait, `.3` starts with `.`, so it will be parsed as number. That's fine.
+   What about `1.`? `num_str = "1."`, `any(c.isdigit())` is True. Parsed as 1.0. Good.
+
+   One minor thing: `float()` might raise ValueError for some strings, but ours are controlled.
+
+   Let's refine the tokenizer to be robust and match Python's float literal rules roughly, but keep it simple as requested.
+   Actually, Python's float literals can have `e` or `E`, but the prompt doesn't mention them. I'll stick to the prompt's examples.
+
+   I should also handle the case where `**` is right-associative but binds tighter than unary minus. My grammar does that.
+   Wait, is there any ambiguity with `2**-1`? In Python, `2**-1` is `0.5`. My parser handles it.
+   What about `-2**-2`? Python: `-4`. My parser: `parse_unary` sees `-`, calls `parse_power`. `parse_power` gets base 2, sees `**`, calls `parse_power` -> gets 2. Returns `2**2`=4. `parse_unary` returns -4. Correct.
+
+   One detail: `parse_power` right associativity implementation:
+   ```python
+       def parse_power(self):
+           base = self.parse_unary()
+           if self.current()[0] == 'POW':
+               self.consume()
+               exponent = self.parse_power()
+               return base ** exponent
+           return base
+   ```
+   This is correct.
+
+   Let's consider error messages. The prompt says "Raise ValueError for anything malformed...". I don't need specific messages, just raise ValueError.
+
+   I'll wrap everything in a module. The function signature is `evaluate(expr: str) -> float`.
+
+   Let's write out the full code carefully.
+
+   ```python
+   def evaluate(expr: str) -> float:
+       # Tokenizer
+       tokens = []
+       i = 0
+       n = len(expr)
+       while i < n:
+           if expr[i].isspace():
+               i += 1
+               continue
+           if expr[i].isdigit() or expr[i] == '.':
+               j = i
+               has_dot = False
+               while j < n and (expr[j].isdigit() or (expr[j] == '.' and not has_dot)):
+                   if expr[j] == '.':
+                       has_dot = True
+                   j += 1
+               num_str = expr[i:j]
+               if not any(c.isdigit() for c in num_str):
+                   raise ValueError("Invalid number format")
+               tokens.append(('NUMBER', float(num_str)))
+               i = j
+           elif expr[i] == '*':
+               if i + 1 < n and expr[i+1] == '*':
+                   tokens.append(('POW', '**'))
+                   i += 2
+               else:
+                   tokens.append(('STAR', '*'))
+                   i += 1
+           elif expr[i] in '+-*/%()':
+               tokens.append((expr[i], expr[i]))
+               i += 1
+           else:
+               raise ValueError(f"Unknown character: {expr[i]}")
+       tokens.append(('EOF', None))
+
+       # Parser
+       pos = 0
+       length = len(tokens)
+
+       def current():
+           return tokens[pos]
+
+       def consume(expected_type=None):
+           nonlocal pos
+           tok = tokens[pos]
+           if expected_type and tok[0] != expected_type:
+               raise ValueError(f"Expected {expected_type}, got {tok[0]}")
+           pos += 1
+           return tok
+
+       def parse_expr():
+           nonlocal pos
+           left = parse_term()
+           while current()[0] in ('+', '-'):
+               op = consume()[0]
+               right = parse_term()
+               if op == '+':
+                   left = left + right
+               else:
+                   left = left - right
+           return left
+
+       def parse_term():
+           nonlocal pos
+           left = parse_power()
+           while current()[0] in ('*', '/', '%'):
+               op = consume()[0]
+               right = parse_power()
+               if op == '*':
+                   left = left * right
+               elif op == '/':
+                   if right == 0:
+                       raise ZeroDivisionError("division by zero")
+                   left = left / right
+               else:
+                   if right == 0:
+                       raise ZeroDivisionError("modulo by zero")
+                   left = left % right
+           return left
+
+       def parse_power():
+           nonlocal pos
+           base = parse_unary()
+           if current()[0] == 'POW':
+               consume()
+               exponent = parse_power() # Right-associative
+               return base ** exponent
+           return base
+
+       def parse_unary():
+           nonlocal pos
+           if current()[0] in ('+', '-'):
+               op = consume()[0]
+               operand = parse_unary()
+               if op == '-':
+                   return -operand
+               return operand
+           return parse_primary()
+
+       def parse_primary():
+           nonlocal pos
+           tok = current()
+           if tok[0] == 'NUMBER':
+               consume()
+               return tok[1]
+           elif tok[0] == '(':
+               consume()
+               val = parse_expr()
+               if current()[0] != ')':
+                   raise ValueError("Unbalanced parentheses")
+               consume()
+               return val
+           else:
+               raise ValueError(f"Unexpected token: {tok[0]}")
+
+       if current()[0] == 'EOF':
+           raise ValueError("Empty expression")
+
+       result = parse_expr()
+       if current()[0] != 'EOF':
+           raise ValueError("Unexpected token after expression")
+       return result
+   ```
+
+   Wait, I need to check if `parse_unary` correctly handles the case where `**` binds tighter than unary minus.
+   In Python: `-2**2` -> `-4`.
+   My parser: `parse_unary` sees `-`, calls `parse_power`. `parse_power` calls `parse_unary` (returns 2), sees `POW`, calls `parse_power` (returns 2), computes `2**2`=4. `parse_unary` returns -4. Correct.
+   What about `2**-1`? `parse_power` gets 2, sees `POW`, calls `parse_power` -> `parse_unary` sees `-`, calls `parse_power` -> 1. Returns -1. `2**-1` = 0.5. Correct.
+
+   One subtle point: `parse_power` right associativity.
+   `2**3**4` -> `2**(3**4)`.
+   My code: `base = parse_unary()` (2), sees `POW`, consumes, calls `parse_power()` recursively.
+   Inner `parse_power`: `base = parse_unary()` (3), sees `POW`, consumes, calls `parse_power()` recursively.
+   Innermost `parse_power`: `base = parse_unary()` (4), no `POW`, returns 4.
+   Inner returns `3**4` = 81.
+   Outer returns `2**81`. Correct.
+
+   What about `2**3**`? Dangling operator. `parse_power` sees `POW`, consumes, calls `parse_power`. Eventually `parse_primary` sees EOF -> ValueError. Correct.
+
+   What about `2 ** 3`? Spaces are handled by tokenizer. Correct.
+
+   Let's test `evaluate("2 3")`.
+   Tokens: `NUMBER(2)`, `NUMBER(3)`, `EOF`.
+   `parse_expr` -> `parse_term` -> `parse_power` -> `parse_unary` -> `parse_primary` consumes 2. Returns 2.
+   `parse_unary` returns 2. `parse_power` returns 2. `parse_term` loop checks next token `NUMBER`, not `*`/`/`/`%`, ends. Returns 2.
+   `parse_expr` loop checks next token `NUMBER`, not `+`/`-`, ends. Returns 2.
+   `parse_expr` returns to main. Main checks `current()[0] != 'EOF'` -> it's `NUMBER`. Raises ValueError. Correct.
+
+   What about `evaluate("+2")`?
+   Tokens: `PLUS`, `NUMBER(2)`, `EOF`.
+   `parse_expr` -> `parse_term` -> `parse_power` -> `parse_unary` sees `+`, consumes, calls `parse_unary` -> `parse_primary` consumes 2, returns 2. `parse_unary` returns 2. `parse_term` returns 2. `parse_expr` returns 2. Main checks EOF. Returns 2.0. Correct.
+
+   What about `evaluate("-")`?
+   Tokens: `MINUS`, `EOF`.
+   `parse_unary` sees `-`, consumes, calls `parse_unary` -> `parse_primary` sees EOF -> ValueError. Correct.
+
+   What about `evaluate("(2+3")`?
+   Tokens: `LPAREN`, `NUMBER(2)`, `PLUS`, `NUMBER(3)`, `RPAREN` missing, `EOF`.
+   `parse_primary` sees `(`, consumes, calls `parse_expr` -> returns 5.
+   Back in `parse_primary`, checks `current()[0] != ')'` -> it's `EOF`. Raises ValueError. Correct.
+
+   What about `evaluate("2+")`?
+   Tokens: `NUMBER(2)`, `PLUS`, `EOF`.
+   `parse_expr` consumes `+`, calls `parse_term` -> ... -> `parse_primary` sees EOF -> ValueError. Correct.
+
+   One thing: `ZeroDivisionError` should be raised for `/` and `%`. I have that.
+   Should I check for modulo by zero? Yes, added.
+   Should I check for division by zero? Yes.
+
+   Is there any case where `float()` might raise ValueError? Only if `num_str` is invalid, but I check `any(c.isdigit())`. `float("2.")` works. `float(".5")` works. `float("0.5")` works. `float("123")` works.
+   What about `float(".")`? Caught by `any(c.isdigit())`.
+   What about `float("..")`? `has_dot` prevents second dot. So `..` won't happen.
+   What about `float("1.2.3")`? `1.2` parsed, `.3` parsed next. `.3` is valid. So `1.2.3` -> `1.2` then `.3` -> ValueError on second number. That's fine.
+
+   One minor point: Python's `**` operator with negative exponent on integer base returns float. `2**-1` -> `0.5`. My code returns float. `evaluate` returns float. Good.
+
+   Should I handle `//`? Prompt says binary operators `+ - * / % and **`. No `//`. So fine.
+
+   Let's consider the precedence of unary vs `**` again.
+   Python docs: "The power operator ** binds less tightly than a unary operator on its left-hand side, such as +, -, ~; thus, -1**2 results in -1."
+   My grammar: `power -> unary ('**' power)?`
+   This means `unary` is parsed first, then `**`. So `unary` has lower precedence than `**`. Wait, if `unary` is parsed first, it means `**` binds tighter. Yes.
+   Example: `-2**2`. `parse_power` calls `parse_unary`. `parse_unary` sees `-`, calls `parse_power` again. This inner `parse_power` gets 2, sees `**`, calls `parse_power` -> 2. Returns 4. Outer `parse_unary` returns -4. Correct.
+   What about `2**-1`? `parse_power` gets 2, sees `**`, calls `parse_power` -> `parse_unary` sees `-`, calls `parse_power` -> 1. Returns -1. `2**-1` = 0.5. Correct.
+   So precedence is correct.
+
+   One potential issue: `parse_unary` recursive call might cause infinite recursion if there's a dangling unary operator? No, because `parse_unary` calls `parse_unary`, which calls `parse_primary`, which consumes a token. So it always terminates.
+
+   Let's check `evaluate("- - 2")`.
+   Tokens: `MINUS`, `MINUS`, `NUMBER(2)`, `EOF`.
+   `parse_unary` sees `-`, consumes, calls `parse_unary`.
+   Inner `parse_unary` sees `-`, consumes, calls `parse_unary`.
+   Innermost `parse_unary` calls `parse_primary`, consumes 2, returns 2.
+   Returns to inner `parse_unary`: `-2`.
+   Returns to outer `parse_unary`: `--2` -> 2.
+   Correct.
+
+   What about `evaluate("2 ** - 3")`?
+   Tokens: `NUMBER(2)`, `POW`, `MINUS`, `NUMBER(3)`, `EOF`.
+   `parse_power` gets 2, sees `POW`, consumes, calls `parse_power`.
+   `parse_power` calls `parse_unary` -> sees `-`, consumes, calls `parse_unary` -> `parse_primary` consumes 3, returns 3. `parse_unary` returns -3.
+   `parse_power` returns -3.
+   `2 ** -3` = 0.125. Correct.
+
+   All looks solid.
+
+   One detail: `float` conversion might produce `-0.0` in some cases, but that's fine.
+   Should I handle `0` vs `0.0`? Prompt says return `float`.
+   The prompt says "Raise ValueError for anything malformed: empty input, unbalanced parentheses, a dangling operator, two numbers in a row, unknown characters."
+   My code raises ValueError for these.
+   I'll add explicit checks or rely on the parser/tokenizer to raise ValueError. It's fine.
+
+   Let's structure it as a module with just the function, as requested.
+   I'll put everything inside `evaluate` or define helper functions inside.
+   To keep it clean, I'll define `evaluate` and inner functions/classes.
+
+   One thing: `pos` and `tokens` need to be accessible. I'll use a class or closure. Closure is fine.
+   I'll rewrite it cleanly.
+
+   ```python
+   def evaluate(expr: str) -> float:
+       # Tokenization
+       tokens = []
+       i = 0
+       n = len(expr)
+       while i < n:
+           if expr[i].isspace():
+               i += 1
+               continue
+           if expr[i].isdigit() or expr[i] == '.':
+               j = i
+               has_dot = False
+               while j < n and (expr[j].isdigit() or (expr[j] == '.' and not has_dot)):
+                   if expr[j] == '.':
+                       has_dot = True
+                   j += 1
+               num_str = expr[i:j]
+               if not any(c.isdigit() for c in num_str):
+                   raise ValueError("Invalid number")
+               tokens.append(('NUMBER', float(num_str)))
+               i = j
+           elif expr[i] == '*':
+               if i + 1 < n and expr[i+1] == '*':
+                   tokens.append(('POW', '**'))
+                   i += 2
+               else:
+                   tokens.append(('STAR', '*'))
+                   i += 1
+           elif expr[i] in '+-*/%()':
+               tokens.append((expr[i], expr[i]))
+               i += 1
+           else:
+               raise ValueError(f"Unknown character: {expr[i]}")
+       tokens.append(('EOF', None))
+
+       pos = 0
+       length = len(tokens)
+
+       def current():
+           return tokens[pos]
+
+       def consume(expected_type=None):
+           nonlocal pos
+           tok = tokens[pos]
+           if expected_type and tok[0] != expected_type:
+               raise ValueError(f"Expected {expected_type}, got {tok[0]}")
+           pos += 1
+           return tok
+
+       def parse_expr():
+           nonlocal pos
+           left = parse_term()
+           while current()[0] in ('+', '-'):
+               op = consume()[0]
+               right = parse_term()
+               left = left + right if op == '+' else left - right
+           return left
+
+       def parse_term():
+           nonlocal pos
+           left = parse_power()
+           while current()[0] in ('*', '/', '%'):
+               op = consume()[0]
+               right = parse_power()
+               if op == '*':
+                   left = left * right
+               elif op == '/':
+                   if right == 0:
+                       raise ZeroDivisionError("division by zero")
+                   left = left / right
+               else:
+                   if right == 0:
+                       raise ZeroDivisionError("modulo by zero")
+                   left = left % right
+           return left
+
+       def parse_power():
+           nonlocal pos
+           base = parse_unary()
+           if current()[0] == 'POW':
+               consume()
+               exponent = parse_power()  # Right-associative
+               return base ** exponent
+           return base
+
+       def parse_unary():
+           nonlocal pos
+           if current()[0] in ('+', '-'):
+               op = consume()[0]
+               operand = parse_unary()
+               return -operand if op == '-' else operand
+           return parse_primary()
+
+       def parse_primary():
+           nonlocal pos
+           tok = current()
+           if tok[0] == 'NUMBER':
+               consume()
+               return tok[1]
+           elif tok[0] == '(':
+               consume()
+               val = parse_expr()
+               if current()[0] != ')':
+                   raise ValueError("Unbalanced parentheses")
+               consume()
+               return val
+           else:
+               raise ValueError(f"Unexpected token: {tok[0]}")
+
+       if current()[0] == 'EOF':
+           raise ValueError("Empty expression")
+
+       result = parse_expr()
+       if current()[0] != 'EOF':
+           raise ValueError("Unexpected token")
+       return result
+   ```
+
+   Wait, should I check for `ZeroDivisionError` for both `/` and `%`? Yes.
+   Should I check for `right == 0` using `==` or `is`? `==` is fine for floats, but exact zero comparison is okay here since we parse from string. Alternatively, `right == 0.0`. I'll stick with `right == 0`.
+
+   One edge case: `evaluate("2 **")` -> `parse_power` sees `POW`, consumes, calls `parse_power` -> `parse_unary` -> `parse_primary` sees EOF -> ValueError. Good.
+   `evaluate("**2")` -> `parse_expr` -> `parse_term` -> `parse_power` -> `parse_unary` -> `parse_primary` sees `POW` -> ValueError. Good.
+
+   What about `evaluate("2 +")`? `parse_expr` consumes `+`, calls `parse_term` -> ... -> `parse_primary` sees EOF -> ValueError. Good.
+
+   What about `evaluate("2 3")`? Already tested.
+
+   What about `evaluate("(2 + 3")`? `parse_primary` sees `(`, consumes, calls `parse_expr` -> returns 5. Then checks for `)`, sees EOF -> ValueError. Good.
+
+   What about `evaluate("2 + 3)")`? `parse_expr` parses `2+3`, returns 5. Then `parse_primary` returns. `parse_power` returns. `parse_term` returns. `parse_expr` returns. Main checks EOF, sees `)` -> ValueError. Good.
+
+   All malformed cases handled.
+
+   One minor thing: `float()` might raise ValueError for strings like `float("1e2")` but we don't parse `e`. So fine.
+   The prompt says "numbers (integers and decimals like 3, 0.5, .5, 2.)". My parser handles these.
+
+   Should I handle `+` and `-` as unary at the start? Yes, `parse_unary` handles it.
+   Should I handle `++2`? Yes, `parse_unary` handles it.
+   Should I handle `2 * * 3`? Tokenizer sees `*`, then space, then `*`. It produces `STAR`, `STAR`. `parse_term` sees first `*`, consumes, calls `parse_power` -> `parse_unary` -> `parse_primary` sees `STAR` -> ValueError. Correct. `2 ** 3` produces `POW`. Correct.
+
+   One detail: `parse_power` right associativity. In Python, `**` is right-associative. My implementation `exponent = parse_power()` correctly implements right associativity.
+
+   Let's double check the precedence of unary vs `**` again.
+   Python: `-2**2` -> `-4`. `2**-1` -> `0.5`.
+   My code: `parse_power` calls `parse_unary`. `parse_unary` handles `-`. Then `parse_power` checks for `POW`.
+   So `-2**2`: `parse_unary` sees `-`, calls `parse_power`. `parse_power` gets base 2, sees `POW`, calls `parse_power` -> gets 2. Returns `2**2`=4. `parse_unary` returns -4. Correct.
+   `2**-1`: `parse_power` gets 2, sees `POW`, calls `parse_power`. Inner `parse_power` calls `parse_unary` -> sees `-`, calls `parse_power` -> gets 1. Returns -1. `2**-1` = 0.5. Correct.
+
+   Everything matches Python's behavior.
+
+   I'll wrap it in a clean module format.
+   One thing: `evaluate` should be the only exported function, or I can just provide the function. The prompt says "Write a Python module that defines `evaluate(expr: str) -> float`". I'll just provide the function.
+
+   I'll add type hints and docstring if needed, but not required.
+   I'll make sure it's a single block.
+
+   Final check of the code:
+   - Tokenizer handles spaces, numbers, operators, parentheses.
+   - Raises ValueError for unknown chars, empty input, malformed numbers.
+   - Parser implements recursive descent with correct precedence.
+   - Handles right-associative `**`.
+   - Handles unary `+`/`-`.
+   - Raises ZeroDivisionError for `/` and `%` by zero.
+   - Raises ValueError for unbalanced parens, dangling operators, two numbers in a row.
+   - Returns float.
+
+   One potential issue: `float(".5")` works. `float("2.")` works. `float("0.5")` works.
+   What about `float("")`? Not possible due to `any(c.isdigit())`.
+   What about `float("1.")`? Works.
+   What about `float("1.2.3")`? Handled as two tokens, second fails.
+   All good.
+
+   I will produce the code now.
+   One minor adjustment: I'll make sure `ZeroDivisionError` is raised exactly as specified. The prompt says "Division or modulo by zero raises ZeroDivisionError." I'll raise it with a message or just `raise ZeroDivisionError`.
+   I'll use `raise ZeroDivisionError("division by zero")` and `raise ZeroDivisionError("modulo by zero")`.
+
+   Code structure:
+   ```python
+   def evaluate(expr: str) -> float:
+       # ... implementation ...
+   ```
+   That's it.
+   I'll verify one more time: `2**-1` -> `0.5`. `2**(-1)` -> `0.5`. Both work.
+   `-2**2` -> `-4`. Works.
+   `2**3**4` -> `2**81`. Works.
+   `10/2**3` -> `1.25`. Works.
+   `(2+3)**2` -> `25`. Works.
+   `- (2+3)**2` -> `-25`. Works.
+   `2 * -3` -> `-6`. Works.
+   `2 ** - 3` -> `0.125`. Works.
+
+   All correct.
+   I'll output the solution. 
+   One thing: `float()` might return integers as floats (e.g., `3.0`), which matches `-> float`.
+   The code is ready.
+   I will present it in a single python block.
+   I'll add comments for clarity but keep it concise.
+   All constraints met.
+   Proceed. 
+   Output matches response. 
+   Self-Correction/Refinement during thought:
+   Wait, `parse_power` right associativity: `base ** parse_power()` is correct.
+   But what about `2**3**4`? `parse_power` calls `parse_unary` -> 2. Sees `POW`, consumes, calls `parse_power`.
+   Inner `parse_power` calls `parse_unary` -> 3. Sees `POW`, consumes, calls `parse_power`.
+   Innermost `parse_power` calls `parse_unary` -> 4. No `POW`, returns 4.
+   Inner returns `3**4` = 81.
+   Outer returns `2**81`. Correct.
+   What about `2**3**`? `parse_power` sees `POW`, consumes, calls `parse_power` -> `parse_unary` -> `parse_primary` sees EOF -> ValueError. Correct.
+   What about `**2`? `parse_unary` -> `parse_primary` sees `POW` -> ValueError. Correct.
+
+   One detail: `float()` conversion for `.5` gives `0.5`. `2.` gives `2.0`. All good.
+   The code looks solid.
+   I will generate it now. 
+   Output matches the final code block. 
+   [Done] 
+   Self-Correction/Note during generation prep: 
+   I should ensure that `evaluate` raises `ValueError` for empty string explicitly, though my code does it via `if current()[0] == 'EOF': raise ValueError(...)`. That's fine.
+   I'll make sure the tokenizer doesn't crash on empty string. `n=0`, loop doesn't run, `tokens=[('EOF', None)]`. `current()` returns EOF. Raises ValueError. Good.
+   All set. 
+   Output matches response. 
+   Proceeds. 
+   [Final Check of the Prompt]: "without using eval, exec, compile or the ast module." - Checked.
+   "numbers (integers and decimals like 3, 0.5, .5, 2.)" - Checked.
+   "binary operators + - * / % and ** (power, right-associative and binding tighter than unary minus on its left, as in Python: -2**2 == -4, 2**-1 == 0.5)" - Checked.
+   "unary + and -, parentheses, and spaces anywhere between tokens." - Checked.
+   "Precedence and associativity follow Python's." - Checked.
+   "Raise ValueError for anything malformed: empty input, unbalanced parentheses, a dangling operator, two numbers in a row, unknown characters." - Checked.
+   "Division or modulo by zero raises ZeroDivisionError." - Checked.
+   "Reply with the whole module in one ```python block." - Checked.
+
+   All good.
+   Output generation. 
+   [Code Generation] -> *Proceeds*
+   *(Self-Correction/Verification during thought)*: 
+   Wait, `parse_unary` recursive call might cause issues if there's a sequence like `+ + +`. It's fine, it just flips signs.
+   What about `2 ** - 3`? Spaces are skipped. `parse_power` gets 2, sees `POW`, consumes, calls `parse_power`. `parse_unary` sees `-`, consumes, calls `parse_unary` -> `parse_primary` consumes 3. Returns 3. `parse_unary` returns -3. `2**-3` = 0.125. Correct.
+   One minor point: `float()` might raise ValueError for strings like `float("1.2.3")` but we handle tokens separately.
+   The code is robust.
+   I'll output it. 
+   [Output Generation] -> *Done.* 
+   *(Note: I'll make sure the indentation and structure are perfect.)*
+   All good. 
+   [Final Output Generation] -> *Proceeds.*
+
+</thinking>
+
+```python
+def evaluate(expr: str) -> float:
+    # Tokenization
+    tokens = []
+    i = 0
+    n = len(expr)
+    while i < n:
+        if expr[i].isspace():
+            i += 1
+            continue
+        if expr[i].isdigit() or expr[i] == '.':
+            j = i
+            has_dot = False
+            while j < n and (expr[j].isdigit() or (expr[j] == '.' and not has_dot)):
+                if expr[j] == '.':
+                    has_dot = True
+                j += 1
+            num_str = expr[i:j]
+            if not any(c.isdigit() for c in num_str):
+                raise ValueError("Invalid number format")
+            tokens.append(('NUMBER', float(num_str)))
+            i = j
+        elif expr[i] == '*':
+            if i + 1 < n and expr[i+1] == '*':
+                tokens.append(('POW', '**'))
+                i += 2
+            else:
+                tokens.append(('STAR', '*'))
+                i += 1
+        elif expr[i] in '+-*/%()':
+            tokens.append((expr[i], expr[i]))
+            i += 1
+        else:
+            raise ValueError(f"Unknown character: {expr[i]}")
+    tokens.append(('EOF', None))
+
+    pos = 0
+    length = len(tokens)
+
+    def current():
+        return tokens[pos]
+
+    def consume(expected_type=None):
+        nonlocal pos
+        tok = tokens[pos]
+        if expected_type and tok[0] != expected_type:
+            raise ValueError(f"Expected {expected_type}, got {tok[0]}")
+        pos += 1
+        return tok
+
+    def parse_expr():
+        nonlocal pos
+        left = parse_term()
+        while current()[0] in ('+', '-'):
+            op = consume()[0]
+            right = parse_term()
+            left = left + right if op == '+' else left - right
+        return left
+
+    def parse_term():
+        nonlocal pos
+        left = parse_power()
+        while current()[0] in ('*', '/', '%'):
+            op = consume()[0]
+            right = parse_power()
+            if op == '*':
+                left = left * right
+            elif op == '/':
+                if right == 0:
+                    raise ZeroDivisionError("division by zero")
+                left = left / right
+            else:
+                if right == 0:
+                    raise ZeroDivisionError("modulo by zero")
+                left = left % right
+        return left
+
+    def parse_power():
+        nonlocal pos
+        base = parse_unary()
+        if current()[0] == 'POW':
+            consume()
+            exponent = parse_power()  # Right-associative
+            return base ** exponent
+        return base
+
+    def parse_unary():
+        nonlocal pos
+        if current()[0] in ('+', '-'):
+            op = consume()[0]
+            operand = parse_unary()
+            return -operand if op == '-' else operand
+        return parse_primary()
+
+    def parse_primary():
+        nonlocal pos
+        tok = current()
+        if tok[0] == 'NUMBER':
+            consume()
+            return tok[1]
+        elif tok[0] == '(':
+            consume()
+            val = parse_expr()
+            if current()[0] != ')':
+                raise ValueError("Unbalanced parentheses")
+            consume()
+            return val
+        else:
+            raise ValueError(f"Unexpected token: {tok[0]}")
+
+    if current()[0] == 'EOF':
+        raise ValueError("Empty expression")
+
+    result = parse_expr()
+    if current()[0] != 'EOF':
+        raise ValueError("Unexpected token after expression")
+    return result
+```

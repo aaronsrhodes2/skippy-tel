@@ -1,0 +1,228 @@
+"""Mentat's /mcp endpoint (mentat/app.py): the public tools as a remote MCP server.
+
+Needs a sigma-ground checkout, like the Weapon vs. Armor integration tests:
+    SIGMA_GROUND_DIR=/path/to/sigma-ground python -m pytest mentat/tests -q
+"""
+import asyncio
+import importlib.util
+import json
+import threading
+from pathlib import Path
+
+import pytest
+
+INIT = {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {},
+                   "clientInfo": {"name": "test", "version": "0"}}}
+
+
+@pytest.fixture(scope="module")
+def mentat():
+    pytest.importorskip("mcp")
+    pytest.importorskip("sigma_ground")
+    path = Path(__file__).resolve().parents[1] / "app.py"
+    spec = importlib.util.spec_from_file_location("mentat_app_mcp", path)   # not `app`: the portal has one too
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def client(mentat):
+    mentat._hits.clear()
+    yield mentat.app.test_client()
+    mentat._hits.clear()
+
+
+def rpc(client, method, params=None, id_=7):
+    msg = {"jsonrpc": "2.0", "id": id_, "method": method, **({"params": params} if params is not None else {})}
+    r = client.post("/mcp", json=msg)
+    assert r.status_code == 200, r.data
+    return r.get_json()
+
+
+def call(client, name, arguments):
+    return rpc(client, "tools/call", {"name": name, "arguments": arguments})["result"]
+
+
+def test_initialize_agrees_a_protocol_version_and_offers_tools_with_sigma_grounds_rules(client, mentat):
+    got = client.post("/mcp", json=INIT).get_json()
+    assert got["id"] == 1 and got["result"]["protocolVersion"] == "2025-06-18"
+    assert got["result"]["capabilities"] == {"tools": {"listChanged": False}}
+    assert got["result"]["serverInfo"]["name"] == "mentat"
+    assert "provenance" in got["result"]["instructions"].lower()
+    unknown = rpc(client, "initialize", {**INIT["params"], "protocolVersion": "1999-01-01"})
+    assert unknown["result"]["protocolVersion"] == mentat.LATEST_PROTOCOL_VERSION
+
+
+def test_notifications_get_202_and_no_body(client):
+    r = client.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"})
+    assert r.status_code == 202 and r.data == b""
+
+
+def test_tools_list_shows_three_tools_not_the_whole_set(client):
+    tools = rpc(client, "tools/list")["result"]["tools"]
+    assert [t["name"] for t in tools] == ["ask", "find_tools", "call_tool"]
+    assert len(json.dumps(tools)) < 4000                                    # the long list was ~290,000 characters (~73k tokens) of every chat's context
+    assert all(t["inputSchema"]["type"] == "object" for t in tools)
+
+
+def test_the_full_list_is_still_there_when_asked_for_and_is_the_public_set_the_rest_api_serves(client, monkeypatch):
+    monkeypatch.setenv("MENTAT_MCP_FULL", "1")
+    tools = rpc(client, "tools/list")["result"]["tools"]
+    names = [t["name"] for t in tools]
+    assert names == [t["name"] for t in client.get("/tools").get_json()]
+    assert "simulate" not in names and not any(n.startswith("playground_") for n in names)
+    assert all(t["inputSchema"]["type"] == "object" for t in tools)
+
+
+def test_a_call_returns_the_tools_own_result_as_json_text(client):
+    res = call(client, "convert_units", {"value": 1, "from_units": "mile", "to_units": "km"})
+    assert res["isError"] is False
+    assert json.loads(res["content"][0]["text"])["value"] == pytest.approx(1.609344)
+
+
+def test_hidden_and_unknown_tools_are_protocol_errors(client):
+    for name in ("simulate", "playground_create", "no_such_tool"):
+        assert rpc(client, "tools/call", {"name": name, "arguments": {}})["error"]["code"] == -32602
+    assert rpc(client, "resources/list")["error"]["code"] == -32601
+    assert rpc(client, "ping")["result"] == {}
+
+
+def test_the_rest_apis_guards_hold_and_come_back_as_tool_errors(client, mentat, monkeypatch):
+    code = call(client, "solve_equation", {"equation": "__import__('os').system('id')", "variable": "x"})
+    assert code["isError"] and "looks like code" in code["content"][0]["text"]
+    assert call(client, "convert_units", ["not", "an", "object"])["isError"]
+    mentat._hits.clear()
+    monkeypatch.setattr(mentat, "RATE_PER_MIN", 1)
+    assert not call(client, "convert_units", {"value": 1, "from_units": "m", "to_units": "cm"})["isError"]
+    slow = call(client, "convert_units", {"value": 1, "from_units": "m", "to_units": "cm"})
+    assert slow["isError"] and "rate limit" in slow["content"][0]["text"]
+
+
+def test_bad_posts_and_other_verbs_are_refused(client, mentat):
+    assert client.post("/mcp", data="not json", content_type="application/json").status_code == 400
+    assert client.post("/mcp", json=[INIT]).status_code == 400                       # no batches
+    assert client.post("/mcp", json={"id": 1, "method": "ping"}).get_json()["error"]["code"] == -32600
+    assert client.post("/mcp", data="x" * (mentat.MAX_MCP_BYTES + 1),
+                       content_type="application/json").status_code == 413
+    assert client.get("/mcp").status_code == 405 and client.delete("/mcp").status_code == 405
+
+
+def test_the_official_mcp_client_connects_lists_and_calls(mentat):
+    """The real SDK client, over real HTTP: what Claude's connector and Claude Code do."""
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamable_http_client
+    from werkzeug.serving import make_server
+
+    httpd = make_server("127.0.0.1", 0, mentat.app, threaded=True)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+    async def session():
+        async with streamable_http_client(f"http://127.0.0.1:{httpd.server_port}/mcp") as (read, write, _):
+            async with ClientSession(read, write) as s:
+                init = await s.initialize()
+                tools = (await s.list_tools()).tools
+                res = await s.call_tool("call_tool", {"name": "hawking_temperature", "arguments": {"mass_kg": 1.989e30}})
+                return init, tools, res
+
+    try:
+        mentat._hits.clear()
+        init, tools, res = asyncio.run(session())
+    finally:
+        httpd.shutdown()
+    assert init.serverInfo.name == "mentat"
+    assert [t.name for t in tools] == ["ask", "find_tools", "call_tool"]
+    assert not res.isError
+    assert json.loads(res.content[0].text)["value"] == pytest.approx(6.17e-8, rel=1e-2)
+
+
+def test_version_reports_the_sigma_ground_commit_and_the_tool_count(client, mentat, monkeypatch, tmp_path):
+    import sys
+    import types
+    # no VENDORED_REF beside the tree (a dev checkout): the build argument, else "dev"
+    monkeypatch.setitem(sys.modules, "sigma_ground", types.SimpleNamespace(__file__=str(tmp_path / "sigma_ground" / "__init__.py")))
+    monkeypatch.setenv("SIGMA_GROUND_REF", "feedface0123")
+    got = client.get("/version").get_json()
+    assert got["sigma_ground_ref"] == "feedface0123" and "build_arg_ref" not in got
+    assert got["tools"] == len(mentat.TOOLS) and got["tools"] > 100
+    monkeypatch.delenv("SIGMA_GROUND_REF")
+    assert client.get("/version").get_json()["sigma_ground_ref"] == "dev"
+
+
+def test_version_prefers_the_vendored_trees_own_marker_and_shows_a_mismatch(client, mentat, monkeypatch, tmp_path):
+    # 2026-10-30: the image's build argument named 8145ed8 while the vendored tree was 3f374fe's; the tree's marker is the truth
+    import sys
+    import types
+    (tmp_path / "sigma_ground").mkdir()
+    (tmp_path / "VENDORED_REF").write_text("3f374fe97e668f1c1a770417e56d5a7572d068ed\n")
+    monkeypatch.setitem(sys.modules, "sigma_ground", types.SimpleNamespace(__file__=str(tmp_path / "sigma_ground" / "__init__.py")))
+    monkeypatch.setenv("SIGMA_GROUND_REF", "8145ed80333f5c64b92660f178a5990940b8b5a1")
+    got = client.get("/version").get_json()
+    assert got["sigma_ground_ref"] == "3f374fe97e668f1c1a770417e56d5a7572d068ed"
+    assert got["build_arg_ref"] == "8145ed80333f5c64b92660f178a5990940b8b5a1"
+    monkeypatch.setenv("SIGMA_GROUND_REF", "3f374fe97e668f1c1a770417e56d5a7572d068ed")
+    assert "build_arg_ref" not in client.get("/version").get_json()
+
+
+def test_an_ode_with_primes_is_maths_but_a_quote_elsewhere_is_still_code(client, mentat):
+    ok = client.post("/tools/solve_ode", json={"equation": "y'' + y"}).get_json()
+    assert ok["ok"] is True and "C1" in ok["result"]["value"], ok
+    # the same apostrophe in any other argument is still refused, and so is code hidden in the ODE
+    assert client.post("/tools/simplify_expr", json={"expression": "x'"}).status_code == 400
+    assert client.post("/tools/solve_ode", json={"equation": "y'' + __import__('os')"}).status_code == 400
+    assert client.post("/tools/solve_ode", json={"equation": "y'' + open(y)"}).status_code == 400
+
+
+def test_the_tool_contract_reaches_the_rest_and_mcp_callers(client, mentat):
+    # a quantity string works, and the conversion is echoed
+    ok = client.post("/tools/kinetic_energy", json={"mass_kg": "145 g", "velocity_m_s": "90 mph"}).get_json()
+    assert ok["ok"] is True and ok["result"]["converted"]["mass_kg"] == "145 g = 0.145 kg"
+    # a caller's mistake is a 400 with the contract's structured detail, as a pydantic failure was before
+    bad = client.post("/tools/schwarzschild_radius", json={})
+    assert bad.status_code == 400
+    body = bad.get_json()
+    assert body["ok"] is False and body["detail"]["code"] == "missing_argument" and body["detail"]["param"] == "mass_kg"
+    wrong = client.post("/tools/schwarzschild_radius", json={"mass_kg": "54 km/h"})
+    assert wrong.status_code == 400 and wrong.get_json()["detail"]["code"] == "wrong_dimension"
+    # the tool's own refusal stays a 200 with value null, now with a code
+    miss = client.post("/tools/density", json={"material": "unobtainium"}).get_json()
+    assert miss["ok"] is True and miss["result"]["value"] is None and miss["result"]["error"]["code"] == "unknown_key"
+    # over MCP the same failure is a tool error the model reads
+    via_mcp = call(client, "schwarzschild_radius", {})
+    assert via_mcp["isError"] is True and json.loads(via_mcp["content"][0]["text"])["code"] == "missing_argument"
+
+
+def test_find_tools_lists_domains_searches_and_bounds_its_answer(client):
+    domains = call(client, "find_tools", {})["content"][0]["text"]
+    assert domains.startswith("Domains") and "(" in domains
+    hits = call(client, "find_tools", {"search": "hawking"})["content"][0]["text"]
+    assert "hawking_temperature(" in hits and hits.count("\n- ") <= 40
+    assert "No Mentat tool matches" in call(client, "find_tools", {"search": "zzzqqq"})["content"][0]["text"]
+
+
+def test_call_tool_runs_a_named_tool_and_says_why_when_it_cannot(client):
+    ok = call(client, "call_tool", {"name": "convert_units", "arguments": {"value": 1, "from_units": "mile", "to_units": "km"}})
+    assert not ok["isError"] and json.loads(ok["content"][0]["text"])["value"] == pytest.approx(1.609344)
+    for bad in ({"name": "simulate"}, {"name": "no_such_tool"}, {}):
+        r = call(client, "call_tool", bad)
+        assert r["isError"] and "find_tools" in r["content"][0]["text"]
+    assert call(client, "call_tool", {"name": "solve_equation", "arguments": {"equation": "__import__('os').system('id')", "variable": "x"}})["isError"]
+
+
+def test_ask_answers_a_question_the_same_way_the_rest_api_does_and_refuses_the_empty_one(client, mentat, monkeypatch):
+    monkeypatch.setattr(mentat, "_ask", lambda q, given=None: {"value": 1.5, "units": "m", "source": "test", "interpreter": "keywords"})
+    res = call(client, "ask", {"question": "how long is a thing"})
+    assert not res["isError"] and json.loads(res["content"][0]["text"])["value"] == 1.5
+    assert call(client, "ask", {"question": "  "})["isError"]
+    assert call(client, "ask", {"question": "q", "given": {"x": [1]}})["isError"]
+
+
+
+def test_a_keywords_only_ask_that_finds_nothing_points_to_find_tools(client, mentat, monkeypatch):
+    monkeypatch.setattr(mentat, "USE_LLM", False)
+    monkeypatch.setattr(mentat, "_ask", lambda q, given=None: {"value": None, "notes": "I can simulate a falling object"})
+    res = call(client, "ask", {"question": "escape velocity of Earth"})
+    assert not res["isError"] and "find_tools" in res["content"][0]["text"]
+    monkeypatch.setattr(mentat, "_ask", lambda q, given=None: {"value": 3.0, "units": "m"})
+    assert "find_tools" not in call(client, "ask", {"question": "q"})["content"][0]["text"]

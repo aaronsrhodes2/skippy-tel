@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Audiobooks — Maker Portal{% endblock %}
+{% block app %}books{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}book{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='bilby-player.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='audiobooks.css') }}">
+{% endblock %}
+{% block content %}
+{# Audiobooks on the bridge (the Captain only). One screen, never scrolled: the covers are shown a screen at a time (swipe, the page keys,
+   or drag along the bar under them), a book opens as a panel over them, the player is a strip along the bottom. Glyphs, not words;
+   words only for titles and names. static/audiobooks-app.js builds everything from the audiobook gate's catalog; static/audiobooks-pure.js
+   holds the logic that needs no browser. The three URLs below are all the page needs from this template. #}
+<section id="ab" class="bp ab" data-state="boot" data-playing="0"
+         data-gate-url="{{ url_for('audiobooks.gate') }}" data-rooms-url="{{ url_for('audiobooks.rooms') }}" data-command-url="{{ url_for('audiobooks.command') }}"
+         aria-label="Audiobooks">
+  <noscript><p class="warn" style="margin:12px">Audiobooks needs JavaScript.</p></noscript>
+
+  <div class="tapbar" id="tapbar" role="region" aria-label="Tap to start the sound" hidden>
+    <button type="button" class="tap-go" data-act="tap"><svg class="g" aria-hidden="true"><use href="#g-play"/></svg></button>
+  </div>
+  <div class="notice" id="notice" role="status" hidden></div>
+
+  <div class="bp-top" id="top">
+    <div class="search">
+      <svg class="g" aria-hidden="true"><use href="#g-search"/></svg>
+      <input type="search" id="q" placeholder="Search" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Search titles, authors and narrators" disabled>
+      <button type="button" class="clear" id="q-clear" data-act="clear-search" aria-label="Clear search" title="Clear search" hidden><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+    </div>
+  </div>
+
+  <div class="ab-filters" id="filters" role="group" aria-label="Show">
+    <button type="button" class="key" data-act="mode" data-mode="all" aria-pressed="true" aria-label="All books" title="All books"><svg class="g" aria-hidden="true"><use href="#g-stack"/></svg><span class="cnt"></span></button>
+    <button type="button" class="key" data-act="mode" data-mode="listening" aria-pressed="false" aria-label="Listening" title="Listening"><svg class="g" aria-hidden="true"><use href="#g-headset"/></svg><span class="cnt"></span></button>
+    <button type="button" class="key" data-act="mode" data-mode="new" aria-pressed="false" aria-label="Not started" title="Not started"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg><span class="cnt"></span></button>
+    <button type="button" class="key" data-act="mode" data-mode="finished" aria-pressed="false" aria-label="Finished" title="Finished"><svg class="g" aria-hidden="true"><use href="#g-star"/></svg><span class="cnt"></span></button>
+    <button type="button" class="key sortkey" id="sort" data-act="sort" aria-label="Sorted by series" title="Sorted by series"><svg class="g" aria-hidden="true"><use href="#g-sort"/></svg><span class="cnt">S</span></button>
+  </div>
+
+  <div class="bp-stage" id="stage">
+    <div class="bp-list" id="listwrap">
+      <div class="bp-page" id="scroll" tabindex="-1">
+        <div class="vl-host" id="host" role="list"></div>
+      </div>
+      <div class="scrub" id="scrub" role="slider" aria-label="Page" aria-valuemin="1" aria-valuemax="1" aria-valuenow="1" tabindex="0">
+        <div class="pips" id="pips"><i></i></div>
+        <span class="pgno" id="pgno"></span>
+      </div>
+    </div>
+
+    {# One book: its cover and names, a key to play it, and two panes (about, chapters) #}
+    <aside class="sheet bp-side" id="side" aria-label="Book" hidden>
+      <div class="s-head">
+        <button type="button" class="key" data-act="close-sheet" aria-label="Back" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <button type="button" class="key" data-act="close-sheet" aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+        <span class="grow"></span>
+        <div class="s-tabs" role="tablist">
+          <button type="button" class="key" role="tab" id="tab-about" aria-selected="true" aria-label="About" title="About" data-act="tab-about"><svg class="g" aria-hidden="true"><use href="#g-info"/></svg></button>
+          <button type="button" class="key" role="tab" id="tab-chapters" aria-selected="false" aria-label="Chapters" title="Chapters" data-act="tab-chapters"><svg class="g" aria-hidden="true"><use href="#g-queue"/></svg></button>
+        </div>
+      </div>
+      <div class="ab-hero">
+        <div class="cover" id="s-cover"><i data-i="book"></i><img alt=""></div>
+        <div class="ab-names">
+          <h2 id="s-title"></h2>
+          <div class="by" id="s-by"></div>
+          <div class="nar" id="s-nar"></div>
+          <div class="meta" id="s-meta"></div>
+        </div>
+      </div>
+      <div class="ab-pbar"><i id="s-prog"></i></div>
+      <div class="panel" id="panel-about" role="tabpanel" aria-labelledby="tab-about">
+        <p class="ab-summary" id="s-summary"></p>
+      </div>
+      <div class="panel" id="panel-chapters" role="tabpanel" aria-labelledby="tab-chapters" hidden>
+        <div class="bp-list">
+          <div class="bp-page" id="c-scroll" tabindex="-1"><div class="vl-host" id="c-host" role="list"></div></div>
+          <div class="scrub" id="c-scrub"><div class="pips" id="c-pips"><i></i></div><span class="pgno" id="c-pgno"></span></div>
+        </div>
+      </div>
+      <div class="ab-acts">
+        <button type="button" class="key big" data-act="play-book" id="s-play" aria-label="Play" title="Play"><svg class="g" aria-hidden="true"><use href="#g-play"/></svg><span class="cnt" id="s-play-t"></span></button>
+        <button type="button" class="key" data-act="restart-book" aria-label="From the start" title="From the start"><svg class="g" aria-hidden="true"><use href="#g-retry"/></svg></button>
+        <button type="button" class="key" data-act="finish-book" id="s-done" aria-pressed="false" aria-label="Mark finished" title="Mark finished"><svg class="g" aria-hidden="true"><use href="#g-star"/></svg></button>
+        <button type="button" class="key" data-act="play-on" aria-label="Play on" title="Play on"><svg class="g" aria-hidden="true"><use href="#g-devices"/></svg></button>
+      </div>
+    </aside>
+
+    {# The player's own panel: a seek bar and the keys #}
+    <aside class="sheet bp-side" id="np" aria-label="Now playing" hidden>
+      <div class="s-head">
+        <button type="button" class="key" data-act="close-np" aria-label="Back" title="Back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <button type="button" class="key" data-act="close-np" aria-label="Close" title="Close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button>
+        <span class="grow"></span>
+        <button type="button" class="key" data-act="np-book" aria-label="The book" title="The book"><svg class="g" aria-hidden="true"><use href="#g-book"/></svg></button>
+      </div>
+      <div class="cover np-cover" id="np-cover"><i data-i="book"></i><img alt=""></div>
+      <div class="np-info"><h2 id="np-title">&nbsp;</h2><div class="by" id="np-ch"></div><div class="by dim" id="np-where"></div></div>
+      <div class="sk">
+        <span class="t" id="np-t0">0:00</span>
+        <input type="range" class="rg" id="np-seek" min="0" max="1" step="1" value="0" aria-label="Place in the book" data-tel="audiobooks:np-seek">
+        <span class="t" id="np-t1">0:00</span>
+      </div>
+      <div class="np-keys">
+        <button type="button" class="key" data-act="chap-prev" aria-label="Previous chapter" title="Previous chapter"><svg class="g" aria-hidden="true"><use href="#g-prev"/></svg></button>
+        <button type="button" class="key" data-act="back30" aria-label="Back 30 seconds" title="Back 30 seconds"><svg class="g" aria-hidden="true"><use href="#g-back30"/></svg></button>
+        <button type="button" class="key big" data-act="toggle" id="np-toggle" aria-label="Play" title="Play"><svg class="g" aria-hidden="true"><use href="#g-play"/></svg></button>
+        <button type="button" class="key" data-act="fwd30" aria-label="Forward 30 seconds" title="Forward 30 seconds"><svg class="g" aria-hidden="true"><use href="#g-fwd30"/></svg></button>
+        <button type="button" class="key" data-act="chap-next" aria-label="Next chapter" title="Next chapter"><svg class="g" aria-hidden="true"><use href="#g-next"/></svg></button>
+      </div>
+      <div class="np-extra">
+        <button type="button" class="key wide" data-act="speed" id="np-speed" aria-label="Speed" title="Speed"><span class="tx">1×</span></button>
+        <button type="button" class="key" data-act="sleep" id="np-sleep" aria-pressed="false" aria-label="Sleep timer" title="Sleep timer"><svg class="g" aria-hidden="true"><use href="#g-moon"/></svg><span class="cnt" id="np-sleep-t"></span></button>
+        <button type="button" class="key" data-act="play-on" id="np-on" aria-label="Play on" title="Play on"><svg class="g" aria-hidden="true"><use href="#g-devices"/></svg></button>
+      </div>
+    </aside>
+
+    {# Play on: this browser, or a pod #}
+    <div class="sheet menu" id="menu" role="menu" hidden></div>
+
+    <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+  </div>
+
+  <div class="bp-bar" id="bar" role="region" aria-label="Player" hidden>
+    <div class="b-line" aria-hidden="true"><i id="b-prog"></i></div>
+    <button type="button" class="b-now" data-act="np" aria-label="Open the player">
+      <span class="cover" id="b-cover"><i data-i="book"></i><img alt=""></span>
+      <span class="b-txt"><span class="b-title" id="b-title"></span><span class="b-sub" id="b-sub"></span></span>
+    </button>
+    <span class="lamp" id="signal" data-s="on" role="status" aria-label="Connected" title="Connected"></span>
+    <div class="b-tp">
+      <button type="button" class="key" data-act="back30" aria-label="Back 30 seconds" title="Back 30 seconds"><svg class="g" aria-hidden="true"><use href="#g-back30"/></svg></button>
+      <button type="button" class="key big" data-act="toggle" id="b-toggle" aria-label="Play" title="Play"><svg class="g" aria-hidden="true"><use href="#g-play"/></svg></button>
+    </div>
+  </div>
+
+  <div class="sr" id="live" aria-live="polite" aria-atomic="true"></div>
+  <audio id="au" preload="metadata"></audio>
+</section>
+<script src="{{ url_for('static', filename='audiobooks-pure.js') }}"></script>
+<script src="{{ url_for('static', filename='audiobooks-app.js') }}"></script>
+{% endblock %}

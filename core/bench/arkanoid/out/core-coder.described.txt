@@ -1,0 +1,66 @@
+This image is a screenshot from the classic arcade game “Arkanoid”. The image is composed of the following elements, listed from top to bottom.
+
+---
+
+**1. Background (Top and Bottom Sections)**
+- The entire background is a blue pattern composed of small, repeating hexagons. The hexagons are a dark blue, with a slight variation in shade to create a textured look. The pattern is consistent across the top and bottom portions of the image.
+- The hexagon pattern does not extend into the middle section, which is occupied by the game elements.
+
+---
+
+**2. Top Wall (Border)**
+- A horizontal row of 10 identical gray rectangular blocks forms a border at the very top of the image. These blocks are 1 pixel thick and are aligned in a single line. The color of each block is a solid light gray: `#808080`.
+- Below this gray border is a multi-row structure representing the brick wall.
+
+---
+
+**3. Brick Wall (Main Play Area)**
+- The brick wall is composed of 4 horizontal rows of colored bricks.
+- Each row contains 10 identical rectangular bricks, making a total of 40 bricks.
+- Each brick is 1 pixel thick and has a solid color. The bricks are arranged in a grid with 1-pixel black gaps between them.
+- Row 1 (top): 10 solid red bricks. Color: `#FF0000`.
+- Row 2: 10 solid yellow bricks. Color: `#FFFF00`.
+- Row 3: 10 solid blue bricks. Color: `#0000FF`.
+- Row 4 (bottom): 10 solid green bricks. Color: `#00FF00`.
+
+---
+
+**4. Middle Space**
+- Below the brick wall is a large empty space, filled with the same blue hexagonal background as the top and bottom.
+- In the center of this space, there is a small, light cyan square (the ball) and a small black square (the paddle), both centered horizontally.
+- The light cyan square (ball) is 1x1 pixel. Color: `#00FFFF`.
+- The black square (paddle) is 1x1 pixel. Color: `#000000`.
+- The ball is positioned directly above the paddle, and the paddle is centered horizontally.
+
+---
+
+**5. Paddle (Bottom of Play Area)**
+- A single horizontal paddle is located just above the bottom edge of the image, centered horizontally.
+- The paddle is a long, thin rectangle, approximately 1 pixel tall and 8 pixels wide.
+- It is composed of three segments:
+  - Center: A gray rectangle. Color: `#808080`.
+  - Ends: Two orange rectangles on the left and right ends of the gray center. Color: `#FF6600`.
+  - The paddle has a black outline, giving it a 1-pixel border.
+
+---
+
+**6. Text (Bottom)**
+- At the very bottom of the image, centered horizontally, is the game’s title: “ARKANOID”.
+- The text is written in a stylized, pixelated font.
+- The font uses a black outline and a white fill with a gradient effect, transitioning from white to a purple hue toward the bottom.
+- The letter “O” in “ARKANOID” is replaced with a grid pattern, resembling a window or a lens.
+- The font size is large enough to span nearly the entire width of the image.
+- The text is rendered with sharp, angular edges and is outlined in orange (`#FF8000`).
+
+---
+
+**Summary of Dimensions (Relative to the Frame)**
+- The entire image is square, approximately 320x320 pixels (common for classic arcade games).
+- The top gray border occupies 1 row (1/40 of the total height).
+- The brick wall occupies 4 rows (4/40 = 1/10 of the total height).
+- The middle space (with ball and paddle) occupies 15 rows (15/40 = 3/8 of the total height).
+- The paddle occupies 1 row (1/40 of the total height).
+- The text occupies 1 row (1/40 of the total height).
+- The bottom blue hexagonal background occupies 15 rows (15/40 = 3/8 of the total height).
+
+All elements are aligned and centered horizontally in the image.

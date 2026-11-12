@@ -1,0 +1,16 @@
+flask>=3.0.0
+gunicorn>=21.2.0,<24        # 26.x hung on /health under gevent 26 (2026-10-31): keep the pair that worked
+gevent>=24.2.0,<26
+httpx>=0.27.0
+anthropic>=0.39.0
+# Gemini client uses httpx + REST (see clients/gemini.py for why we
+# don't use google-generativeai — gRPC + gevent worker don't cooperate).
+psutil>=5.9.0
+python-dotenv>=1.0.0
+# Google Drive API — DropShip image service
+google-auth>=2.29.0
+google-auth-oauthlib>=1.2.0
+google-api-python-client>=2.130.0
+# Service icon generation (fallback when SD is offline)
+Pillow>=10.3.0
+requests>=2.31.0

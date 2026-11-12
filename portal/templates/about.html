@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}About — Maker Portal{% endblock %}
+{% block app %}dashboard{% endblock %}
+{% block public_up %}{{ url_for('index') }}{% endblock %}
+{% block public_up_label %}Home{% endblock %}
+{% block content %}
+{# Public, no sign-in: what Maker Portal is, for anyone (and for Google's review of the OAuth consent screen's home page:
+   the app's name, its purpose, and what it does with Google data, readable without logging in). #}
+<section>
+  <h2>Maker Portal</h2>
+  <p>Maker Portal (makerportal.live) is a private home portal run by one person, {{ switch_owner }}, for himself and a few friends.
+    It is not a commercial service and has no ads.</p>
+
+  <div class="card">
+    <h3>What it does</h3>
+    <ul>
+      <li>Runs and shows the status of a few private game servers for friends.</li>
+      <li>Plays his own music, audiobook and video collections in the browser.</li>
+      <li>Skippy, a home assistant (chat and voice), answers questions and runs his house: lights, music, and a morning and bedtime summary.</li>
+      <li>Public experiments: physics demos anyone can open without signing in (<a href="{{ url_for('experiments.index') }}">Experiments</a>).</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Signing in with Google</h3>
+    <p>Sign-in uses Google only to learn your email address, so the portal knows whether you are on the list. Nothing else of yours is read.</p>
+  </div>
+
+  <div class="card">
+    <h3>Google data, for the owner only</h3>
+    <p>The owner, and only the owner, can choose to connect his own Google account so Skippy can read, <b>read only</b>, his calendar,
+      Gmail, contacts and Google Tasks. Skippy uses them for one thing: telling him about his day in the morning and bedtime routines
+      (today's events, bills and mail from people he knows, packages arriving, birthdays, to-dos). It never sends, changes or deletes
+      anything, never shares or sells the data, never shows it to anyone else, and never uses it for advertising, to train AI models,
+      or to make images. The summaries are written by a model running on his own computers. He can disconnect at any time, which
+      revokes the access at Google.</p>
+    <p>Maker Portal's use and transfer of information received from Google APIs adheres to the
+      <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
+      including the Limited Use requirements.</p>
+  </div>
+
+  <p><a href="{{ url_for('privacy') }}">Privacy policy</a> &middot; <a href="{{ url_for('index') }}">Sign in</a></p>
+</section>
+{% endblock %}

@@ -1,0 +1,12 @@
+# Real wolveix/satisfactory-server log lines from the games VM, 2026-09-30 (build CL-502094, Satisfactory 1.2 'anniversary-2026'), trimmed to the lines that matter.
+# Captured read-only through the ops workflow while the Captain started the server. The Sentry key in the client's HTTP trace is removed.
+[2026.09.30-07.11.20:793][  0]LogServer: Display: Server API listening on [::]:7777
+[2026.09.30-07.11.20:793][  0]LogServer: Display: Server API listening on '[::]:7777' Dedicated Server
+Downloading the latest version of the game...
+[----] Update complete, launching Steamcmd...
+Connecting anonymously to Steam Public...[0mOK
+[0mUnloading Steam API...[0mOK
+LogEOSShared: Initialize Initializing EOSSDK Version:1.18.1.2-47370208
+LogInit: Build: ++FactoryGame+rel-main-anniversary-2026-CL-502094
+LogInit: Engine Version: 5.6.1-502094+++FactoryGame+rel-main-anniversary-2026
+LogInit: Command Line: -Port=7777 -ReliablePort=8888 -ExternalReliablePort=8888 -ini:Engine:[/Script/FactoryGame.FGSaveSession]:mNumRotatingAutosaves=5 -ini:Engine:[/Script/Engine.GarbageCollectionSettings]:gc.MaxObjectsInEditor=2162688 -ini:Engine:[/Script/OnlineSubsystemUtils.IpNetDriver]:LanServerMaxTickRate=30 -ini:Engine:[/Script/OnlineSubsystemUtils.IpNetDriver]:NetServerMaxTickRate=30 -ini:Engine:[/Script/OnlineSubsystemUtils.IpNetDriver]:ConnectionTimeout=30 -ini:Engine:[/Script/OnlineSubsystemUtils.IpNetDriver]:InitialConnectTimeout=30 -ini:Engine:[ConsoleVariables]:wp.Runtime.EnableServerStreaming=1 -ini:Game:[/Script/Engine.GameSession]:ConnectionTimeout=30 -ini:Game:[/Script/Engine.GameSession]:InitialConnectTimeout=30 -ini:Game:[/Script/Engine.GameSession]:MaxPlayers=4 -ini:GameUserSettings:[/Script/Engine.GameSession]:MaxPlayers=4 -multihome=::

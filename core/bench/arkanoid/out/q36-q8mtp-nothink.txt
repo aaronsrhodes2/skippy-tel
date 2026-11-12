@@ -1,0 +1,450 @@
+Here is a complete, single-file HTML solution. It implements the game mechanics using HTML5 Canvas while strictly adhering to the visual description provided (colors, layout, and specific style elements like the hex background and the specific title font styling).
+
+Save the following code as an `.html` file (e.g., `arkanoid.html`) and open it in any modern web browser.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkanoid Clone</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #111;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        canvas {
+            background-color: #000033; /* Fallback color */
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+            border: 4px solid #444;
+        }
+
+        #instructions {
+            position: absolute;
+            bottom: 10px;
+            color: #888;
+            font-size: 12px;
+            text-align: center;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="640" height="480"></canvas>
+<div id="instructions">Mouse to move • Click to launch • Click to Restart</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // --- Configuration & Colors ---
+    const COLORS = {
+        bgTop: '#000033', // Dark Blue Hex
+        gray: '#808080',
+        red: '#FF0000',
+        yellow: '#FFFF00',
+        blue: '#0000FF',
+        green: '#00FF00',
+        orange: '#FF6600',
+        white: '#FFFFFF',
+        black: '#000000',
+        purple: '#990099'
+    };
+
+    // --- Game State ---
+    let gameState = 'START'; // START, PLAYING, GAMEOVER, WIN
+    let score = 0;
+    let lives = 3;
+
+    // --- Entities ---
+
+    // 1. Ball
+    const ball = {
+        x: canvas.width / 2,
+        y: canvas.height - 60,
+        radius: 6, // ~1/10th of screen height (approx 48px) -> diameter 48. Scaled down for playability.
+        dx: 0,
+        dy: 0,
+        speed: 4,
+        color: COLORS.white,
+        centerColor: COLORS.black,
+        launched: false
+    };
+
+    // 2. Paddle
+    const paddle = {
+        x: canvas.width / 2 - 60,
+        y: canvas.height - 50, // Positioned above title
+        width: 120, // ~1/3 of screen width (scaled down)
+        height: 10, // ~1/15 of screen height (scaled down)
+        colorBody: COLORS.gray,
+        colorEnd: COLORS.orange,
+        border: COLORS.black
+    };
+
+    // 3. Walls & Bricks
+    const wallHeight = 40;
+    const brickHeight = 20;
+    const brickWidth = canvas.width / 10;
+    
+    // Top Wall (10 blocks, gray)
+    const topWall = [];
+    for (let i = 0; i < 10; i++) {
+        topWall.push({ x: i * brickWidth, y: 0, width: brickWidth, height: wallHeight, status: 1, color: COLORS.gray });
+    }
+
+    // Brick Wall (4 rows x 10 cols)
+    const bricks = [];
+    const brickRows = 4;
+    const brickCols = 10;
+    
+    for (let r = 0; r < brickRows; r++) {
+        for (let c = 0; c < brickCols; c++) {
+            let color = COLORS.red;
+            if (r === 1) color = COLORS.yellow;
+            if (r === 2) color = COLORS.blue;
+            if (r === 3) color = COLORS.green;
+
+            bricks.push({
+                x: c * brickWidth,
+                y: wallHeight + (r * brickHeight),
+                width: brickWidth,
+                height: brickHeight,
+                status: 1,
+                color: color
+            });
+        }
+    }
+
+    // --- Drawing Functions ---
+
+    function drawHexagon(cx, cy, size) {
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+            ctx.lineTo(cx + size * Math.cos(i * Math.PI / 3), cy + size * Math.sin(i * Math.PI / 3));
+        }
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    function drawBackground() {
+        // Draw Hexagon Pattern
+        ctx.fillStyle = COLORS.bgTop;
+        const hexSize = 15;
+        const xStep = hexSize * 3;
+        const yStep = Math.sqrt(3) * hexSize;
+
+        for (let x = 0; x < canvas.width + hexSize; x += xStep) {
+            for (let y = 0; y < canvas.height + hexSize; y += yStep) {
+                // Offset every other column
+                let offsetX = (Math.floor(y / yStep) % 2 === 0) ? 0 : xStep / 2;
+                drawHexagon(x + offsetX, y, hexSize - 1); // -1 for gap effect
+            }
+        }
+    }
+
+    function drawBall() {
+        // White Halo
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS.white;
+        ctx.fill();
+        ctx.closePath();
+
+        // Black Center
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ball.radius * 0.5, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS.black;
+        ctx.fill();
+        ctx.closePath();
+    }
+
+    function drawPaddle() {
+        // Main Body
+        ctx.fillStyle = paddle.colorBody;
+        ctx.fillRect(paddle.x, paddle.y, paddle.width, paddle.height);
+        
+        // Orange Ends (1px wide)
+        ctx.fillStyle = paddle.colorEnd;
+        ctx.fillRect(paddle.x, paddle.y, 1, paddle.height); // Left
+        ctx.fillRect(paddle.x + paddle.width - 1, paddle.y, 1, paddle.height); // Right
+
+        // Black Border
+        ctx.strokeStyle = paddle.border;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(paddle.x, paddle.y, paddle.width, paddle.height);
+    }
+
+    function drawBricks() {
+        bricks.forEach(b => {
+            if (b.status === 1) {
+                ctx.fillStyle = b.color;
+                ctx.fillRect(b.x, b.y, b.width, b.height);
+                // Black border
+                ctx.strokeStyle = COLORS.black;
+                ctx.lineWidth = 1;
+                ctx.strokeRect(b.x, b.y, b.width, b.height);
+            }
+        });
+    }
+
+    function drawTopWall() {
+        topWall.forEach(b => {
+            if (b.status === 1) {
+                ctx.fillStyle = b.color;
+                ctx.fillRect(b.x, b.y, b.width, b.height);
+                // Black border
+                ctx.strokeStyle = COLORS.black;
+                ctx.lineWidth = 1;
+                ctx.strokeRect(b.x, b.y, b.width, b.height);
+            }
+        });
+    }
+
+    function drawTitle() {
+        const text = "ARKANOID";
+        const fontSize = 24;
+        const y = canvas.height - 15;
+        
+        ctx.font = `bold ${fontSize}px "Courier New", monospace`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "bottom";
+
+        // Calculate total width to center it
+        const totalWidth = ctx.measureText(text).width;
+        const startX = (canvas.width - totalWidth) / 2;
+        
+        // Draw characters manually to handle the "O" grid effect and gradient stripe
+        let currentX = startX;
+        
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            const charWidth = ctx.measureText(char).width;
+            const charX = currentX;
+
+            // 1. Draw Orange Outline (Simulated by drawing slightly offset and larger, or just stroke)
+            ctx.strokeStyle = COLORS.orange;
+            ctx.lineWidth = 3;
+            ctx.strokeText(char, charX + charWidth/2, y);
+
+            // 2. Draw White Fill
+            ctx.fillStyle = COLORS.white;
+            ctx.fillText(char, charX + charWidth/2, y);
+
+            // 3. Draw Purple-to-White Gradient Stripe
+            // We draw a rectangle over the text, then clip it to the text shape
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(charX, 0, charWidth, canvas.height); // Cover area
+            ctx.clip();
+            
+            // Gradient
+            const gradient = ctx.createLinearGradient(charX, y - fontSize, charX, y);
+            gradient.addColorStop(0, COLORS.purple);
+            gradient.addColorStop(1, COLORS.white);
+            ctx.fillStyle = gradient;
+            
+            // Draw stripe (middle height approx)
+            ctx.fillRect(charX, y - fontSize/2, charWidth, fontSize/3);
+            ctx.restore();
+
+            // Special handling for 'O': Draw a 3x3 grid of white squares on black bg
+            if (char === 'O') {
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(charX, 0, charWidth, canvas.height);
+                ctx.clip();
+                
+                ctx.fillStyle = COLORS.black; // Background for the O
+                ctx.fillRect(charX, y - fontSize, charWidth, fontSize);
+                
+                ctx.fillStyle = COLORS.white;
+                const sqSize = charWidth / 4;
+                const sqGap = 1;
+                for(let r=0; r<3; r++){
+                    for(let c=0; c<3; c++){
+                        ctx.fillRect(charX + sqSize + c*sqSize + sqGap, y - fontSize + sqSize + r*sqSize + sqGap, sqSize, sqSize);
+                    }
+                }
+                ctx.restore();
+            }
+
+            currentX += charWidth;
+        }
+    }
+
+    function drawUI() {
+        ctx.fillStyle = COLORS.white;
+        ctx.font = "16px Courier New";
+        ctx.textAlign = "left";
+        ctx.fillText(`Score: ${score}`, 10, 20);
+    }
+
+    function drawOverlay(msg) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.fillStyle = COLORS.white;
+        ctx.font = "30px Courier New";
+        ctx.textAlign = "center";
+        ctx.fillText(msg, canvas.width/2, canvas.height/2);
+        
+        ctx.font = "16px Courier New";
+        ctx.fillStyle = COLORS.orange;
+        ctx.fillText("Click to Start", canvas.width/2, canvas.height/2 + 40);
+    }
+
+    // --- Logic ---
+
+    function resetBall() {
+        ball.launched = false;
+        ball.x = paddle.x + paddle.width / 2;
+        ball.y = paddle.y - ball.radius - 2;
+        ball.dx = 0;
+        ball.dy = 0;
+    }
+
+    function update() {
+        if (gameState !== 'PLAYING') return;
+
+        // Move Ball
+        if (!ball.launched) {
+            ball.x = paddle.x + paddle.width / 2;
+            ball.y = paddle.y - ball.radius - 2;
+        } else {
+            ball.x += ball.dx;
+            ball.y += ball.dy;
+
+            // Wall Collisions
+            if (ball.x + ball.radius > canvas.width || ball.x - ball.radius < 0) {
+                ball.dx = -ball.dx;
+            }
+            if (ball.y - ball.radius < 0) {
+                ball.dy = -ball.dy;
+            }
+            
+            // Floor Collision (Game Over check)
+            if (ball.y + ball.radius > canvas.height) {
+                lives--;
+                if (lives === 0) {
+                    gameState = 'GAMEOVER';
+                } else {
+                    resetBall();
+                }
+            }
+
+            // Paddle Collision
+            if (
+                ball.y + ball.radius >= paddle.y &&
+                ball.y - ball.radius <= paddle.y + paddle.height &&
+                ball.x >= paddle.x &&
+                ball.x <= paddle.x + paddle.width
+            ) {
+                // Calculate hit position relative to center (-1 to 1)
+                let hitPoint = ball.x - (paddle.x + paddle.width / 2);
+                hitPoint = hitPoint / (paddle.width / 2);
+
+                // Change angle based on hit point
+                let angle = hitPoint * (Math.PI / 3); // Max 60 degrees
+                
+                ball.dx = ball.speed * Math.sin(angle);
+                ball.dy = -ball.speed * Math.cos(angle);
+            }
+
+            // Brick Collision
+            let activeBricks = 0;
+            bricks.forEach(b => {
+                if (b.status === 1) {
+                    activeBricks++;
+                    if (
+                        ball.x > b.x &&
+                        ball.x < b.x + b.width &&
+                        ball.y > b.y &&
+                        ball.y < b.y + b.height
+                    ) {
+                        ball.dy = -ball.dy;
+                        b.status = 0;
+                        score += 10;
+                    }
+                }
+            });
+
+            if (activeBricks === 0) {
+                gameState = 'WIN';
+            }
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        drawBackground();
+        drawTopWall();
+        drawBricks();
+        drawPaddle();
+        drawBall();
+        drawTitle();
+        drawUI();
+
+        if (gameState === 'START') drawOverlay("ARKANOID");
+        if (gameState === 'GAMEOVER') drawOverlay("GAME OVER");
+        if (gameState === 'WIN') drawOverlay("YOU WIN!");
+    }
+
+    function loop() {
+        update();
+        draw();
+        requestAnimationFrame(loop);
+    }
+
+    // --- Input Handling ---
+
+    document.addEventListener("mousemove", (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const rootX = e.clientX - rect.left;
+        
+        // Center paddle on mouse
+        paddle.x = rootX - paddle.width / 2;
+
+        // Clamp paddle
+        if (paddle.x < 0) paddle.x = 0;
+        if (paddle.x + paddle.width > canvas.width) paddle.x = canvas.width - paddle.width;
+    });
+
+    document.addEventListener("mousedown", () => {
+        if (gameState === 'START' || gameState === 'GAMEOVER' || gameState === 'WIN') {
+            score = 0;
+            lives = 3;
+            // Reset bricks
+            bricks.forEach(b => b.status = 1);
+            topWall.forEach(b => b.status = 1);
+            gameState = 'PLAYING';
+            resetBall();
+            // Launch immediately
+            ball.launched = true;
+            ball.dy = -ball.speed;
+            ball.dx = 2; // Slight angle
+        } else if (gameState === 'PLAYING' && !ball.launched) {
+            ball.launched = true;
+            ball.dy = -ball.speed;
+            ball.dx = 2; // Slight angle
+        }
+    });
+
+    // Start Loop
+    loop();
+
+</script>
+</body>
+</html>
+```

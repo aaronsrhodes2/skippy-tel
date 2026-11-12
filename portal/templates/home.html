@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Maker Portal{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}core{% endblock %}
+{% block content %}
+{# The launcher: one control per module (portal/modules.py), glyphs only, every one on this one screen. A module the Captain
+   retired in the Admin Graveyard is not here. The words for a screen reader are on each control (aria-label, title). The
+   names of the game servers that are up are real text: they are names people look up. #}
+<section>
+  <div class="deck" style="--rows: {{ (tiles | length + 1) // 2 }}; --rows-wide: {{ (tiles | length + 3) // 4 }}; --rows-side: {{ (tiles | length + 4) // 5 }}">
+    {% for t in tiles %}
+      <div class="unit{% if t.names %} named{% endif %}" data-app="{{ t.id }}"{% if t.state %} data-s="{{ t.state }}"{% endif %} data-tel="tile:{{ t.id }}" style="--i: {{ loop.index0 }}">
+        <i class="plate"></i>
+        <a class="hit" href="{{ t.href }}" aria-label="{{ t.label }}" title="{{ t.label }}"></a>
+        <i class="claws"><b></b><b></b><b></b></i>
+        {% if t.state %}<span class="lamp"></span>{% endif %}
+        {% if t.badge %}<span class="badge" role="status">{{ t.badge }}</span>{% endif %}
+        <svg class="g" aria-hidden="true"><use href="#g-{{ t.glyph }}"/></svg>
+        {% if t.names %}<span class="names">{% for href, name in t.names %}<a href="{{ href }}" data-tel="tile:games:{{ href.rsplit('/', 1)[-1] }}" title="{{ name }}">{{ name }}</a>{% endfor %}</span>{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

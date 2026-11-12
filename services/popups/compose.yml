@@ -1,0 +1,15 @@
+# The plumbing's test pop-up (docs/popups.md). Each family has a file like this in services/<family>-popups/compose.yml: its own
+# Compose project on skippy-pc's network, so the home reporter reaches each container by name and no shared file changes.
+#   docker compose -f services/popups/compose.yml build && docker compose -f services/popups/compose.yml up -d
+name: skippy-popups-plumbing
+services:
+  echo:
+    build: ./echo
+    container_name: skippy-popup-echo
+    restart: unless-stopped
+    networks: [skippytel]
+    logging: {driver: json-file, options: {max-size: "2m", max-file: "2"}}
+networks:
+  skippytel:
+    name: skippytel_default
+    external: true

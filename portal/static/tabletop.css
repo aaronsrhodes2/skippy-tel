@@ -1,0 +1,190 @@
+/* The Tabletop (templates/tabletop.html, static/tabletop.js): one screen, the board pans and zooms inside it. Portal colours only. */
+.tt { overflow: hidden; }
+.tt-title { flex: 1; min-width: 0; margin: 0; font: 700 1rem var(--mono); color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-view { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; outline: none;
+           border: 1px solid var(--dim-green-hi);
+           clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); }
+.tt-view.panning { cursor: grabbing; }
+.tt-view:focus-visible { border-color: var(--accent); }
+.tt-board { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; outline: 2px solid #5a3d1a;
+            /* the cork: black (see-through on the glasses), speckled with pin holes. A tiled SVG, no gradient, no fill colour. */
+            background: #000 url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='90' height='90'%3E%3Cg fill='%23FFAA00' fill-opacity='.38'%3E%3Ccircle cx='12' cy='17' r='1.6'/%3E%3Ccircle cx='58' cy='9' r='1.1'/%3E%3Ccircle cx='77' cy='51' r='1.8'/%3E%3Ccircle cx='31' cy='62' r='1.2'/%3E%3Ccircle cx='49' cy='38' r='.9'/%3E%3Ccircle cx='8' cy='80' r='1.3'/%3E%3Ccircle cx='66' cy='84' r='1'/%3E%3C/g%3E%3C/svg%3E"); }
+
+/* a card pinned to the cork: a cue card (a note) or a polaroid (a picture), each with a pin at the top */
+.tt-card { position: absolute; display: flex; flex-direction: column; background: #000; user-select: none; -webkit-user-select: none;
+           touch-action: none; cursor: pointer; }
+.tt-card.dragging { cursor: grabbing; box-shadow: 0 0 0 4px var(--accent); }
+.tt-card .pin { position: absolute; top: -14px; left: 50%; width: 28px; height: 28px; margin-left: -14px; border-radius: 50%;
+                border: 3px solid #000; z-index: 2; }
+.tt-card .pin::after { content: ""; position: absolute; left: 6px; top: 5px; width: 7px; height: 7px; border-radius: 50%; background: #000; opacity: .45; }
+.pin-0 { background: var(--red); } .pin-1 { background: var(--amber); } .pin-2 { background: var(--cyan); }
+.pin-3 { background: var(--green); } .pin-4 { background: var(--violet); }
+/* the cue card: an index card drawn in line, its red header rule and ruled lines */
+.tt-card.cue { border: 2px solid var(--ink); border-top: 8px solid var(--red); padding-top: 6px; }
+.tt-card.cue .note { padding: 14px 22px 4px; font: 34px/1.45 "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive; white-space: pre-wrap; overflow-wrap: anywhere;
+                     text-decoration: underline; text-decoration-color: rgba(0, 204, 255, .35); text-decoration-thickness: 2px; text-underline-offset: 8px; }
+/* the polaroid: a white frame drawn as a border, wide at the foot, the caption written under it */
+.tt-card.polaroid { border: 16px solid #f2f2f2; border-bottom-width: 54px; }
+.tt-card img { display: block; width: 100%; height: auto; pointer-events: none; -webkit-user-drag: none; }
+.tt-card.polaroid .cap { position: absolute; left: -16px; right: -16px; top: 100%; margin-top: 60px; padding: 0 6px; text-align: center;
+                         font: 28px/1.3 "Segoe Print", "Bradley Hand", "Comic Sans MS", cursive; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tt-card .by { align-self: flex-end; padding: 2px 12px 6px; font: 600 18px var(--mono); color: var(--muted); }
+.tt-card.polaroid .by { position: absolute; right: 0; bottom: -46px; color: #555; }
+.tt-card.mine.cue { border-left-color: var(--accent); border-right-color: var(--accent); border-bottom-color: var(--accent); }
+.ink-green  { color: var(--green); }  .ink-amber { color: var(--amber); } .ink-cyan { color: var(--cyan); }
+.ink-violet { color: var(--violet); } .ink-white { color: var(--ink); }  .ink-red  { color: var(--red); }
+
+.tt-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+            color: var(--muted); text-align: center; padding: 20px; pointer-events: none; }
+.tt-empty .g { width: 64px; height: 64px; color: var(--accent); opacity: .7; }
+.tt-empty p { margin: 0; max-width: 28em; }
+.tt-drop { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.7);
+           border: 2px dashed var(--accent); pointer-events: none; }
+.tt-drop .g { width: 72px; height: 72px; color: var(--accent); }
+
+.tt-sheet-top, .tt-sheet-bottom { flex: none; display: flex; align-items: center; gap: 8px; }
+.tt-sheet-top > .g { width: 22px; height: 22px; color: var(--accent); }
+.tt-by { font: 600 .85rem var(--mono); color: var(--muted); }
+.tt-new { flex: none; display: flex; gap: 6px; }
+.tt-new input { flex: 1; min-width: 0; height: 40px; padding: 0 10px; background: var(--panel); color: var(--ink); border: 1px solid var(--dim-green-hi); }
+.tt-new input:focus { border-color: var(--accent); outline: none; }
+.tt-card-pic { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.tt-card-pic:empty { display: none; }
+.tt-card-pic img { max-width: 100%; max-height: 100%; object-fit: contain; }
+#tt-card textarea { flex: none; width: 100%; box-sizing: border-box; resize: none; padding: 8px; background: var(--panel); color: var(--ink);
+                    border: 1px solid var(--dim-green-hi); font: 1rem var(--mono); }
+#tt-card.note textarea { flex: 1; }
+#tt-card textarea:focus { border-color: var(--accent); outline: none; }
+#tt-card textarea[readonly] { border-color: transparent; }
+.tt-inks { flex: none; display: flex; gap: 8px; }
+.tt-inks button { width: 30px; height: 30px; border: 2px solid currentColor; background: #000; border-radius: 0; padding: 0; }
+.tt-inks button[aria-checked="true"] { background: currentColor; }
+
+/* ── the Fear, the party, a hero's sheet (static/tabletop-heroes.js) ── */
+.tt-fear { flex: none; display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 10px; background: #000; color: var(--red);
+           border: 1px solid var(--dim-green-hi); font: 700 1.1rem var(--mono); cursor: pointer;
+           clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px); }
+.tt-fear .g { width: 20px; height: 20px; }
+.tt-fear.lit { border-color: var(--red); }
+.tt-fear.lit .g { animation: breathe 2.4s ease-in-out infinite; }
+.tt-fear-big { text-align: center; font: 700 4rem var(--mono); color: var(--red); }
+.tt-fear-big small { font-size: 1.2rem; color: var(--muted); margin-left: 6px; }
+.tt-fear-pips { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; width: 100%; max-width: 420px; margin: 0 auto; }
+.tt-fear-pips .pip { aspect-ratio: 1; border: 2px solid var(--red); background: #000; border-radius: 50%; padding: 0; }
+.tt-fear-pips .pip.on { background: var(--red); }
+.tt-fear-keys { justify-content: center; gap: 24px; }
+
+.clk { display: inline-flex; gap: 2px; }
+.clk i { width: 8px; height: 8px; border: 1px solid var(--cyan); }
+.clk i.on { background: var(--cyan); }
+
+.tt-hero { padding: 8px; }
+.tt-hero-name { margin: 0; font: 700 1rem var(--mono); color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tt-tabs { display: flex; gap: 4px; }
+.tt-save { font: .72rem var(--mono); color: var(--muted); }
+.tt-save[data-s="saved"] { color: var(--green); } .tt-save[data-s="not saved"] { color: var(--red); }
+.tt-hero-pg { flex: 1; min-height: 0; border: 1px solid var(--dim-green-hi); }
+.tt-hero .hs { display: block; box-sizing: border-box; margin: 6px; padding: 6px 8px; border: 1px solid var(--dim-green-hi); }
+.tt-hero .hs h3, .tt-hero .hf, .tt-hero .trait, .tt-hero .exp { break-inside: avoid; }
+.tt-hero .hs h3 { break-after: avoid; }
+.tt-hero .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 2px 10px; align-items: end; }
+.tt-hero .fields > .hf-area, .tt-hero .fields > .hf-track, .tt-hero .fields > .sub, .tt-hero .fields > .slot { grid-column: 1 / -1; }
+.tt-hero .fields > .exp { grid-column: span 2; }
+.tt-hero .hs h3 { margin: 0 0 6px; font: 700 .8rem var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+.tt-hero .hs .sub { display: block; margin: 6px 0 2px; font: 700 .72rem var(--mono); color: var(--cyan); text-transform: uppercase; }
+.tt-hero .hf { display: block; margin: 0 0 6px; }
+.tt-hero .hf .lb { display: block; font-size: .7rem; color: var(--muted); margin-bottom: 1px; }
+.tt-hero .hf input[type=text], .tt-hero .hf input[type=number], .tt-hero .hf textarea, .tt-hero .trait input[type=number] {
+  width: 100%; box-sizing: border-box; padding: 4px 6px; background: var(--panel); color: var(--ink); border: 1px solid var(--dim-green-hi);
+  font: 16px/1.3 inherit; resize: none; }
+.tt-hero input:focus, .tt-hero textarea:focus { border-color: var(--accent); outline: none; }
+.tt-hero input:disabled, .tt-hero textarea:disabled { border-color: transparent; background: transparent; color: var(--ink); opacity: 1; }
+.tt-hero .hf-num input { max-width: 6em; }
+.tt-hero .inline { display: inline-flex; align-items: center; gap: 6px; margin-right: 12px; font-size: .85rem; color: var(--ink); }
+.tt-hero input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); }
+.tt-hero .exp { display: flex; gap: 6px; }
+.tt-hero .exp .hf:first-child { flex: 1; }
+.tt-hero .exp .hf:last-child input { width: 4em; }
+.tt-hero .traits { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 6px; }
+.tt-hero .trait { display: grid; grid-template-columns: 1fr auto; gap: 2px 6px; align-items: center; padding: 4px; border: 1px solid var(--dim-green-hi); }
+.tt-hero .trait .tn { grid-column: 1 / -1; font: 700 .72rem var(--mono); text-transform: uppercase; color: var(--accent); }
+.tt-hero .trait .tv { grid-column: 1 / -1; font-size: .62rem; color: var(--muted); }
+.tt-hero .boxes { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
+.tt-hero .boxes button { width: 22px; height: 22px; padding: 0; border: 2px solid var(--accent); background: #000; border-radius: 0; cursor: pointer; }
+.tt-hero .boxes button.on { background: var(--accent); }
+.tt-hero .boxes.round button { border-radius: 50%; }
+.tt-hero .boxes.dia button { transform: rotate(45deg) scale(.82); }
+.tt-hero .boxes button:disabled { cursor: default; }
+.tt-hero .hf-track .mx { display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; }
+.tt-hero .hf-track .mx .lb { display: inline; margin: 0; }
+.tt-hero .hf-track .mx input { width: 3.6em; }
+.tt-hero .gm { border-color: var(--red); }
+.tt-hero .gm h3 { color: var(--red); }
+.tt-hero .hist { margin: 4px 0 0; padding-left: 18px; font: .68rem var(--mono); color: var(--muted); }
+.tt-hero .folder .fbar { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.tt-hero .files { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.tt-hero .file { display: flex; flex-direction: column; gap: 3px; padding: 6px; border: 1px solid var(--dim-green-hi); }
+.tt-hero .file .open { display: flex; align-items: center; justify-content: center; height: 110px; overflow: hidden; color: var(--accent); background: #000; }
+.tt-hero .file .open img { width: 100%; height: 100%; object-fit: cover; }
+.tt-hero .file .open .g { width: 40px; height: 40px; }
+.tt-hero .file .pdf { font: 700 .8rem var(--mono); margin-left: 4px; }
+.tt-hero .file .fn { font-size: .78rem; overflow-wrap: anywhere; }
+.tt-hero .file .fm { font-size: .66rem; color: var(--muted); }
+.tt-hero .file .fk { display: flex; gap: 4px; }
+.tt-hero .qref textarea { width: 100%; box-sizing: border-box; padding: 6px; background: var(--panel); color: var(--ink); border: 1px solid var(--red); font: 15px/1.4 inherit; resize: none; }
+
+/* ── the heroes along the top of a campaign's tabletop ── */
+.tt-title .tt-campaign { color: var(--ink); }
+.tt-strip { flex: none; display: flex; gap: 8px; margin: 0 0 6px; overflow: hidden; }
+.tt-herocard { flex: 0 1 200px; min-width: 120px; display: grid; grid-template-columns: auto 1fr; grid-auto-rows: auto; gap: 0 8px; align-items: center;
+               padding: 6px 10px; text-align: left; color: var(--ink); background: #05090b; border: 1px solid var(--accent);
+               clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.tt-herocard .g { grid-row: span 3; width: 26px; height: 26px; color: var(--accent); }
+.tt-herocard .nm { font: 700 .95rem var(--mono); color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-herocard .cl, .tt-herocard .pl { font-size: .72rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tt-herocard .pl { color: var(--muted); }
+.tt-herocard .clk { grid-column: 2; margin-top: 2px; }
+.tt-herocard.add { flex: 0 0 52px; min-width: 52px; display: flex; justify-content: center; border-style: dashed; }
+.tt-herocard.add .g { grid-row: auto; }
+
+/* the Fear's backdrop: a canvas behind everything else on the sheet */
+.tt-fearsheet #tt-fear-fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.tt-fearsheet > :not(canvas) { position: relative; z-index: 1; }
+.tt-fearsheet .tt-fear-big { text-shadow: 0 0 18px #000, 0 0 6px #000; }
+
+/* the hero's avatar: on their card at the table's edge, beside their name on the sheet, and the key that picks it in the folder */
+.avwrap { display: block; flex: none; overflow: hidden; border: 1px solid var(--accent); }
+.avwrap[hidden] { display: none; }
+.avwrap img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.tt-herocard .avwrap { grid-row: span 3; width: 46px; height: 46px; }
+.avwrap.sm { width: 34px; height: 34px; }
+.tt-hero .file .fk .key.on::after { background: var(--accent); } .tt-hero .file .fk .key.on .g { color: #000; }
+
+
+/* ── who sees a card: shown, fogged, hidden ── the fog is drifting lines (no fill, no gradient) over black */
+.tt-card .ttl, .tt-card.cue .note .ttl { display: block; margin-bottom: 12px; font: 700 40px/1.2 var(--mono); text-decoration: none; }
+.tt-card.fogged { display: flex; align-items: center; justify-content: center; overflow: hidden; background: #05090b; border: 2px dashed var(--violet); cursor: default; }
+.tt-card.fogged::before, .tt-card .veil {
+  content: ""; position: absolute; inset: 0; pointer-events: none; animation: fogdrift 28s linear infinite;
+  background-size: 220px 130px; background-repeat: repeat;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='130'%3E%3Cg fill='none' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M0 25C36 5 74 45 110 25S184 5 220 25' stroke='%23818CF8' stroke-opacity='.6'/%3E%3Cpath d='M0 70C36 50 74 90 110 70S184 50 220 70' stroke='%2300CCFF' stroke-opacity='.4'/%3E%3Cpath d='M0 115C36 95 74 135 110 115S184 95 220 115' stroke='%23818CF8' stroke-opacity='.5'/%3E%3C/g%3E%3C/svg%3E"); }
+.tt-card .veil { z-index: 1; background-color: rgba(5, 9, 11, .66); }
+.tt-card .veil.lifting { animation: lift 2.8s ease-out forwards; }
+.tt-card.fogged .q { position: relative; font: 700 150px/1 var(--mono); color: var(--violet); opacity: .5; }
+@keyframes fogdrift { from { background-position: 0 0; } to { background-position: 220px 65px; } }
+@keyframes lift { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-40px); } }
+.tt-card.appear { animation: pinon .8s ease-out; }
+@keyframes pinon { from { opacity: 0; } to { opacity: 1; } }
+.tt-card.gmonly.cue { border-style: dashed; }          /* a cue card is dashed when only the GM sees it; a polaroid keeps its white frame */
+.tt-card.vis-hidden { opacity: .62; }
+.tt-card .vtag, .tt-card .vkey { position: absolute; z-index: 3; display: flex; align-items: center; justify-content: center; width: 52px; height: 52px; padding: 0;
+  background: #000; border: 2px solid var(--violet); color: var(--violet); border-radius: 0; }
+.tt-card .vtag { top: -20px; right: -20px; pointer-events: none; }
+.tt-card .vkey { bottom: -22px; left: -22px; cursor: pointer; border-color: var(--accent); color: var(--accent); }
+.tt-card .vtag .g, .tt-card .vkey .g { width: 32px; height: 32px; }
+.tt-card.polaroid .vkey { bottom: -64px; }
+.tt-vis { flex: none; display: flex; gap: 8px; }
+.tt-vis [aria-checked="true"]::after { background: var(--accent); } .tt-vis [aria-checked="true"] .g { color: #000; }
+#tt-card-title { flex: none; width: 100%; box-sizing: border-box; padding: 8px; background: var(--panel); color: var(--ink); border: 1px solid var(--dim-green-hi); font: 700 1rem var(--mono); }
+#tt-card-title:focus { border-color: var(--accent); outline: none; }
+#tt-card-title[readonly] { border-color: transparent; }

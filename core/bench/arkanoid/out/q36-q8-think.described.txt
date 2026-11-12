@@ -1,0 +1,47 @@
+This is a 2D pixel art image, likely a screenshot of the game “Arkanoid”. It has a symmetrical, top-down perspective. The image is divided into three main vertical sections: the top is a solid background, the middle contains the game’s playfield, and the bottom contains the title.
+
+---
+
+**1. Background (Top and Bottom)**
+- **Top background**: A solid dark blue, patterned with a repeating checkerboard of slightly lighter and darker blue squares. The pattern is uniform across the entire top portion.
+- **Bottom background**: The same dark blue checkerboard pattern, but it extends from the bottom edge upward to just above the title text.
+
+---
+
+**2. Game Playfield (Middle Section)**
+- **Top edge**: A horizontal row of 10 identical rectangular blocks, forming a “brick wall” at the top of the playfield.
+  - Each block is 1 pixel high and 1 pixel wide.
+  - **Color**: Solid gray (`#808080`), with a 1-pixel black outline on all sides.
+- **Brick Wall**: Below the gray row, there are 4 rows of colored blocks, each row containing 10 blocks (100 blocks total). The blocks are arranged in a grid.
+  - **Row 1 (topmost row of bricks)**: 10 solid red blocks (`#FF0000`), each 1 pixel high and 1 pixel wide, with 1-pixel black outlines.
+  - **Row 2**: 10 solid yellow blocks (`#FFFF00`), each 1 pixel high and 1 pixel wide, with 1-pixel black outlines.
+  - **Row 3**: 10 solid blue blocks (`#0000FF`), each 1 pixel high and 1 pixel wide, with 1-pixel black outlines.
+  - **Row 4 (bottommost row of bricks)**: 10 solid green blocks (`#00FF00`), each 1 pixel high and 1 pixel wide, with 1-pixel black outlines.
+- **Note**: The brick wall is 4 rows high. There is a gap between the bottom row of bricks and the paddle/ball area — this gap is filled with the dark blue checkerboard background.
+
+---
+
+**3. Paddle and Ball (Center of Playfield)**
+- **Paddle**: A horizontal, 1-pixel-thick rectangle, positioned near the bottom of the playfield (just above the title).
+  - **Shape**: A rectangle 8 pixels wide and 1 pixel tall.
+  - **Color**: The main body is a dark gray (`#666666`), with 1-pixel wide red (`#FF0000`) end caps on both sides. The paddle has a 1-pixel black outline.
+- **Ball**: A small circle, centered horizontally above the paddle and positioned about 1 pixel above the paddle’s top edge.
+  - **Shape**: A perfect circle with a diameter of 1 pixel.
+  - **Color**: The ball is a cyan (`#00FFFF`) filled circle, with a 1-pixel black outline.
+
+---
+
+**4. Title Text (Bottom of Image)**
+- **Text**: The word “ARKANOID”, displayed in a stylized, angular font.
+- **Position**: Centered horizontally at the bottom of the image, resting on the dark blue checkerboard background.
+- **Font Style**: The letters are blocky and angular, with sharp points and beveled edges. The letter “O” is replaced with a circular grid pattern (a 3x3 grid of white pixels on a black background).
+- **Color and Outline**:
+  - The main fill color of the letters is white (`#FFFFFF`).
+  - The letters have a thick black (`#000000`) outline.
+  - There is a thin orange (`#FF6600`) outline around the black outline, creating a 3-layer effect.
+- **Size**: The text spans horizontally across the entire width of the image, centered vertically.
+
+---
+
+**Overall Layout**
+The image is a square. The top 1/3 is the dark blue checkerboard background, the middle 1/3 is the playfield (gray row + 4 rows of colored bricks + gap + paddle + ball), and the bottom 1/3 is the dark blue checkerboard background with the title text centered in the lower portion. All elements are pixel-perfect and aligned to integer grid positions.

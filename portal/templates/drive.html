@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}Drive — Maker Portal{% endblock %}
+{% block app %}drive{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}wheel{% endblock %}
+{% block head %}
+<style>
+  /* Drive (drive.py): one screen for the Tesla's browser. The trio (play/pause, next, the star) is one tall key down the left edge,
+     nearest the driver (2026-11-02); the other five fill 3 x 2 beside it (one cell stays empty). Upright: the trio down the left
+     half, the rest beside and below it.
+     Skippy's key IS his face (the pods' own, static/skippy-face.js); the last key is the house's lamps. */
+  #drive { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+  #drive .deck { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  #drive .deck > .unit:last-child { grid-column: auto; }
+  #drive .deck > #k-play { grid-column: 1; grid-row: 1 / span 2; }
+  @media (max-aspect-ratio: 1/1) { #drive .deck { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(0, 1fr)); } }
+  #drive .unit .g { width: 42%; max-width: 132px; stroke-width: 1.1; }
+  #drive .unit .g.sub { position: absolute; right: 14%; bottom: 22%; width: 22%; max-width: 46px; aspect-ratio: 1; z-index: 1; opacity: .9; }
+  #drive .unit .name { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #drive .unit[data-on="1"] { filter: drop-shadow(0 0 9px color-mix(in srgb, var(--accent) 70%, transparent)); }
+  #drive .unit[data-on="1"] .plate { opacity: 1; }
+  #drive .unit[aria-disabled="true"] { opacity: .35; }
+  #now { height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 6px; font: 600 16px var(--mono); color: var(--ink); min-width: 0;
+         width: 100%; max-width: 100%; box-sizing: border-box; }   /* (the page centres its children: a row left to its own width ran off both sides of a phone) */
+  #now .g { width: 26px; height: 26px; flex: none; color: var(--accent); }
+  #now-t { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #now-bar { position: relative; height: 3px; background: var(--line); margin: 0 6px; }
+  #now-bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); }
+  #vstatus { min-height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 6px; font: 600 15px var(--mono); color: var(--green); }
+  #vstatus[hidden] { display: flex !important; visibility: hidden; }
+  #vstatus .lvbar { width: 70px; height: 6px; background: var(--line); position: relative; flex: none; }
+  #vstatus .lvbar i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--green); }
+  #vstatus .vtxt { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* each key's own theme (the Captain, 2026-11-01): the book Audible orange, discovery psychedelic, library black/red/orange stripes */
+  #k-book { --accent: #ff9900 !important; }
+  #k-book .plate { opacity: .9; }
+  #k-book .plate::before { background: radial-gradient(circle at 50% 42%, rgba(255, 153, 0, .16), #0b0600 70%); }
+  #k-disc { --accent: #ff4fd8 !important; }
+  #k-disc .plate { opacity: 1; background: conic-gradient(from 0deg, #ff004c, #ffb300, #b6ff00, #00ffd5, #2b6bff, #c800ff, #ff004c);
+                   animation: drive-trip 6s linear infinite; }
+  #k-disc .plate::before { background: radial-gradient(circle at 50% 45%, rgba(120, 0, 255, .22), #05010a 72%); }
+  #k-disc .g { animation: drive-trip 6s linear infinite; }
+  @keyframes drive-trip { to { filter: hue-rotate(360deg); } }
+  #k-lib { --accent: #ff5a00 !important; }
+  #k-lib .plate { opacity: 1; background: #ff3b00; }
+  #k-lib .plate::before { background: repeating-linear-gradient(135deg, #000 0 18px, #3a0000 18px 26px, #000 26px 34px, #3a1600 34px 42px); }
+  #k-lib .g { color: #ff6a00; filter: drop-shadow(0 0 4px #c00000); }
+  #k-lib .g.sub { color: #ff2a00; }
+  @media (prefers-reduced-motion: reduce) { #k-disc .plate, #k-disc .g { animation: none; } }
+  /* the trio: play/pause, next and the star stacked in one key, a third each, split by two lines */
+  #k-play .trio { position: relative; z-index: 1; display: flex; flex-direction: column; width: 100%; height: 100%; align-items: center; justify-content: space-around; }
+  #k-play .trio .g { width: auto; height: 22%; max-width: 60%; aspect-ratio: 1; }
+  #k-play .trio .fav-g { color: var(--amber); }
+  #k-play .split { position: absolute; z-index: 1; left: 18%; right: 18%; height: 1px; background: var(--accent); opacity: .5; }
+  #k-play .split.s1 { top: 33.3%; } #k-play .split.s2 { top: 66.6%; }
+  #k-play .hit.play { bottom: 66.6%; } #k-play .hit.next { top: 33.3%; bottom: 33.3%; } #k-play .hit.fav { top: 66.6%; }
+  #k-skippy .face { position: relative; z-index: 1; height: 86%; aspect-ratio: 1; max-width: 92%; }
+  #k-skippy .face img, #k-skippy .face canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  #k-skippy .face canvas { opacity: 0; } #k-skippy.live .face canvas { opacity: 1; } #k-skippy.live .face img { display: none; }
+  #k-house .lamps { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, 1fr); gap: 10% 8%; width: 78%; }
+  #k-house .lamps i { display: flex; align-items: center; justify-content: center; aspect-ratio: 1; color: var(--muted); opacity: .45; }
+  #k-house .lamps i .g { width: 70%; max-width: 54px; height: auto; aspect-ratio: 1; stroke-width: 1.4; }
+  /* the hud mode (/hud, hud.py): purple's colour on the voice key, the hub key and the apps key in the strip, and hub mode: every key
+     goes, his face fills the screen with what was said under it, and the voice listens for "Skippy" with no touch, like a pod */
+  #drive.hud #k-skippy { --accent: var(--violet) !important; }
+  #drive .hudkeys { display: flex; align-items: center; gap: 6px; margin-left: auto; flex: none; }
+  #drive .hudkeys .key { width: 38px; height: 38px; flex: none; }
+  @media (max-width: 480px) { #drive.hud #now { gap: 6px; } #drive.hud #now > .g { display: none; } }          /* a phone: the strip's keys come first, its words take what is left */
+  #drive .hudkeys .key[hidden] { display: none; }
+  #k-flash.busy, #k-link.busy { opacity: .55; }
+  #drive .hudkeys .batt { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; font: 600 14px var(--mono); color: var(--muted); white-space: nowrap; }
+  #drive .hudkeys .batt .g { width: 20px; height: 20px; }
+  #drive .hudkeys .batt[data-lvl="ok"] { color: var(--green); } #drive .hudkeys .batt[data-lvl="low"] { color: var(--amber); } #drive .hudkeys .batt[data-lvl="crit"] { color: var(--red); }
+  #drive .hudkeys .batt[data-heat="warm"] { color: var(--amber); } #drive .hudkeys .batt[data-heat="hot"] { color: var(--red); animation: drive-blink 1.4s ease-in-out infinite; }
+  #k-forget { --accent: var(--amber); color: var(--amber); }
+  #said { min-height: 0; font: 600 20px var(--mono); color: var(--green); padding: 0 8px; overflow: hidden; display: -webkit-box;
+          -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  #said[hidden] { display: none; }
+  /* captions (heard speech, seen signs): black with the chat's dashed cyan border (bridge.css .turn.heard); the original words stay dim
+     while the English takes their place word by word */
+  #heard { display: flex; flex-direction: column; gap: 6px; padding: 0 8px; min-height: 0; }
+  #heard:empty { display: none; }
+  #heard .turn.heard { display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; margin: 0; transition: opacity .6s; }
+  #heard .turn.heard.gone { opacity: 0; }
+  #heard .turn.heard > .g { width: 22px; height: 22px; flex: none; margin-top: 2px; }
+  #heard .tx { min-width: 0; }
+  #heard .line { font: 600 20px var(--mono); color: #fff; overflow-wrap: anywhere; }
+  #heard .line .orig { color: var(--muted); }
+  #drive.hub #heard { align-items: center; } #drive.hub #heard .line { font-size: 26px; }
+  #drive.hub .deck > .unit:not(#k-skippy) { display: none; }
+  #drive.hub .deck { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+  #drive.hub .deck > #k-skippy { grid-column: 1; grid-row: 1; }
+  #drive.hub #k-skippy .plate { opacity: 0; } #drive.hub #k-skippy .claws, #drive.hub #k-skippy::before, #drive.hub #k-skippy::after { display: none; }
+  #drive.hub #said { font-size: 26px; text-align: center; }
+  #k-house .lamps i[data-ok="1"] { color: var(--green); opacity: 1; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--green) 60%, transparent)); }
+  #k-house .lamps i[data-ok="0"] { color: var(--red); opacity: 1; animation: drive-blink 1.4s ease-in-out infinite; }
+  @keyframes drive-blink { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { #k-house .lamps i[data-ok="0"], #drive .hudkeys .batt[data-heat="hot"] { animation: none; } }
+  #vstatus .vx { background: none; border: 1px solid var(--green); color: var(--green); width: 34px; height: 34px; font-size: 20px; }
+</style>
+{% endblock %}
+{% block content %}
+<section id="drive"{% if hud %} class="hud"{% endif %}
+         data-music-gate="{{ url_for('music.player_gate') }}" data-favorites="{{ url_for('music.favorites_list') }}" data-played="{{ url_for('music.favorites_played') }}" data-fav-add="{{ url_for('music.favorites_add') }}" data-tap="{{ url_for('telemetry_tap') }}"{% if hud %}
+         data-ws-send="{{ url_for('me.workshop_send') }}" data-ws-events="{{ url_for('me.workshop_events') }}"{% endif %}
+         data-book-gate="{{ url_for('audiobooks.gate') }}" data-voice-gate="{{ url_for('chat.voice_gate') }}"
+         data-send="{{ url_for('housechat.home_chat_send') }}" data-events="{{ url_for('housechat.home_chat_events') }}"
+         data-ort="{{ url_for('static', filename='vendor/ort/') }}"
+         data-sp-on="{{ '1' if spotify_in_car else '0' }}"
+         data-sp-mix="{{ url_for('drive.spotify_mix') }}" data-sp-car="{{ url_for('drive.spotify_car') }}"
+         data-sp-play="{{ url_for('drive.spotify_play') }}" data-sp-pause="{{ url_for('drive.spotify_pause') }}"
+         data-house="{{ url_for('drive.house') }}" data-last="{{ url_for('drive.last') }}" data-rooms="{{ url_for('audiobooks.rooms') }}" data-room-cmd="{{ url_for('audiobooks.command') }}" data-frames="{{ url_for('static', filename='skippy/face/') }}"
+         data-texts="{{ url_for('texts.state') }}"
+         data-vision-moments="{{ url_for('vision.listing') }}" data-vision-add="{{ url_for('vision.add_file', mid='_MID_') }}"
+         data-snapshot-lib="{{ url_for('static', filename='vendor/html2canvas.min.js') }}"{% if hud %}
+         data-vision="{{ url_for('vision.flash') }}" data-link-new="{{ url_for('authlink.new') }}" data-vision-read="{{ url_for('vision.read_signs') }}" data-vision-look="{{ url_for('vision.look') }}" data-vision-delete="{{ url_for('vision.moment_delete', mid='_MID_') }}" data-vision-keep="{{ url_for('vision.moment_keep', mid='_MID_') }}"{% endif %}>
+  <div id="now" aria-live="polite"><svg class="g" aria-hidden="true"><use id="now-g" href="#g-wheel"/></svg><span id="now-t"></span>
+    {% if hud %}<span class="hudkeys">
+      <span class="batt" id="k-batt" role="img" aria-label="Battery" title="Battery"><svg class="g" aria-hidden="true"><use href="#g-battery"/></svg><b></b></span>
+      <button type="button" class="key" id="k-link" hidden aria-label="Sign the glasses in: a one-time link for OpenViture" title="Sign the glasses in: a one-time link for OpenViture" data-tel="hud:sign-glasses-in"><svg class="g" aria-hidden="true"><use href="#g-link"/></svg></button>
+      <button type="button" class="key" id="k-forget" hidden aria-label="Forget the moment just saved" title="Forget the moment just saved" data-tel="hud:forget"><svg class="g" aria-hidden="true"><use href="#g-trash"/></svg></button>
+      <button type="button" class="key" id="k-flash" aria-label="Skippy-vision: save this moment (hold for the 10-second clip)" title="Skippy-vision: save this moment (hold for the 10-second clip)" data-tel="hud:flash"><svg class="g" aria-hidden="true"><use href="#g-camera"/></svg></button>
+      <button type="button" class="key" id="k-hub" aria-pressed="false" aria-label="Hub mode: hands-off, no touch" title="Hub mode: hands-off, no touch" data-tel="hud:hub"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg></button>
+      <a class="key" href="{{ url_for('apps') }}" aria-label="Apps" title="Apps" data-tel="hud:apps"><svg class="g" aria-hidden="true"><use href="#g-apps"/></svg></a>
+    </span>{% endif %}</div>
+  <div id="now-bar"><i></i></div>
+  <div class="deck">
+    {# The trio (the Captain, 2026-11-02): play/pause, next and the star are one key, down the left edge, nearest the driver's hand #}
+    <div class="unit" id="k-play" style="--i: 0">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <span class="trio"><svg class="g" aria-hidden="true"><use id="k-play-g" href="#g-play"/></svg><svg class="g" aria-hidden="true"><use id="k-next-g" href="#g-next"/></svg><svg class="g fav-g" aria-hidden="true"><use href="#g-star"/></svg></span>
+      <i class="split s1"></i><i class="split s2"></i>
+      <button class="hit play" type="button" aria-label="Play or pause" data-tel="drive:play-or-pause"></button>
+      <button class="hit next" type="button" aria-label="Next song, or 30 seconds on in the book" data-tel="drive:next-song-or-30"></button>
+      <button class="hit fav" type="button" aria-label="Add this song to my favorites" data-tel="drive:favorite"></button>
+    </div>
+    <div class="unit named" id="k-book" style="--accent: var(--violet); --i: 1">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <svg class="g" aria-hidden="true"><use href="#g-book"/></svg>
+      <span class="name" id="k-book-t"></span>
+      <button class="hit" type="button" aria-label="Play my audiobook" data-tel="drive:play-my-audiobook"></button>
+    </div>
+    <div class="unit named" id="k-disc" style="--accent: var(--pink); --i: 2">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <svg class="g" aria-hidden="true"><use href="#g-shuffle"/></svg><svg class="g sub" aria-hidden="true"><use href="#g-globe"/></svg>
+      <span class="name" id="k-disc-t"></span>
+      <button class="hit" type="button" aria-label="Bilby Shuffle: discovery (songs you have not heard)" data-tel="drive:shuffle-discovery"></button>
+    </div>
+    <div class="unit named" id="k-lib" style="--accent: var(--pink); --i: 3">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <svg class="g" aria-hidden="true"><use href="#g-shuffle"/></svg><svg class="g sub" aria-hidden="true"><use href="#g-star"/></svg>
+      <span class="name" id="k-lib-t"></span>
+      <button class="hit" type="button" aria-label="Bilby Shuffle: library (my favorites)" data-tel="drive:shuffle-library"></button>
+    </div>
+    <div class="unit named" id="k-skippy" style="--accent: var(--green); --i: 4">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <span class="face" aria-hidden="true"><img src="{{ url_for('static', filename='skippy/skippy-head.png') }}" alt="" width="256" height="256"><canvas width="480" height="480"></canvas></span>
+      <button class="hit voice" type="button" aria-label="{{ 'Purple Skippy' if hud else 'Skippy' }}" data-tel="drive:skippy"><svg style="display:none" aria-hidden="true"><use href="#g-ear"/></svg></button>
+    </div>
+    <div class="unit" id="k-house" style="--accent: var(--green); --i: 5">
+      <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
+      <span class="lamps">{% for id, glyph, name in lamps %}<i data-lamp="{{ id }}" title="{{ name }}"><svg class="g" aria-hidden="true"><use href="#g-{{ glyph }}"/></svg></i>{% endfor %}</span>
+      <button class="hit" type="button" aria-label="The house: what is up and reachable" data-tel="drive:the-house"></button>
+    </div>
+  </div>
+  <div id="vstatus" hidden></div>
+  {% if hud %}<div id="heard" aria-live="polite"></div>   {# other people's speech and what the glasses read, as captions (drive-app.js addCaption) #}
+  <div id="said" aria-live="polite" hidden></div>{% endif %}
+  <audio id="media" preload="auto"></audio>
+</section>
+<script src="{{ url_for('static', filename='audiobooks-pure.js') }}"></script>
+<script src="{{ url_for('static', filename='drive-pure.js') }}"></script>
+<script src="{{ url_for('static', filename='skippy-voice.js') }}"></script>
+<script src="{{ url_for('static', filename='skippy-face.js') }}"></script>
+<script src="{{ url_for('static', filename='skippy-wake.js') }}"></script>
+<script src="{{ url_for('static', filename='vision.js') }}"></script>
+<script src="{{ url_for('static', filename='texts-chip.js') }}"></script>
+<script src="{{ url_for('static', filename='vendor/ort/ort.wasm.min.js') }}"></script>
+<script src="{{ url_for('static', filename='drive-app.js') }}"></script>
+{% endblock %}

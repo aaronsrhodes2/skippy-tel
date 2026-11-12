@@ -1,0 +1,393 @@
+"""The house: what Skippy may do with the things in it, whatever they are reached through (Home Assistant, HomeKit, a TV...).
+
+A backend (a subclass of House) says which entities exist (`states()`, Home Assistant style dicts), which room each is in (`areas()`) and how to call a
+service on one (`_service()`); everything else is the same for every backend. What he may do is deliberately narrow, the standard guard rails:
+  * only these domains (lights, switches, fans, covers, climate, media players, scenes, scripts, vacuums, input booleans);
+  * locks, alarm panels and garage doors / gates are never touched unless HASS_SENSITIVE=1, and then only with an explicit confirm
+    (the one exception lives outside this class: garage.Garage.close_on_departure, which can only close, used by autoclose.py when the
+    car drives away; nothing here calls it, and no tool reaches it);
+  * a spoken name must match ONE entity: with several close matches nothing happens and the choices are given back so Skippy can ask which;
+  * every call is a named service on a named entity: no raw service calls from the model, no templates from the model.
+Secrets (tokens, pairing keys) live in the vault or state folder; they are never printed or returned.
+"""
+from __future__ import annotations
+
+import re
+
+import house_layout
+
+ALLOWED = ("light", "switch", "fan", "cover", "climate", "media_player", "scene", "script", "vacuum", "humidifier", "input_boolean")
+READ_ONLY = ("sensor", "binary_sensor", "weather", "person", "sun", "camera", "generator")                  # may be asked about, never changed
+SENSITIVE_DOMAINS = ("lock", "alarm_control_panel")
+SENSITIVE_COVERS = ("garage", "gate", "door")                                         # a cover's device_class
+MAX_LIST = 40
+GROUP_WORDS = {"light": ("light", "lights", "lamp", "lamps"), "switch": ("switch", "switches", "plug", "plugs", "outlet", "outlets"),
+               "fan": ("fan", "fans")}
+FILLER = ("the", "a", "my", "all", "every", "everything", "in", "on", "of", "stuff", "things", "devices", "and")
+GROUP_ACTIONS = ("on", "turn_on", "off", "turn_off", "toggle", "set_brightness")
+
+
+class HomeError(Exception):
+    """The house did not answer, or refused. The message is safe to say aloud."""
+
+
+HassError = HomeError                                  # the first backend's name for it
+
+
+def _norm(text: str) -> list[str]:
+    return [w for w in re.sub(r"[^a-z0-9 ]", " ", str(text).lower()).split() if w not in ("the", "a", "my", "in", "light", "lights", "lamp")] or \
+           re.sub(r"[^a-z0-9 ]", " ", str(text).lower()).split()
+
+
+class House:
+    """Subclasses: states(fresh=False) -> list of {entity_id, state, attributes}; areas() -> {entity_id: area}; _service(domain, service, data)."""
+
+    sensitive = False
+    layout: house_layout.Layout | None = None                # None: house_layout.default(), the repo's house_layout.json
+
+    def _layout(self) -> house_layout.Layout:
+        return self.layout if self.layout is not None else house_layout.default()
+
+    def rooms(self) -> dict[str, str]:
+        """{entity_id: room}: the layout's room for each thing, else its backend's own room name."""
+        lay, areas = self._layout(), self.areas()
+        out = {}
+        for s in self.states():
+            eid = s.get("entity_id", "")
+            room = lay.room_of(eid, self._label(s), areas.get(eid, ""))
+            if room or areas.get(eid):
+                out[eid] = room or areas[eid]
+        return out
+
+    def states(self, fresh: bool = False) -> list[dict]:
+        raise NotImplementedError
+
+    def areas(self) -> dict[str, str]:
+        return {}
+
+    def _service(self, domain: str, service: str, data: dict) -> None:
+        raise NotImplementedError
+
+    def invalidate(self) -> None:
+        pass
+
+    # ── what he may touch ───────────────────────────────────────────────────────
+    def _domain(self, s: dict) -> str:
+        return str(s.get("entity_id", "")).split(".", 1)[0]
+
+    def _is_sensitive(self, s: dict) -> bool:
+        d = self._domain(s)
+        if d in SENSITIVE_DOMAINS:
+            return True
+        return d == "cover" and str((s.get("attributes") or {}).get("device_class") or "") in SENSITIVE_COVERS
+
+    def _visible(self, s: dict) -> bool:
+        d = self._domain(s)
+        if d in READ_ONLY:
+            return True
+        if d in SENSITIVE_DOMAINS:
+            return self.sensitive
+        if d in ALLOWED:
+            return not self._is_sensitive(s) or self.sensitive
+        return False
+
+    def _label(self, s: dict) -> str:
+        return str((s.get("attributes") or {}).get("friendly_name") or s.get("entity_id"))
+
+    def find(self, query: str, domains: tuple | None = None) -> tuple[dict | None, list[dict]]:
+        """(the one entity, []) when the words name exactly one; (None, [close matches]) when several fit; (None, []) when none does."""
+        query = str(query or "").strip()
+        states = [s for s in self.states() if self._visible(s)]
+        if domains:
+            states = [s for s in states if self._domain(s) in domains]
+        for s in states:
+            if s["entity_id"] == query.lower():
+                return s, []
+        want = set(_norm(query))
+        if not want:
+            return None, []
+        areas = self.rooms()
+        scored = []
+        for s in states:
+            have = set(_norm(self._label(s))) | set(_norm(areas.get(s["entity_id"], "")))
+            name = set(_norm(self._label(s)))
+            hit = want & (name | set(_norm(areas.get(s["entity_id"], ""))))
+            if not hit or not want <= have:                              # every word he said must be in the name or the area
+                continue
+            scored.append((len(want & name) * 2 + len(hit), -len(name), s))
+        scored.sort(key=lambda t: (t[0], t[1]), reverse=True)
+        if not scored:
+            return None, []
+        exact = [t for t in scored if set(_norm(self._label(t[2]))) == want]
+        if len(exact) == 1:
+            return exact[0][2], []
+        top = [t for t in scored if t[0] == scored[0][0] and t[1] == scored[0][1]]
+        if len(top) == 1 and len(scored) == 1:
+            return scored[0][2], []
+        if len(top) == 1 and scored[0][0] > scored[1][0]:
+            return scored[0][2], []
+        return None, [t[2] for t in scored[:6]]
+
+    # ── the tools ───────────────────────────────────────────────────────────────
+    def devices(self, area: str = "", domain: str = "") -> str:
+        areas = self.rooms()
+        place = self._layout().place(area) if area else None          # "upstairs" is every room on it; "everywhere" is all of them
+        out = []
+        for s in self.states():
+            if self._domain(s) not in ALLOWED or not self._visible(s):
+                continue
+            if domain and self._domain(s) != domain:
+                continue
+            room = areas.get(s["entity_id"], "")
+            if place is not None and room not in place:
+                continue
+            if area and place is None and area.lower() not in room.lower():
+                continue
+            where = room if room and place is not None and len(place) > 1 else ""      # which room, when he asked about a floor or the house
+            out.append(f"{self._label(s)} ({s.get('state')}{', ' + where if where else ''})")
+        if not out:
+            return "Nothing matches in the house."
+        extra = f"; and {len(out) - MAX_LIST} more" if len(out) > MAX_LIST else ""
+        return "; ".join(out[:MAX_LIST]) + extra
+
+    def state_of(self, query: str) -> str:
+        s, close = self.find(query)
+        if s is None:
+            return self._ambiguous(query, close)
+        a = s.get("attributes") or {}
+        unit = a.get("unit_of_measurement") or ""
+        extra = ""
+        if self._domain(s) == "climate":
+            extra = f", currently {a.get('current_temperature')} degrees, set to {a.get('temperature')}"
+        if self._domain(s) == "light" and a.get("brightness") is not None:
+            extra = f", at {round(int(a['brightness']) / 255 * 100)} percent"
+        if self._domain(s) == "cover":
+            pos = a.get("current_position")
+            if isinstance(pos, (int, float)) and 0 < pos < 100 and s.get("state") == "open":
+                extra = f", {int(pos)} percent of the way"
+            if a.get("obstructed"):
+                extra += ", and its safety sensor says something is in the way"
+        if self._domain(s) == "camera":                                  # the cameras (cams.py): last person, last car, last press
+            from cams import camera_words                                # noqa: PLC0415
+            extra = camera_words(a)
+        if self._domain(s) == "generator":                               # the Generac (generac.py): battery, last exercise, faults, maintenance
+            from generac import generator_words                          # noqa: PLC0415
+            extra = generator_words(a, self.clock() if callable(getattr(self, "clock", None)) else None)
+        return f"{self._label(s)} is {s.get('state')}{(' ' + unit) if unit else ''}{extra}."
+
+    def _ambiguous(self, query: str, close: list[dict]) -> str:
+        if not close:
+            return f"I cannot find anything in the house called {query}."
+        return "That could be " + ", or ".join(self._label(c) for c in close) + ". Ask him which one; do not guess."
+
+    def control(self, target: str, action: str, value=None, confirm: bool = False) -> str:
+        action = str(action or "").lower().strip().replace(" ", "_")
+        group = self._group(target)
+        if group is not None:
+            return self._control_group(target, group, action, value)
+        s, close = self.find(target)
+        if s is None:
+            return self._ambiguous(target, close)
+        domain, eid, label = self._domain(s), s["entity_id"], self._label(s)
+        if domain in READ_ONLY:
+            return f"{label} can only be read, not changed."
+        if domain == "cover" and action in ("close", "set_position") and (s.get("attributes") or {}).get("obstructed"):
+            return f"I won't close {label}: its safety sensor says something is in the way. Tell him that; it has to be cleared first."
+        if self._is_sensitive(s) and not confirm:
+            return f"{label} needs him to confirm out loud first. Ask him, and only call again with confirm set once he has said yes."
+        service, data = self._plan(domain, action, value, s)
+        if service is None:
+            return f"I cannot {action.replace('_', ' ')} {label}."
+        self._service(domain, service, {"entity_id": eid, **data})
+        self.invalidate()
+        return f"Done: {label}, {action.replace('_', ' ')}{'' if value is None else ' ' + str(value)}."
+
+    def _group(self, target: str) -> list[dict] | None:
+        """Every thing a place-and-kind phrase names ("the upstairs lights", "everything in the kitchen", "theater"), or None when the words
+        are not a place plus a kind (then it is one thing's name). A thing whose own name is exactly the words is that one thing ("Bedroom")."""
+        rooms, rest = self._layout().split(target)
+        if rooms is None:
+            return None
+        rest_words = [w for w in house_layout.words(rest) if w not in FILLER]
+        kinds = {k for k, ws in GROUP_WORDS.items() for w in rest_words if w in ws}
+        if [w for w in rest_words if not any(w in ws for ws in GROUP_WORDS.values())]:
+            return None                                            # more than a place and a kind: a name ("kitchen under 1")
+        said = set(house_layout.words(target)) - set(FILLER)
+        everything = self.states()
+        if any(set(house_layout.words(self._label(s))) - set(FILLER) == said for s in everything):
+            return None                                            # one thing's own name ("Bedroom", "Garage door", even a hidden one)
+        visible = [s for s in everything if self._visible(s) and self._domain(s) in ("light", "switch", "fan")]
+        lay, areas = self._layout(), self.rooms()
+        out = []
+        for s in visible:
+            if areas.get(s["entity_id"]) not in rooms or self._is_sensitive(s):
+                continue
+            kind = lay.device(s["entity_id"], self._label(s)).get("kind") or ("light" if self._domain(s) == "light" else self._domain(s))
+            if kinds and kind not in kinds and not set(rest_words) & set(house_layout.words(self._label(s))):   # a plug called "Lamp" is a lamp
+                continue
+            if not kinds and kind not in ("light", "switch", "fan"):
+                continue
+            out.append(s)
+        return out or None                                         # nothing there: maybe a thing's name after all ("lamp in the office")
+
+    def _control_group(self, target: str, group: list[dict], action: str, value) -> str:
+        if action not in GROUP_ACTIONS:
+            return f"I can only switch things on or off, toggle them or dim them all at once; name the one thing to {action.replace('_', ' ')}."
+        if not group:
+            return f"Nothing I can switch is in {target}. Do not claim you did anything."
+        done, failed = [], []
+        for s in group:
+            service, data = self._plan(self._domain(s), action, value, s)
+            if service is None:
+                continue
+            try:
+                self._service(self._domain(s), service, {"entity_id": s["entity_id"], **data})
+                done.append(self._label(s))
+            except HomeError:
+                failed.append(self._label(s))
+        self.invalidate()
+        said = f"Done: {target}, {action.replace('_', ' ')}{'' if value is None else ' ' + str(value)}: {', '.join(done)}." if done else ""
+        if failed:
+            said += f" These did not answer: {', '.join(failed)}."
+        return said.strip() or f"I cannot {action.replace('_', ' ')} anything in {target}."
+
+    def _plan(self, domain: str, action: str, value, s: dict):
+        if domain == "climate" and action in ("heat", "cool", "heat_cool"):           # the thermostat's mode (the Nest: nest.py)
+            return "set_hvac_mode", {"hvac_mode": action}
+        number = None
+        if value is not None:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                return None, {}
+        switchable = ("light", "switch", "fan", "input_boolean", "vacuum", "humidifier", "media_player", "climate")
+        if action in ("on", "turn_on"):
+            return ("turn_on" if domain in switchable + ("scene", "script") else None), {}
+        if action in ("off", "turn_off"):
+            return ("turn_off" if domain in switchable else None), {}
+        if action == "toggle":
+            return ("toggle" if domain in ("light", "switch", "fan", "input_boolean") else None), {}
+        if action in ("activate", "run") and domain in ("scene", "script"):
+            return "turn_on", {}
+        if action == "set_brightness" and domain == "light" and number is not None:
+            return "turn_on", {"brightness_pct": max(1, min(100, int(number)))}
+        if action == "set_temperature" and domain == "climate" and number is not None:
+            # in the thermostat's own unit (a Nest in Fahrenheit hears 70, not 21): the backend checks the range in that unit
+            return ("set_temperature", {"temperature": number}) if 5 <= number <= 95 else (None, {})
+        if action == "set_volume" and domain == "media_player" and number is not None:
+            return "volume_set", {"volume_level": max(0, min(100, number)) / 100}
+        if domain == "cover" and action == "set_position" and number is not None:
+            return "set_cover_position", {"position": max(0, min(100, int(number)))}
+        if domain == "cover" and action in ("open", "close", "stop"):
+            return {"open": "open_cover", "close": "close_cover", "stop": "stop_cover"}[action], {}
+        if domain == "media_player" and action in ("play", "pause", "stop", "next", "previous"):
+            return {"play": "media_play", "pause": "media_pause", "stop": "media_stop", "next": "media_next_track", "previous": "media_previous_track"}[action], {}
+        if domain == "vacuum" and action in ("start", "stop", "return_to_base"):
+            return action, {}
+        if domain == "lock" and self.sensitive:
+            return {"lock": "lock", "unlock": "unlock"}.get(action), {}
+        return None, {}
+
+
+class Combined(House):
+    """Several backends as one house (HomeKit's lights and plugs, Matter's thermostat ...): one set of names, one set of guard rails.
+    Each entity is driven by the backend that reported it; one backend that is down never hides the others' things."""
+
+    def __init__(self, parts: list[House], sensitive: bool = False):
+        self.parts, self.sensitive = list(parts), sensitive
+        self._owner: dict[str, House] = {}
+
+    def states(self, fresh: bool = False) -> list[dict]:
+        out, owner = [], {}
+        for part in self.parts:
+            try:
+                rows = part.states(fresh)
+            except HomeError:
+                continue
+            for row in rows:
+                if row.get("entity_id") not in owner:      # the same name twice: the first backend keeps it
+                    owner[row["entity_id"]] = part
+                    out.append(row)
+        self._owner = owner
+        return out
+
+    def areas(self) -> dict[str, str]:
+        merged: dict[str, str] = {}
+        for part in self.parts:
+            try:
+                merged.update({k: v for k, v in part.areas().items() if k not in merged})
+            except HomeError:
+                pass
+        return merged
+
+    def invalidate(self) -> None:
+        for part in self.parts:
+            part.invalidate()
+
+    def _service(self, domain: str, service: str, data: dict) -> None:
+        part = self._owner.get(data["entity_id"])
+        if part is None:
+            self.states(fresh=True)
+            part = self._owner.get(data["entity_id"])
+        if part is None:
+            raise HomeError("I do not know that one any more.")
+        part._service(domain, service, data)
+        self.last = getattr(part, "last", {})                # homectl.py prove reads it, whichever backend did the work
+
+    def owner(self, eid: str) -> House | None:
+        if eid not in self._owner:
+            self.states(fresh=True)
+        return self._owner.get(eid)
+
+
+THERMO = r"(?:thermostat|heat(?:er|ing)?|furnace|a/?c|air conditioning)"
+SET_THERMO = re.compile(rf"\b(?:set|turn|put|make|change)\b.*\b{THERMO}\b.*?\b(?:to|at)\s+(\d{{2}})\b|\b{THERMO}\b.*?\b(?:to|at)\s+(\d{{2}})\b", re.I)
+OFF_THERMO = re.compile(rf"\bturn\s+(?:off\s+(?:the\s+)?{THERMO}|(?:the\s+)?{THERMO}\s+off)\b", re.I)
+ON_THERMO = re.compile(rf"\bturn\s+(?:on\s+(?:the\s+)?(?:heat|heater|heating|furnace)|(?:the\s+)?(?:heat|heater|heating|furnace)\s+on)\b", re.I)
+ASK_THERMO = re.compile(r"\bthermostat\b|\bhow\s+(?:warm|cold|hot)\s+is\s+it\s+(?:in\s+here|inside|in\s+the\s+house|at\s+home)\b|"
+                        r"\b(?:temperature|temp)\s+(?:in\s+here|inside|in\s+the\s+house|at\s+home)\b|\bis\s+the\s+heat\s+on\b", re.I)
+
+
+def thermostat_route(heard: str) -> tuple[str, dict] | None:
+    """A plain thermostat request, straight to the house tool ("set the thermostat to 70", "turn the heat off", "how warm is it in here?");
+    None = the model decides. Left to itself, Core said "I cannot see the thermostat" with the tool right there (2026-11-01)."""
+    h = heard or ""
+    m = SET_THERMO.search(h)
+    if m:
+        return "home_control", {"name": "thermostat", "action": "set_temperature", "value": int(m.group(1) or m.group(2))}
+    if OFF_THERMO.search(h):
+        return "home_control", {"name": "thermostat", "action": "off"}
+    if ON_THERMO.search(h):
+        return "home_control", {"name": "thermostat", "action": "heat"}
+    if ASK_THERMO.search(h):
+        return "home_state", {"name": "thermostat"}
+    return None
+
+
+TOOLS = [
+    {"name": "home_devices", "description": "List what is in the house that he can control, with each one's state. Optionally for one area (a room, a floor like 'upstairs', or 'everywhere') or one kind (light, switch, fan, cover, climate, media_player).",
+     "input_schema": {"type": "object", "properties": {"area": {"type": "string"}, "domain": {"type": "string"}}}},
+    {"name": "home_state", "description": "Ask the state of one thing in the house: a light, a temperature sensor, the thermostat, a door sensor. Use his own words for its name.",
+     "input_schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+    {"name": "home_control", "description": "Do something to one thing in the house. Actions: on, off, toggle, set_brightness (value 1-100), set_temperature (value in degrees), heat, cool, heat_cool (a thermostat's mode; off turns it off), set_volume (value 0-100), "
+                                             "open, close, stop, set_position (value 0-100) (covers), play, pause, next, previous (media players), activate (scenes, scripts). If several things fit the name, nothing happens and you must ask which. "
+                                             "Locks, alarms and the garage door need confirm=true, and only after he has said yes aloud.",
+     "input_schema": {"type": "object", "properties": {"name": {"type": "string", "description": "His words for it, e.g. 'living room lamp'; or a place and a kind for all of them at once: 'upstairs lights', 'kitchen lights', 'all the lights', 'everything downstairs' (on, off, toggle, set_brightness only)."},
+                                                       "action": {"type": "string"}, "value": {"type": "number"}, "confirm": {"type": "boolean"}},
+                      "required": ["name", "action"]}},
+]
+
+
+def run_tool(hass: House, name: str, args: dict) -> str:
+    """Never raises: whatever goes wrong comes back as a sentence Skippy can say."""
+    args = args if isinstance(args, dict) else {}
+    try:
+        if name == "home_devices":
+            return hass.devices(str(args.get("area") or ""), str(args.get("domain") or ""))
+        if name == "home_state":
+            return hass.state_of(str(args.get("name") or ""))
+        if name == "home_control":
+            return hass.control(str(args.get("name") or ""), str(args.get("action") or ""), args.get("value"), args.get("confirm") is True)
+    except HomeError as e:
+        return str(e)
+    return "I have no such tool."

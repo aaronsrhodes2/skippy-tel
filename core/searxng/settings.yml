@@ -1,0 +1,23 @@
+# SearXNG for skippy-core (docs/popup-inventory.md, section 6: purple Skippy's WebSearch). Claude Code's own WebSearch is a server-side Anthropic tool,
+# so a local model has none; this is the local one. It queries public search engines for us, keeps no account and no key, and the box's
+# tailnet-only door (core/install/tailnet.sh, :7360) is the only way to it: no limiter is needed because nothing else can reach it.
+use_default_settings: true
+general:
+  instance_name: "skippy-core search"
+  enable_metrics: false
+server:
+  bind_address: "0.0.0.0"
+  port: 8080
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  secret_key: "skippy-core-local-only-not-exposed"
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json
+  default_lang: "en"
+ui:
+  static_use_hash: true

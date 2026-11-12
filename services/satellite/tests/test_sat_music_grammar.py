@@ -1,0 +1,491 @@
+"""His music grammar (the Captain, 2026-11-01): wake + function (music / Bilby) + mode + filters + location, parsed straight to play_music's
+arguments (brain.music_grammar, no model in between) and queued by mixes.resolve: the car's discovery mix, genre families, his playlists
+(Traktor's and Spotify's, Bilby's copy preferred), each place, and a filter that matches nothing played as the closest, never a question."""
+from __future__ import annotations
+
+import asyncio
+import random
+import sys
+import threading
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import brain  # noqa: E402
+import hub  # noqa: E402
+import mixes  # noqa: E402
+
+S1 = "spotify:track:" + "1" * 22
+S2 = "spotify:track:" + "2" * 22
+S3 = "spotify:track:" + "3" * 22
+
+
+def test_his_four_phrases_parse_to_the_exact_arguments():
+    assert brain.music_grammar("skippy, bilby discovery everywhere") == {"mode": "discovery", "shuffle": True, "speaker": "everywhere"}
+    assert brain.music_grammar("skippy, play favorite music upstairs") == {"mode": "favorites", "shuffle": True, "speaker": "upstairs"}
+    assert brain.music_grammar("skippy, tell bilby to shuffle new darkwave songs") == {"new": True, "genre": "darkwave", "shuffle": True}
+    assert brain.music_grammar("hey skippy, play goth songs downstairs on discovery mode") == {
+        "mode": "discovery", "genre": "goth", "shuffle": True, "speaker": "downstairs"}
+
+
+def test_whisper_spellings_of_bilby_and_the_old_plain_forms_still_work():
+    assert brain.music_grammar("Bill be discovery everywhere.") == {"mode": "discovery", "shuffle": True, "speaker": "everywhere"}
+    assert brain.music_grammar("Tell Bill B to play music everywhere.") == {"what": "everything", "shuffle": True, "speaker": "everywhere"}
+    assert brain.bilby_route("bilby") == {"what": "everything", "shuffle": True}
+
+
+def test_the_other_parts_of_the_grammar():
+    g = brain.music_grammar
+    assert g("play my library") == {"mode": "favorites", "shuffle": True}
+    assert g("play new wave music") == {"genre": "new wave", "shuffle": True}             # "new wave" is a genre, not "new"
+    assert g("play some music by the cure in the theater") == {"artist": "cure", "speaker": "downstairs"}
+    assert g("play my gallows playlist upstairs") == {"playlist": "gallows", "speaker": "upstairs"}
+    assert g("shuffle the playlist the box") == {"playlist": "box", "shuffle": True}
+    assert g("play the album disintegration") == {"album": "disintegration"}
+    assert g("play bauhaus on discovery") == {"mode": "discovery", "artist": "bauhaus", "shuffle": True}
+    m = brain.music_route
+    assert m("I'm tired of this song") == m("drop this one") == m("remove this from my favorites") == m("never play this again") == {"action": "tired"}
+    assert m("add this to my favorites") == m("favorite this song") == {"action": "favorite"}
+    for not_this in ("pause the music", "what music is this", "play Pink Floyd upstairs", "play spotify upstairs", "turn the music down",
+                     "pay the bill by friday", "play the news"):
+        assert g(not_this) is None, not_this
+
+
+def test_each_place():
+    for said, place in (("everywhere", "everywhere"), ("in the whole house", "everywhere"), ("on both floors", "everywhere"),
+                        ("upstairs", "upstairs"), ("in the living room", "upstairs"), ("on the enclave", "upstairs"),
+                        ("downstairs", "downstairs"), ("in the theater", "downstairs"), ("on the sony", "downstairs")):
+        assert brain.music_grammar(f"play goth music {said}")["speaker"] == place, said
+    assert "speaker" not in brain.music_grammar("play goth music")                      # no place: where the room plays, as before
+
+
+def test_discovery_is_what_he_has_not_heard_with_spotify_new_songs_one_in_four_like_the_car():
+    # the Captain, 2026-11-01: "unplayed songs from my collection, and new songs from spotify within my normal genre boundaries,
+    # omitting the songs on my favorites list"
+    all_ = [f"lib/{i}.mp3" for i in range(300)]
+    favs, played, tired = all_[:20], all_[20:120], all_[120:125]
+    sugg = [f"spotify:track:{i:022d}" for i in range(30)]
+    q = mixes.build("discovery", {"all": all_, "favorites": favs, "liked": [sugg[0]], "suggested": sugg, "played": played, "tired": tired},
+                    random.Random(1), 200)
+    assert len(q) == 200 and len(set(q)) == 200
+    assert not set(q) & set(favs + played + tired + [sugg[0]])
+    assert all(q[i].startswith("spotify:") for i in range(3, 116, 4))                 # drive-pure.js: (n + 1) % SUGGEST_EVERY == 0
+    assert sum(x.startswith("spotify:") for x in q) == 29                              # every suggestion but the liked one, while they last
+    q = mixes.build("favorites", {"all": all_, "favorites": favs[:5], "liked": [sugg[1], sugg[2]], "tired": [favs[0]]}, random.Random(1))
+    assert sorted(q) == sorted(favs[1:5] + [sugg[1], sugg[2]])                       # his one pool, minus what he is tired of
+
+
+def test_discovery_keeps_spotify_inside_his_genres():
+    goth, polka, unknown = "spotify:track:" + "g" * 22, "spotify:track:" + "p" * 22, "spotify:track:" + "u" * 22
+    genre = {"lib/1.mp3": "Gothic Rock", goth: "Gothic Rock", polka: "Polka"}.get
+    q = mixes.build("discovery", {"all": ["lib/0.mp3", "lib/1.mp3"], "favorites": ["lib/1.mp3"], "suggested": [goth, polka, unknown],
+                                  "genre": lambda k: genre(k) or ""}, random.Random(2))
+    assert sorted(x for x in q if x.startswith("spotify:")) == sorted([goth, unknown]) and "lib/1.mp3" not in q
+
+
+CATALOG = {
+    "Bauhaus/In the Flat Field/Dark Entries.mp3": ("Dark Entries", "Bauhaus", "In the Flat Field", "Gothic Rock", 100),
+    "Christian Death/Only Theatre/Romeo's Distress.mp3": ("Romeo's Distress", "Christian Death", "Only Theatre", "Deathrock", 200),
+    "Clan of Xymox/Medusa/Louise.mp3": ("Louise", "Clan of Xymox", "Medusa", "Darkwave", 900),
+    "Clan of Xymox/Medusa/Michelle.mp3": ("Michelle", "Clan of Xymox", "Medusa", "", 950),            # untagged: takes Xymox's genre
+    "Lebanon Hanover/Tomb/Gallowdance.mp3": ("Gallowdance", "Lebanon Hanover", "Tomb", "Coldwave", 990),
+    "Pink Floyd/DSOTM/Money.mp3": ("Money", "Pink Floyd", "DSOTM", "Classic Rock", 300),
+    "Front 242/Tyranny/Rhythm of Time.mp3": ("Rhythm of Time", "Front 242", "Tyranny", "Techno-Industrial", 400),
+}
+
+
+def test_genre_families():
+    assert mixes.genre_match("Gothic Rock", "goth") and mixes.genre_match("Deathrock", "goth") and mixes.genre_match("Post-Punk", "goth")
+    assert not mixes.genre_match("Rock", "goth") and not mixes.genre_match("Classic Rock", "goth")
+    assert mixes.genre_match("Coldwave", "darkwave") and mixes.genre_match("Dark Wave", "darkwave") and not mixes.genre_match("Gothic Rock", "darkwave")
+    assert mixes.genre_match("Techno-Industrial", "industrial") and mixes.genre_match("Darkwave \\ EBM \\ Industrial", "ebm")
+    q, note, _ = mixes.resolve({"genre": "goth", "shuffle": True}, CATALOG, rnd=random.Random(2))
+    assert set(q) == {p for p in CATALOG if not p.startswith(("Pink", "Front"))} and note == ""
+    q, _, _ = mixes.resolve({"genre": "darkwave", "new": True, "shuffle": True}, CATALOG, rnd=random.Random(2))
+    assert "Clan of Xymox/Medusa/Michelle.mp3" in q and "Bauhaus/In the Flat Field/Dark Entries.mp3" not in q
+
+
+def test_new_is_the_most_recently_added(monkeypatch):
+    monkeypatch.setattr(mixes, "NEW_COUNT", 2)
+    q, _, _ = mixes.resolve({"new": True, "shuffle": True}, CATALOG, rnd=random.Random(3))
+    assert set(q) == {"Lebanon Hanover/Tomb/Gallowdance.mp3", "Clan of Xymox/Medusa/Michelle.mp3"}
+
+
+def test_a_filter_that_matches_nothing_says_so_and_plays_the_closest():
+    q, note, _ = mixes.resolve({"genre": "polka", "shuffle": True}, CATALOG, rnd=random.Random(4))
+    assert set(q) == set(CATALOG) and note == "Nothing polka in his library, so here is the closest."
+    q, note, _ = mixes.resolve({"genre": "goth", "artist": "Nobody At All", "shuffle": True}, CATALOG, rnd=random.Random(4))
+    assert q and all(mixes.genre_match(mixes.genre_of(p, CATALOG, mixes.artist_genres(CATALOG)), "goth") for p in q)
+    assert "Nobody At All" in note
+    q, note, _ = mixes.resolve({"mode": "favorites"}, CATALOG, favorites=[], rnd=random.Random(4))
+    assert set(q) == set(CATALOG) and "favorites" in note
+    q, _, _ = mixes.resolve({"mode": "discovery"}, CATALOG, played=set(CATALOG) - {"Pink Floyd/DSOTM/Money.mp3"}, rnd=random.Random(4))
+    assert q == ["Pink Floyd/DSOTM/Money.mp3"]                                                     # all he hasn't heard
+
+
+def test_a_song_he_is_tired_of_is_in_no_mix():
+    out = "Clan of Xymox/Medusa/Louise.mp3"
+    for args in ({"mode": "discovery"}, {"genre": "darkwave", "shuffle": True}, {"mode": "favorites"}):
+        q, _, _ = mixes.resolve(args, CATALOG, favorites=[out, "Bauhaus/In the Flat Field/Dark Entries.mp3"], tired={out, S3},
+                                spotify=FakeSpotify(), rnd=random.Random(6))
+        assert q and out not in q and S3 not in q, args
+
+
+class FakeSpotify:
+    def __init__(self):
+        self.lists = {"night drive": {"playlist": {"name": "Night Drive"},
+                                      "tracks": [{"uri": S1, "title": "Dark Entries (2009 Remaster)", "artist": "Bauhaus"},
+                                                 {"uri": S2, "title": "Never Owned", "artist": "Somebody"}]}}
+
+    def mix(self):
+        return {"liked": [{"uri": S1, "title": "Dark Entries", "artist": "Bauhaus"}, {"uri": S3, "title": "Liked", "artist": "Clan of Xymox"}],
+                "suggested": [{"uri": S2, "title": "Never Owned", "artist": "Somebody"}]}
+
+    def playlist(self, name):
+        if name.lower() not in self.lists:
+            raise RuntimeError("no such playlist")
+        return self.lists[name.lower()]
+
+
+def test_his_playlists_are_one_thing_and_bilby_plays_what_he_owns():
+    lists = {"Gallows 03-25-26": ["Lebanon Hanover/Tomb/Gallowdance.mp3", "Bauhaus/In the Flat Field/Dark Entries.mp3", "Gone/Not/There.mp3"]}
+    q, note, ordered = mixes.resolve({"playlist": "gallows"}, CATALOG, playlists=lists)
+    assert q == lists["Gallows 03-25-26"][:2] and ordered and note == "his playlist Gallows 03-25-26"   # Traktor's DJ set, in its order
+    q, note, ordered = mixes.resolve({"playlist": "night drive"}, CATALOG, spotify=FakeSpotify(), playlists=lists)
+    assert q == ["Bauhaus/In the Flat Field/Dark Entries.mp3", S2] and ordered                        # Spotify's list, Bilby's copy first
+    assert note == "his playlist Night Drive, 1 of them from Bilby"
+    q, _, _ = mixes.resolve({"mode": "favorites"}, CATALOG, favorites=["Pink Floyd/DSOTM/Money.mp3"], spotify=FakeSpotify(), rnd=random.Random(5))
+    assert sorted(q) == sorted(["Pink Floyd/DSOTM/Money.mp3", "Bauhaus/In the Flat Field/Dark Entries.mp3", S3])
+    q, _, _ = mixes.resolve({"mode": "favorites", "genre": "darkwave"}, CATALOG, favorites=["Pink Floyd/DSOTM/Money.mp3"],
+                            spotify=FakeSpotify(), rnd=random.Random(5))
+    assert q == [S3]                                                                                   # a Spotify row has its artist's genre in Bilby
+
+
+def test_traktor_playlists_are_read_from_the_nml(tmp_path):
+    nml = tmp_path / "collection.nml"
+    nml.write_text('<?xml version="1.0"?><NML><COLLECTION><ENTRY TITLE="x"/></COLLECTION><PLAYLISTS><NODE TYPE="FOLDER" NAME="$ROOT"><SUBNODES>'
+                   '<NODE TYPE="PLAYLIST" NAME="Gallows 03-25-26"><PLAYLIST><ENTRY><PRIMARYKEY TYPE="TRACK" KEY="Macintosh HD/:Users/:a/:corrected_music/:'
+                   'Bauhaus/:In the Flat Field/:Dark Entries.mp3"/></ENTRY></PLAYLIST></NODE>'
+                   '<NODE TYPE="PLAYLIST" NAME="_LOOPS"><PLAYLIST><ENTRY><PRIMARYKEY TYPE="TRACK" KEY="x/:corrected_music/:a.mp3"/></ENTRY></PLAYLIST></NODE>'
+                   '</SUBNODES></NODE></PLAYLISTS></NML>', encoding="utf-8")
+    got = mixes.traktor_playlists(str(nml), tmp_path / "state")
+    assert got == {"Gallows 03-25-26": ["Bauhaus/In the Flat Field/Dark Entries.mp3"]}
+    assert mixes.traktor_playlists(str(nml), tmp_path / "state") == got                                # from the cache
+    assert mixes.pick_playlist(got, "gallows") == "Gallows 03-25-26" and mixes.pick_playlist(got, "polka") is None
+
+
+# ── the hub's play_music with the grammar, on the house stereo ──
+class Media:
+    async def catalog(self):
+        return CATALOG
+
+
+class Box:
+    def __init__(self):
+        self.media, self.playing, self.queue = Media(), False, []
+
+    async def play_queue(self, q):
+        self.queue = list(q)
+
+    async def pause(self):
+        self.playing = False
+
+    def title(self):
+        return ("T", "A")
+
+
+class Player:
+    spotify = None
+
+
+class House:
+    def __init__(self):
+        self.env, self.playing, self.box, self.player, self.moved, self.played = {}, False, Box(), Player(), None, None
+        self.media = self.box.media
+
+    def move(self, kinds):
+        self.moved = set(kinds)
+
+    def where(self):
+        return set(self.moved or ()), set()
+
+    async def play_tracks(self, tracks, mixed=False, limit=500, premixed=False):
+        self.played = (list(tracks), mixed, premixed)
+        return len(tracks)
+
+    async def stop(self):
+        pass
+
+
+class Room:
+    def __init__(self):
+        self.music, self.name = Box(), "theater"
+
+
+def test_the_hub_plays_the_grammar_on_the_place_named_without_asking():
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    room, house = Room(), House()
+    _, run = hub.music_tools(lambda: room, loop, favorites=None, stereo=lambda: house)
+    said = run("play_music", brain.music_grammar("hey skippy, play goth songs downstairs on discovery mode"))
+    tracks, mixed, premixed = house.played
+    assert set(tracks) == {p for p in CATALOG if not p.startswith(("Pink", "Front"))} and mixed and premixed
+    assert house.moved
+    assert said.startswith("Playing 5 tracks of goth on discovery ") and "?" not in said
+    said = run("play_music", {"genre": "polka", "speaker": "upstairs", "shuffle": True})
+    assert said.startswith("Nothing polka in his library, so here is the closest. Playing 7 tracks")
+    said = run("play_music", {"what": "polka", "speaker": "upstairs"})                     # a free word that is no name: the same, not "nothing matches"
+    assert said.startswith("Nothing polka in his library, so here is the closest.")
+    loop.call_soon_threadsafe(loop.stop)
+
+
+def test_tired_of_this_song_drops_it_and_moves_on_and_favorite_this_adds_it():
+    class Favs:
+        calls: list = []
+
+        def tire(self, room, device=""):
+            self.calls.append(("tire", room))
+            return "Dropped Louise by Clan of Xymox: out of his favorites and out of every mix from now on."
+
+        def mark(self, room, device=""):
+            self.calls.append(("mark", room))
+            return "Added Louise by Clan of Xymox to his favorites."
+
+        def pool(self):
+            return [], set(), set()
+
+    class Pod(Box):
+        def __init__(self):
+            super().__init__()
+            self.playing, self.skipped = True, 0
+
+        async def next(self):
+            self.skipped += 1
+
+        async def resume(self):
+            pass
+
+        async def prev(self):
+            pass
+
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    room, favs, house = Room(), Favs(), House()
+    house.box = Pod()                                               # the station plays it: the hub is only the remote
+    house.playing = True
+    _, run = hub.music_tools(lambda: room, loop, favorites=favs, stereo=lambda: house)
+    assert run("music", brain.music_route("I'm tired of this song")).startswith("Dropped Louise") and house.box.skipped == 1
+    assert run("music", brain.music_route("add this to my favorites")).startswith("Added Louise") and house.box.skipped == 1
+    assert favs.calls == [("tire", "theater"), ("mark", "theater")]
+    loop.call_soon_threadsafe(loop.stop)
+
+
+def test_local_first_a_spotify_song_he_owns_plays_from_bilby_and_a_refusal_moves_on():
+    # the Captain, 2026-11-01: "fall back to bilby, and prefer bilby use local library versions to spotify versions of songs"
+    import music
+
+    class Media:
+        async def catalog(self):
+            return {"Bauhaus/In the Flat Field/Dark Entries.mp3": ("Dark Entries", "Bauhaus", "In the Flat Field"),
+                    "Massive Attack/Mezzanine/Teardrop.mp3": ("Teardrop", "Massive Attack", "Mezzanine")}
+
+        def track_url(self, path, start, towards=""):
+            return "http://x/" + path
+
+    class Player:                                                   # the stereo without DJ mode: play_spotify says whether Spotify took it
+        def __init__(self):
+            self.played, self.asked = [], []
+
+        async def play(self, url):
+            self.played.append(url)
+
+        async def play_spotify(self, uri, pos=0.0):
+            self.asked.append(uri)
+            return False                                            # a 429
+
+        async def stop(self):
+            pass
+
+    async def go():
+        p = Player()
+        box = music.BoxMusic(p, Media(), log=lambda *_: None)
+        q = box.add_spotify([{"uri": S1, "title": "Dark Entries (2009 Remaster)", "artist": "Bauhaus"},
+                             {"uri": S2, "title": "Teardrop (feat. Elizabeth Fraser)", "artist": "Massive Attack, Elizabeth Fraser"},
+                             {"uri": S3, "title": "Never Owned", "artist": "Somebody"}])
+        await box.play_queue([q[2], q[0], q[1]])
+        assert box.queue == [S3, "Bauhaus/In the Flat Field/Dark Entries.mp3", "Massive Attack/Mezzanine/Teardrop.mp3"]
+        for _ in range(10):
+            await asyncio.sleep(0.01)
+        assert p.asked == [S3] and p.played == ["http://x/Bauhaus/In the Flat Field/Dark Entries.mp3"] and box.idx == 1
+    asyncio.run(go())
+
+
+# ── 2026-11-04: "Play heavy metal music upstairs on the enclave" searched the library for "heavy metal on enclave" ──────────────────────────────────
+# The grammar took out only the FIRST place phrase, so the second stayed in the search words, nothing matched, the closest (a shuffle of everything) played, and the
+# housekeeper upstairs was told the library "is apparently empty" of metal. Before that, at 08:20 and 08:21, two requests the grammar did not understand reached the
+# model, which said "Playing ..." and "*turns an imaginary dial*" and called no tool: the music never left the theater's own speakers.
+def test_a_request_that_names_two_places_loses_both_from_the_search_words():
+    g = brain.music_grammar
+    metal = {"speaker": "upstairs", "genre": "heavy metal", "shuffle": True}
+    assert g("Play heavy metal music upstairs on the enclave") == metal
+    assert g("play heavy metal music on the enclave upstairs") == metal
+    assert g("play heavy metal upstairs in the living room") == metal
+    assert g("play heavy metal for the maid on the upstairs stereo") == metal
+    assert g("play goth music downstairs on the sony") == {"speaker": "downstairs", "genre": "goth", "shuffle": True}
+    assert g("play goth music upstairs and downstairs")["speaker"] == "everywhere"          # two different places are both
+    assert g("play music on the upstairs stereo") == {"speaker": "upstairs", "what": "everything", "shuffle": True}   # "stereo" was searched for as a name
+    assert g("play goth music on the stereo")["speaker"] == "stereo"                        # where it plays now
+    assert g("play house music") == {"genre": "house", "shuffle": True}                     # "house" alone was "the whole house": everywhere, the whole library
+    assert g("play goth music in the house")["speaker"] == "everywhere"
+    assert g("play stereo love") is None                                                    # a song, not a speaker
+
+
+def test_polite_and_explaining_words_around_a_request_are_not_search_words():
+    g = brain.music_grammar
+    metal = {"genre": "heavy metal", "shuffle": True}
+    assert g("Skippy, make sure you play heavy metal today.") == metal                      # 08:20: not a plain request, so the model heard it, and claimed
+    assert g("I want to hear some heavy metal tonight") == metal and g("go ahead and play heavy metal") == metal
+    assert g("hey skippy, could you please play heavy metal music upstairs") == {**metal, "speaker": "upstairs"}
+    assert g("Play heavy metal music upstairs. The maid is coming over to clean and they like heavy metal") == {**metal, "speaker": "upstairs"}
+    assert g("Play heavy metal. Upstairs.") == {**metal, "speaker": "upstairs"}              # a place said on its own is part of the request
+    assert g("play some music by Mr. Mister") == {"artist": "mr mister"}                    # "Mr." does not end a sentence
+    assert g("Play some music by U.S. Girls") == {"artist": "u s girls"}                    # nor does an initialism: one word after it is no explanation
+    assert g("play jazz") == {"genre": "jazz", "shuffle": True}                             # a genre needs no "music" after it
+    for not_this in ("play Pink Floyd upstairs", "play it", "what is playing upstairs", "do you like playing music"):
+        assert g(not_this) is None, not_this
+
+
+def test_play_it_on_the_upstairs_stereo_moves_the_music_it_is_not_a_search_for_a_song_called_it():
+    s = brain.speakers_route
+    for said in ("Play it on the upstairs stereo. The maid is coming over to clean and they like heavy metal", "play it upstairs", "put it on the enclave",
+                 "put the music on the enclave", "Skippy, play it in the living room please"):
+        assert s(said) == {"what": "music", "place": "upstairs", "play": True}, said         # `play`: with nothing playing, the library starts there
+    assert s("move the music to the enclave") == {"what": "music", "place": "upstairs"}
+    assert s("send it everywhere") == {"what": "music", "place": "everywhere"} and s("switch to downstairs") == {"what": "music", "place": "downstairs"}
+    assert s("play it in the theater and upstairs") == {"what": "music", "place": "everywhere", "play": True}
+    for not_this in ("play it", "play it back", "play goth music upstairs", "play the music upstairs", "turn it up upstairs", "play it upstairs, then turn it up",
+                     "play Pink Floyd upstairs", "put the lights on upstairs"):
+        assert s(not_this) is None, not_this
+
+
+def test_the_hub_moves_the_music_and_a_place_the_model_left_in_what_still_plays_there():
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    room, house = Room(), House()
+    _, run = hub.music_tools(lambda: room, loop, favorites=None, stereo=lambda: house)
+    house.playing = True
+    assert run("speakers", {"what": "music", "place": "upstairs"}) .startswith("Done: the music plays upstairs") and house.moved == {"enclave"}
+    # the model's own call, with the place inside the words (what the grammar did to the Captain's sentence): cleaned after a plain search finds nothing
+    house.moved = None
+    said = run("play_music", {"what": "darkwave on the enclave"})
+    assert said.startswith("Playing 3 tracks") and house.moved == {"enclave"} and "enclave" not in said
+    said = run("play_music", {"what": "darkwave today", "speaker": "downstairs"})
+    assert said.startswith("Playing 3 tracks") and house.moved == {"hdmi"}                   # a speaker it was given wins; "today" is no part of a name
+    said = run("play_music", {"what": "polka upstairs on the enclave"})
+    assert said.startswith("Nothing polka in his library, so here is the closest.") and house.moved == {"enclave"}
+    loop.call_soon_threadsafe(loop.stop)
+
+
+def test_a_bare_genre_in_a_free_what_is_a_genre_before_it_is_a_title_search_and_band_names_keep_their_places():
+    # the library check, 2026-11-04: "heavy metal" found 3 songs by TITLE (Pantera's "Heavy Metal Rules") against 1,941 tagged metal, "metal" 191 against 1,941
+    class MetalMedia:
+        async def catalog(self):
+            return {"Pantera/Vulgar/Heavy Metal Rules.mp3": ("Heavy Metal Rules", "Pantera", "Vulgar", "Pop", 1),                  # a decoy: the title says it, the tag does not
+                    "Slayer/Reign in Blood/Raining Blood.mp3": ("Raining Blood", "Slayer", "Reign in Blood", "Metal", 2),
+                    "Judas Priest/Painkiller/Painkiller.mp3": ("Painkiller", "Judas Priest", "Painkiller", "Metal", 3),
+                    "Living Colour/Vivid/Cult of Personality.mp3": ("Cult of Personality", "Living Colour", "Vivid", "Rock", 4),
+                    "Theatre of Tragedy/Aegis/Cassandra.mp3": ("Cassandra", "Theatre of Tragedy", "Aegis", "Gothic Rock", 5)}
+
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    room, house = Room(), House()
+    house.media = MetalMedia()
+    _, run = hub.music_tools(lambda: room, loop, favorites=None, stereo=lambda: house)
+    metal = {"Slayer/Reign in Blood/Raining Blood.mp3", "Judas Priest/Painkiller/Painkiller.mp3"}
+    for what in ("heavy metal", "Heavy Metal", "some loud metal music", "heavy metal today"):
+        house.moved, house.played = None, None
+        said = run("play_music", {"what": what, "speaker": "stereo"})                  # "stereo": the speakers stay where they are
+        assert set(house.played[0]) == metal and said.startswith("Playing 2 tracks") and house.moved is None, (what, said)
+    for what in ("heavy metal on enclave", "heavy metal for the maid upstairs"):          # a place said in the words (and no speaker given) is where it plays
+        house.moved, house.played = None, None
+        said = run("play_music", {"what": what})
+        assert set(house.played[0]) == metal and house.moved == {"enclave"}, (what, said, house.moved)
+    house.moved = None
+    run("play_music", {"what": "heavy metal on the stereo"})                           # "on the stereo": where it plays now, so the speakers are left alone
+    assert house.moved is None
+    # a band whose name holds a place word keeps it; only a place after a preposition (or plainly one, "upstairs") is a place
+    for what, tracks, moved in (("Living Colour on the enclave", {"Living Colour/Vivid/Cult of Personality.mp3"}, {"enclave"}),
+                                ("Theatre of Tragedy upstairs", {"Theatre of Tragedy/Aegis/Cassandra.mp3"}, {"enclave"}),
+                                ("Judas Priest in the living room", {"Judas Priest/Painkiller/Painkiller.mp3"}, {"enclave"})):
+        house.moved, house.played = None, None
+        run("play_music", {"what": what})
+        assert set(house.played[0]) == tracks and house.moved == moved, (what, house.played, house.moved)
+    import station
+    env = {}
+    assert station.clean_what(env, "Living Colour") == ("living colour", "") and station.clean_what(env, "Basement Jaxx") == ("basement jaxx", "")
+    assert station.clean_what(env, "heavy metal upstairs on the enclave today") == ("heavy metal", "the enclave")          # both places out; the first found (the longest) is the speaker
+    assert station.clean_what(env, "goth on the stereo") == ("goth", "stereo") and station.clean_what(env, "goth through the speakers upstairs")[1] == "upstairs"
+    loop.call_soon_threadsafe(loop.stop)
+
+
+def test_words_that_are_only_a_place_move_the_music_only_when_no_song_has_that_name():
+    class Media2:
+        async def catalog(self):
+            return {"Enclave/Demo/Enclave.mp3": ("Enclave", "Enclave", "Demo", "Metal", 1), "Slayer/Reign in Blood/Raining Blood.mp3": ("Raining Blood", "Slayer", "Reign", "Metal", 2)}
+
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    room, house = Room(), House()
+    house.media = Media2()
+    _, run = hub.music_tools(lambda: room, loop, favorites=None, stereo=lambda: house)
+    run("play_music", {"what": "Enclave", "speaker": "stereo"})                         # a band with that name: it plays, nothing moves
+    assert house.played[0] == ["Enclave/Demo/Enclave.mp3"] and house.moved is None
+    house.moved, house.played = None, None
+    run("play_music", {"what": "upstairs"})                                              # no song is called that: the model meant the place
+    assert house.moved == {"enclave"}
+    loop.call_soon_threadsafe(loop.stop)
+
+
+# ── 2026-11-04, the library check: dropping time words out of a request must never edit a NAME ("Tonight Alive", "Tomorrow Never Knows", Spotify's "Today's Top Hits") ──────────
+def test_time_and_audience_words_come_off_the_end_of_a_request_never_out_of_a_name():
+    g = brain.music_grammar
+    metal = {"genre": "heavy metal", "shuffle": True, "speaker": "upstairs"}
+    for tail in ("right now", "today", "tonight", "again", "thanks", "please skippy", "all day long", "every day", "for the maid", "while she cleans", "for the maid while she cleans"):
+        assert g(f"play heavy metal music upstairs {tail}") == metal, tail
+    assert g("play the music every day") == {"what": "everything", "shuffle": True}
+    for said, want in (("play the song tomorrow never knows", {"song": "tomorrow never knows"}), ("play the song all day and all of the night", {"song": "all day and all of the night"}),
+                       ("play the song now and then", {"song": "now and then"}), ("play the song right now", {"song": "right now"}), ("play the album today", {"album": "today"}),
+                       ("play the album tomorrow never knows", {"album": "tomorrow never knows"}), ("play songs by Tonight Alive", {"artist": "tonight alive"}),
+                       ("play the playlist today's top hits", {"playlist": "today's top hits"}), ("play the song tonight upstairs", {"song": "tonight", "speaker": "upstairs"})):
+        assert g(said) == want, said
+    # a request for LATER is not play-now: the model (or an alarm) hears it, it is never started at once with its time words thrown away
+    for later in ("play heavy metal music upstairs tomorrow morning", "play some music at 8 tonight", "play heavy metal music when the maid gets here", "play music after dinner"):
+        assert g(later) is None, later
+
+
+def test_more_ways_to_name_the_places_and_a_second_sentence_that_asks():
+    g = brain.music_grammar
+    metal = {"genre": "heavy metal", "shuffle": True}
+    for said, speaker in (("play heavy metal music up in the living room", "upstairs"), ("play heavy metal music down in the theater", "downstairs"), ("play heavy metal music up stairs", "upstairs"),
+                          ("play heavy metal music over the enclave speakers", "upstairs"), ("play music all over the house", "everywhere"), ("play music throughout the house", "everywhere"),
+                          ("play music in every room", "everywhere")):
+        got = g(said)
+        assert got and got["speaker"] == speaker and "what" not in {k: v for k, v in got.items() if v not in ("everything",)}, said
+    assert g("The maid is coming today. Play heavy metal music upstairs.") == {**metal, "speaker": "upstairs"}     # the sentence that asks, not the first one
+    assert g("I'd like some heavy metal on the sony") == {**metal, "speaker": "downstairs"} and g("I need some jazz upstairs") == {"genre": "jazz", "shuffle": True, "speaker": "upstairs"}
+    assert g("play the music video downstairs") is None                                           # a video is not the library
+    assert g("play songs by House of Pain") == {"artist": "house pain"}                            # "house" alone is no place
+    assert g("play some music by Basement Jaxx") == {"artist": "basement jaxx"}                   # nor is "basement": band names stay out of the place words
+
+
+def test_the_music_tools_plain_commands_are_heard_before_the_grammar_and_whatever_way_they_are_said():
+    m = brain.music_route
+    assert m("make it louder") == m("turn up the volume") == m("turn it up a bit") == {"action": "louder"}
+    assert m("a little quieter") == m("turn it down a little") == {"action": "quieter"}
+    assert m("turn the music off") == m("And turn the music off downstairs and upstairs") == {"action": "pause"}
+    assert m("play the next song") == {"action": "next"} and m("what music is this") == m("what's playing right now") == {"action": "what"}
+    assert m("set the volume to five upstairs") == {"action": "volume", "level": 5}
+    assert m("play the music again") == {"action": "resume"} and m("play the last song") == {"action": "previous"}
+    assert m("I'm tired of this song") == {"action": "tired"} and m("never play this again") == {"action": "tired"}           # "again" is part of that one
+    for not_this in ("play heavy metal music upstairs", "play it on the upstairs stereo", "play the song tomorrow never knows"):
+        assert m(not_this) is None, not_this

@@ -1,0 +1,61 @@
+/* Audiobooks on the bridge (templates/audiobooks.html, static/audiobooks-app.js). Rides on bilby-player.css (a list shown a screen at a time, covers,
+   the strip along the bottom, sheets) and the bridge's own pieces; this is only what books add: a shelf of covers, a book's panel, the player's keys.
+   Black base, no gradients, glyphs for everything that has one, colours from the portal's tokens; the accent is violet (base.html data-app="books"). */
+
+.ab .ab-filters { flex: none; display: flex; gap: 6px; margin: 2px 0 6px; }
+.ab .ab-filters .key { position: relative; flex: 1 1 0; height: 38px; }
+.ab .ab-filters .key .cnt { position: absolute; top: 2px; right: 5px; font: 700 10px var(--mono); color: var(--amber); pointer-events: none; z-index: 2; }
+.ab .ab-filters .key[aria-pressed="true"] .cnt { color: var(--black); }
+
+/* a shelf: one row of covers, with the title under each and a line for how far in */
+.vrow.shelf { display: flex; align-items: flex-start; gap: 8px; padding: 0 4px; border: 0; }
+.shelf .cell { position: relative; flex: none; display: flex; flex-direction: column; gap: 3px; text-align: left; color: var(--white); }
+.shelf .cell[hidden] { display: none; }
+.shelf .cell .cover { width: 100%; }
+.shelf .cell .bar { display: block; height: 3px; background: var(--dim-green); }
+.shelf .cell .bar b { display: block; height: 100%; width: 0; background: var(--accent); }
+.shelf .cell[data-st="finished"] .bar b { background: var(--dim-green-hi); }
+.shelf .cell[data-st="finished"] .cover { opacity: .55; }
+.shelf .cell .t { font-size: .74rem; line-height: 1.2; height: 2.4em; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; color: var(--ink); }
+.shelf .cell.cur .t { color: var(--accent); }
+.shelf .cell.cur .cover { border-color: var(--accent); }
+.shelf .cell:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
+#host[data-empty="1"]::after { content: ""; display: block; height: 60px; }
+
+/* a book's panel */
+.ab-hero { flex: none; display: flex; gap: 12px; align-items: stretch; padding: 4px; }
+.ab-hero .cover { width: 96px; height: 96px; }
+.ab-names { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; justify-content: center; }
+.ab-names h2 { margin: 0; color: var(--white); font-size: 1.05rem; line-height: 1.2; text-transform: none; letter-spacing: 0; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.ab-names .by { color: var(--accent); font-size: .85rem; }
+.ab-names .nar { color: var(--muted); font-size: .78rem; display: flex; align-items: center; gap: 4px; } .ab-names .nar .g { width: 14px; height: 14px; }
+.ab-names .meta { color: var(--muted); font: 600 .72rem var(--mono); }
+.ab-pbar { flex: none; height: 3px; margin: 2px 4px 4px; background: var(--dim-green); }
+.ab-pbar i { display: block; height: 100%; width: 0; background: var(--accent); }
+.ab-summary { margin: 0; padding: 0 4px; color: var(--ink); font-size: .84rem; line-height: 1.45; white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 9; -webkit-box-orient: vertical; overflow: hidden; }
+@media (max-height: 700px) { .ab-summary { -webkit-line-clamp: 5; } }
+.ab-acts { flex: none; display: flex; gap: 8px; justify-content: center; padding-top: 4px; }
+.ab-acts .key { width: 52px; height: 48px; position: relative; }
+.ab-acts .key.big { width: 96px; }
+.ab-acts .key .cnt, .np-keys .key .cnt, .np-extra .key .cnt { position: absolute; z-index: 2; bottom: 2px; right: 5px; font: 700 10px var(--mono); color: var(--amber); pointer-events: none; }
+.ab-acts .key.big .g { width: 26px; height: 26px; }
+.ab-acts .key[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+
+/* the player's panel */
+.np-keys { flex: none; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.np-keys .key { position: relative; width: 52px; height: 48px; }
+.np-keys .key.big { width: 76px; height: 54px; } .np-keys .key.big .g { width: 28px; height: 28px; }
+.np-extra { flex: none; display: flex; align-items: center; justify-content: center; gap: 12px; }
+.np-extra .key { position: relative; width: 52px; height: 42px; }
+.np-extra .key.wide { width: 74px; font: 700 .95rem var(--mono); }
+.np-extra .key[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+.np-info .by.dim { color: var(--muted); font-size: .78rem; }
+.ab .sk .rg { accent-color: var(--accent); }
+.ab .menu .mkey .lamp { top: 6px; left: 8px; }
+.ab .menu .mkey[disabled] { opacity: .4; }
+.ab .menu .s-head h4 .g { width: 22px; height: 22px; }
+.ab-names .meta:empty, .ab-names .nar[hidden] { display: none; }
+.ab .key .tx { position: relative; z-index: 1; }
+.shelf .cell .cover .sq { position: absolute; left: 0; bottom: 0; z-index: 2; padding: 1px 5px; background: var(--black); color: var(--accent); font: 700 .68rem var(--mono); }
+.shelf .cell .cover .sq:empty { display: none; }
+.ab .ab-filters .key.sortkey { flex: 0 0 44px; }

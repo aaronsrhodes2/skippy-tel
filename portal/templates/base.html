@@ -1,0 +1,380 @@
+<!doctype html>
+{# A page built on the bridge (static/bridge.css) says so: {% block ui %}bridge{% endblock %}, and names its glyph for the strip
+   along the top ({% block glyph %}) and, if "back" isn't Home, where back goes ({% block hud_back %}). The blocks sit in a
+   branch that never prints; they are data for the shell below (read with self.ui()). #}
+{% if false %}{% block ui %}{% endblock %}{% block glyph %}core{% endblock %}{% block hud_back %}{% endblock %}{% endif %}
+{% set bridge = (self.ui() | trim) == 'bridge' %}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+{% if bridge %}<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#000000">
+{% else %}<meta name="viewport" content="width=device-width, initial-scale=1">
+{% endif %}
+<title>{% block title %}Maker Portal{% endblock %}</title>
+{# The admiral beercan: the SVG for modern browsers, PNG/ICO for the rest, and iOS's home-screen icon. #}
+<link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+<link rel="icon" href="{{ url_for('static', filename='favicon-32.png') }}" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='apple-touch-icon.png') }}">
+<style>
+  /* ── The one design kit ────────────────────────────────────────────────────────
+     Every page and every demo builds on this: tokens, the app bar, tiles, cards,
+     buttons, forms. The portal is a phone: Home is a launcher of app tiles, and every
+     other page is an app (back button, title, a round Home button). Don't add another
+     stylesheet or another nav: add a tile (home.html) and use these classes.
+     Palette matches ChatPalette (zPhone/apps/SkippyChat): same names, same hex. */
+  :root {
+    --black: #000000; --white: #ffffff;
+    --green: #00ff88; --dim-green: #003322; --dim-green-hi: #006644;
+    --cyan: #00ffff; --amber: #ffaa00; --red: #ff4444; --violet: #aa44ff; --pink: #ff44aa; --orange: #ff8a3d;
+    --ink: #b8ffe0; --muted: #6f8b94; --panel: #05090b; --line: #16323a;
+    --radius: 12px; --radius-lg: 20px;
+    --font: -apple-system, "Segoe UI", Roboto, sans-serif; --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    --accent: var(--green);
+  }
+  /* Each app's colour, in one place. A page says which app it is: <body data-app="…">. */
+  [data-app="games"]       { --accent: var(--orange); }
+  [data-app="skippy"]      { --accent: var(--green); }
+  [data-app="music"]       { --accent: var(--pink); }     /* the audio player keeps Bilby's colour */
+  [data-app="video"]       { --accent: var(--amber); }    /* Nagatha's Video Service: a cinema marquee */
+  [data-app="books"]       { --accent: var(--violet); }   /* Audiobooks: his own library, read to him */
+  [data-app="play"]        { --accent: var(--cyan); }
+  [data-app="experiments"] { --accent: var(--violet); }
+  [data-app="tabletop"]    { --accent: var(--amber); }    /* the Tabletop: candlelight on a game table */
+  [data-app="dashboard"]   { --accent: var(--cyan); }
+  [data-app="car"]         { --accent: var(--white); }    /* the Car: his Tesla, in plain white light */
+  [data-app="alarms"]      { --accent: var(--amber); }    /* Alarms & timers: the clock that wakes him */
+  [data-app="drive"]       { --accent: var(--cyan); }     /* Drive: the keys he uses at the wheel; each key keeps its own app's colour */
+  [data-app="hud"]         { --accent: var(--green); }    /* the glasses view: the passthrough doctrine's green on black (hud.py) */
+  [data-app="texts"]       { --accent: var(--cyan); }     /* Texts: his Google Voice messages; cyan, the colour of who and where (texts.py) */
+  [data-app="me"]          { --accent: #b05cff; }    /* /me: deep purple (the whole palette is redefined in bridge-panes.css) */
+  [data-app="admin"]       { --accent: var(--red); }
+
+  * { box-sizing: border-box; }
+  /* A glyph (templates/_glyphs.html) wherever it is used, on the bridge or not: an outline in the text colour. */
+  svg.g { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: square; stroke-linejoin: miter; overflow: visible; }
+  body { background: var(--black); color: var(--white); font-family: var(--font); margin: 0; padding: 24px 16px 84px; }
+  a { color: var(--cyan); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+  main { max-width: 760px; margin: 0 auto; }
+  main.wide { max-width: 1100px; }
+  section { margin-bottom: 32px; }
+  h1 { color: var(--accent); font-size: 1.4rem; margin: 0; flex: 1; min-width: 0; }
+  h2 { color: var(--accent); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .muted { color: var(--muted); font-size: .85rem; }
+  .help { font-size: 0.8rem; color: #7fbfa0; margin: 2px 0 0; }
+  .error { color: var(--red); }
+  .warn { color: var(--amber); }
+
+  /* App bar: the home screen shows the account; an app shows back + its own title. */
+  header.appbar { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; min-height: 40px; }
+  header.appbar h1.apptitle { font-size: 1.1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  a.back { text-decoration: none; padding: 8px 12px 8px 8px; border-radius: 999px; white-space: nowrap;
+           border: 1px solid var(--dim-green-hi); background: var(--dim-green); }
+  #home-btn { position: fixed; left: 50%; transform: translateX(-50%); bottom: 14px; z-index: 40;
+              width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+              font-size: 1.3rem; text-decoration: none; color: var(--accent); background: #050505;
+              border: 1px solid var(--accent); box-shadow: 0 4px 18px rgba(0,0,0,.6); }
+  #home-btn:hover { background: var(--accent); color: var(--black); }
+  .user { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; white-space: nowrap; }
+  .user img { width: 28px; height: 28px; border-radius: 50%; }
+
+  /* Tiles: the launcher, and any grid of things to open (games, demos). Give one an
+     accent (style="--accent: …") or an app (data-app) and it colours itself. */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .tile { position: relative; display: flex; flex-direction: column; justify-content: flex-end; min-height: 168px;
+          padding: 14px; border-radius: var(--radius-lg); text-decoration: none; color: var(--white); overflow: hidden;
+          border: 1px solid var(--accent);
+          background: radial-gradient(circle at 80% 10%, color-mix(in srgb, var(--accent) 32%, transparent), transparent 62%), var(--panel);
+          transition: transform .12s ease, box-shadow .12s ease; }
+  .tile:hover, .tile:focus-visible { transform: translateY(-2px); box-shadow: 0 6px 22px rgba(0,0,0,.6); }
+  .tile h3 { margin: 0; font-size: 1.1rem; color: var(--accent); }
+  .tile p { margin: 4px 0 0; font-size: .8rem; opacity: .85;
+            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .tile .icon { font-size: 2.1rem; line-height: 1; margin-bottom: auto; }
+  .tile .pill { position: absolute; top: 12px; right: 12px; z-index: 2; }
+  /* A tile that has links of its own (the Games tile's live-game badge): the tile is a box, its title link is stretched
+     across it (so a tap anywhere opens the app), and anything with z-index 2 sits above that overlay and is its own target. */
+  .tile .tile-link { color: inherit; text-decoration: none; }
+  .tile .tile-link::after { content: ""; position: absolute; inset: 0; z-index: 1; border-radius: inherit; }   /* above the text (a <p> with opacity paints as its own layer), below the badges (z-index 2) */
+  .tile .tile-link:focus-visible { outline: none; }
+  .tile .tile-link:focus-visible::after { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .tile .pill a { position: relative; color: inherit; text-decoration: none; display: block;
+                  padding: 8px 2px; margin: -8px -2px; }        /* a bigger tap target than the small pill itself */
+  .tile .pill a:hover, .tile .pill a:focus-visible { text-decoration: underline; }
+  /* Several badges (one per live game): stacked at the top right, inside the tile, long names cut short. The row itself
+     lets clicks fall through to the tile link; only the badges catch them. */
+  .tile .pills { position: absolute; top: 12px; right: 12px; left: 12px; z-index: 2; display: flex; flex-direction: column;
+                 align-items: flex-end; gap: 6px; pointer-events: none; }
+  .tile .pills .pill { position: static; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                       pointer-events: auto; }
+  /* The game that's up (the server runs one at a time): a glowing, thicker-bordered card and a bolder badge, so it is the
+     first thing the eye finds. Border and glow only: no colour fill behind text. */
+  .tile.live { border-width: 2px; box-shadow: 0 0 0 1px var(--accent), 0 0 26px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .tile.live:hover, .tile.live:focus-visible { box-shadow: 0 0 0 1px var(--accent), 0 0 32px color-mix(in srgb, var(--accent) 55%, transparent), 0 6px 22px rgba(0,0,0,.6); }
+  .tile.live .pill { border-width: 2px; font-weight: 700; }
+  .tile.featured { grid-column: span 2; min-height: 200px; }
+  .tile.featured p { -webkit-line-clamp: 3; font-size: .85rem; }
+  @media (max-width: 420px) { .tile.featured { grid-column: span 1; } }
+  .pill { font-size: .72rem; padding: 2px 9px; border-radius: 999px; background: rgba(0,0,0,.45);
+          border: 1px solid currentColor; color: var(--accent); white-space: nowrap; }
+  .chip { font-size: .78rem; padding: 4px 12px; border-radius: 999px; cursor: pointer; background: transparent;
+          border: 1px solid var(--dim-green-hi); color: var(--ink); }
+  .chip:hover { background: var(--dim-green); }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--black); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+  /* Cards: a panel of content inside an app. */
+  .card { background: var(--dim-green); border: 1px solid var(--dim-green-hi); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+  .card h3 { margin: 0 0 4px; color: var(--white); }
+  .card p { margin: 4px 0; color: var(--ink); font-size: 0.9rem; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
+  .dot.green { background: var(--green); } .dot.grey { background: #666; } .dot.amber { background: var(--amber); }
+  code.code { font-size: 1.15rem; letter-spacing: .08em; padding: 1px 6px; border-radius: 4px;
+              background: rgba(255,255,255,.08); user-select: all; cursor: copy; }
+  pre.copy { margin: 4px 0 10px; padding: 8px 12px; border-radius: 6px; background: rgba(255,255,255,.08);
+             font-family: var(--mono); font-size: .85rem; overflow-x: auto; cursor: copy; }
+  /* The Copy button static/copy.js puts after every code.code / pre.copy: small, and it turns solid when it worked. */
+  .copy-btn { padding: 1px 10px; margin-left: 8px; font-size: .72rem; border-radius: 999px; vertical-align: middle;
+              background: transparent; border-color: var(--dim-green-hi); color: var(--ink); }
+  pre + .copy-btn { display: block; margin: -6px 0 10px; }
+  code.code.copied, pre.copy.copied { outline: 1px solid var(--accent); }
+  .copy-btn:hover, .copy-btn:focus-visible { background: var(--accent); border-color: var(--accent); color: var(--black); }
+
+  button, .btn { background: var(--dim-green-hi); color: var(--white); border: 1px solid var(--green);
+                 border-radius: 6px; padding: 8px 16px; font-size: 0.9rem; cursor: pointer; text-decoration: none;
+                 display: inline-block; font-family: inherit; }
+  button:hover, .btn:hover { background: var(--green); color: var(--black); }
+  button.danger { border-color: var(--red); }
+  button:disabled { opacity: .4; cursor: default; }
+  .flash { padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 0.9rem; }
+  .flash.ok { background: var(--dim-green); border: 1px solid var(--green); }
+  .flash.error { background: #330000; border: 1px solid var(--red); }
+  /* a skippy-pc button's command output (recovery_web.py): plain text, kept as it came, never wider than the screen */
+  .flash.detail { border: 1px solid var(--dim-green-hi); font-family: ui-monospace, monospace; font-size: 0.75rem;
+                  white-space: pre-wrap; overflow-wrap: anywhere; max-height: 16rem; overflow-y: auto; }
+  form.inline { display: inline; }
+  label.game { display: block; margin: 6px 0; }
+  label.field { display: block; margin: 10px 0 2px; font-size: 0.85rem; color: var(--ink); }
+  input[type=text], input[type=search], input[type=password], input[type=number], textarea, select {
+    background: var(--black); color: var(--white); border: 1px solid var(--dim-green-hi);
+    border-radius: 6px; padding: 8px 10px; width: 100%; font-size: 0.95rem; font-family: inherit; }
+  input[type=range] { accent-color: var(--accent); width: 100%; }
+  table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+  td, th { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+  .links a { margin-right: 12px; }
+  footer.sitefoot { max-width: 760px; margin: -8px auto 0; text-align: center; font-size: .75rem; color: var(--muted); }   /* privacy link (portal/telemetry_web.py) */
+  footer.sitefoot a { color: var(--muted); }
+  /* The build stamp (signed-in pages): its own line under the privacy link, so it never moves anything above it, one line tall
+     before and after the script swaps UTC for local time, and long enough text wraps instead of scrolling a 375 px screen. */
+  footer.sitefoot .build { display: block; margin-top: 4px; font-family: var(--mono); font-size: .68rem; overflow-wrap: anywhere; cursor: default; }
+
+  /* Skippy chat (templates/_chat.html): the one chat interface, in the Skippy app. */
+  .skippy-chat .log { overflow-y: auto; max-height: 60vh; }
+  .skippy-chat .turn { margin: 8px 0; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; font-size: .92rem; }
+  .skippy-chat .user { background: #111; border: 1px solid #333; }
+  .skippy-chat .assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: var(--ink); }
+  .skippy-chat .failed { border-color: var(--red); color: var(--red); }
+  .skippy-chat .verbs { margin: 6px 0; font-size: .85rem; }
+  .skippy-chat .verbs summary { cursor: pointer; color: var(--green); }
+  .skippy-chat .verb-cat { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+  .skippy-chat .verb-cat-name { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); min-width: 6.5em; }
+  .skippy-chat button.verb { font-size: .75rem; padding: 2px 10px; border-radius: 999px; }
+  .skippy-chat .receipt { font-size: .7rem; color: var(--muted); margin-top: 4px; }
+  .skippy-chat code.code { font-size: .95rem; }
+  /* Skippy Memory (admins only): a filterable list of saved conversations; the chosen one shows as a banner */
+  .skippy-chat .memory { margin: 6px 0; font-size: .85rem; }
+  .skippy-chat .memory summary { cursor: pointer; color: var(--green); }
+  .skippy-chat .memory input[type=search] { width: 100%; margin: 6px 0; }
+  .skippy-chat .mem-list { max-height: 40vh; overflow-y: auto; }
+  .skippy-chat .mem-row { display: block; width: 100%; text-align: left; margin: 4px 0; padding: 6px 10px; font-size: .8rem;
+                          overflow-wrap: anywhere; }
+  .skippy-chat .mem-src { font-size: .65rem; text-transform: uppercase; letter-spacing: .06em; color: var(--cyan); margin-right: 6px; }
+  .skippy-chat .continuing { border: 1px solid var(--violet); border-radius: 8px; padding: 6px 10px; margin: 6px 0; font-size: .8rem;
+                             display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+</style>
+{% if hidden_controls %}<style>/* retired by the nightly tidy (portal/adaptive.py): revive in Admin > Graveyard */
+{% for h in hidden_controls %}[data-tel="{{ h }}"], .unit:has(> [data-tel="{{ h }}"]){{ ', ' if not loop.last }}{% endfor %} { display: none !important; }</style>{% endif %}
+{% if bridge and (is_admin or (control_themes.values() | select("in", theme_choices.fancy) | list)) %}<link rel="stylesheet" id="themes-fancy" href="{{ url_for('static', filename='themes-fancy.css') }}">{% endif %}
+{% if bridge %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge.css') }}?v={{ (build.built_at if build else 'dev') }}">
+{# in the head and not deferred: a bridge page's own script (the chat's pager) runs before the page ends and needs Bridge #}
+<script src="{{ url_for('static', filename='bridge-pure.js') }}?v={{ (build.built_at if build else 'dev') }}"></script>
+<script src="{{ url_for('static', filename='bridge.js') }}?v={{ (build.built_at if build else 'dev') }}"></script>{% endif %}
+<script src="{{ url_for('static', filename='skippy-duck.js') }}?v={{ (build.built_at if build else 'dev') }}"></script>   {# Skippy's voice ducks every player on the device (music, books, the Drive page) instead of stopping it #}
+<script src="{{ url_for('static', filename='direct.js') }}?v={{ (build.built_at if build else 'dev') }}"></script>   {# SkippyDirect.pick: a gate pass's direct address (skippy-pc's own front door) when this device can reach it, else the Funnel; in the head so every page script that fetches a gate finds it #}
+{% block head %}{% endblock %}
+{# Full screen on phones and tablets: the site manifest (Add to Home Screen, no browser bars) unless the page brings its own (music, video); a page that does overrides this block with nothing. #}
+{% block pwa %}<link rel="manifest" href="{{ url_for('site_manifest') }}">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Skippy"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">{% endblock %}
+</head>
+<body{% if bridge %} class="bridge{% if captain %} captain{% endif %}"{% endif %} data-app="{% block app %}{% endblock %}">
+{% if bridge %}
+{% include "_glyphs.html" %}
+{% set on_front = request.endpoint == 'chat.index' %}{% set on_apps = request.endpoint in ('index', 'apps') %}{% set on_home = on_front or on_apps %}
+{# The strip along the top: back, what this is (a glyph), home. On the front page (Skippy): who you are, and the way to the apps. On the apps: the way back to Skippy, and the way out. #}
+<header class="hud">
+  {% if on_apps %}
+    <span class="who" role="img" aria-label="{{ user.name if user else '' }}" title="{{ user.name if user else '' }}">{% if user and user.picture %}<img src="{{ user.picture }}" alt="">{% else %}<svg class="g" aria-hidden="true" style="width:24px;height:24px"><use href="#g-user"/></svg>{% endif %}</span>
+  {% elif on_front %}
+    <a class="key" href="{{ url_for('index') }}" aria-label="Home" title="Home" data-tel="base:home"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></a>
+  {% else %}
+    <a class="key" href="{{ (self.hud_back() | trim) or url_for('index') }}" aria-label="Back" title="Back" data-tel="base:back"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></a>
+  {% endif %}
+  <span class="rail"></span>
+  {% if (self.glyph() | trim) == 'can' %}<img class="g mark face" src="{{ url_for('static', filename='skippy/skippy-head.png') }}" alt="Skippy" width="28" height="28" style="border-radius:50%">{% else %}<svg class="g mark" aria-hidden="true"><use href="#g-{{ self.glyph() | trim }}"/></svg>{% endif %}
+  <span class="rail"></span>
+  <button type="button" class="key" id="fs-key" hidden aria-label="Full screen" title="Full screen" data-tel="base:fs-key"><svg class="g" aria-hidden="true"><use href="#g-fs"/></svg></button>
+  {% if user and is_admin %}
+    <a class="key" href="{{ url_for('admin.index') }}#friends" aria-label="User access" title="User access" data-tel="base:user-access"><svg class="g" aria-hidden="true"><use href="#g-keys"/></svg></a>
+  {% endif %}
+  {% if user and on_apps %}
+    <a class="key" href="{{ url_for('auth.logout') }}" aria-label="Sign out" title="Sign out" data-tel="base:sign-out"><svg class="g" aria-hidden="true"><use href="#g-out"/></svg></a>
+  {% elif user %}
+    <a class="key" href="{{ url_for('index') }}" aria-label="Home" title="Home" data-tel="base:home"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg></a>
+  {% else %}
+    <a class="key" href="{{ url_for('index') }}" aria-label="Sign in" title="Sign in" data-tel="base:sign-in"><svg class="g" aria-hidden="true"><use href="#g-in"/></svg></a>
+  {% endif %}
+</header>
+<div class="fs-tip" id="fs-tip" hidden role="status"></div>
+{% endif %}
+{# public_up / public_up_label: where a public page's back button goes. They are data for the app bar below
+   (read with self.public_up()), so they sit in a branch that never prints. #}
+{% if false %}{% block public_up %}{% endblock %}{% block public_up_label %}Experiments{% endblock %}{% endif %}
+<main class="{% block mainclass %}{% endblock %}">
+{% if not bridge %}
+{% if user %}
+{% set on_home = request.endpoint == 'index' %}
+<header class="appbar">
+  {% if on_home %}
+    <h1>Maker Portal</h1>
+  {% else %}
+    <a class="back" href="{{ url_for('index') }}">&lsaquo; Home</a>
+    {# the app's name is its page title minus the site suffix, so no template needs a second title #}
+    <h1 class="apptitle">{{ self.title() | trim | replace(' — Maker Portal', '') | replace(' — Experiments', '') | replace(' — Browser Games', '') | replace(' — Aaron Rhodes', '') }}</h1>
+  {% endif %}
+  {% if on_home %}{# the account lives on the home screen; app bars are just back + title #}
+  <div class="user">
+    {% if user.picture %}<img src="{{ user.picture }}" alt="">{% endif %}
+    {{ user.name }} &middot; <a href="{{ url_for('auth.logout') }}">sign out</a>
+  </div>
+  {% endif %}
+</header>
+{% else %}
+{# Public pages (the Experiments): a signed-out visitor gets the same app bar, with their parent as "back". #}
+{% set up = self.public_up() | trim %}
+{% if up or request.endpoint == 'experiments.index' %}
+<header class="appbar">
+  {% if up %}<a class="back" href="{{ up }}">&lsaquo; {{ self.public_up_label() | trim }}</a>{% endif %}
+  <h1 class="apptitle">{{ self.title() | trim | replace(' — Maker Portal', '') | replace(' — Experiments', '') | replace(' — Browser Games', '') | replace(' — Aaron Rhodes', '') }}</h1>
+  <a href="{{ url_for('index') }}">Sign in</a>
+</header>
+{% endif %}
+{% endif %}
+{% endif %}
+{% for category, message in get_flashed_messages(with_categories=true) %}
+  <div class="flash {{ category }}">{{ message }}</div>
+{% endfor %}
+{% block content %}{% endblock %}
+</main>
+{% if bridge %}
+<footer class="foot">
+  <a class="key sm" href="{{ url_for('privacy') }}" aria-label="Privacy: what this site records" title="Privacy: what this site records" data-tel="base:privacy"><svg class="g" aria-hidden="true"><use href="#g-shield"/></svg></a>
+  {% if build %}<span class="build" title="{{ build_tip }}">{{ build.short }}</span>{% endif %}
+</footer>
+{% else %}
+{# Every page says where to read what the site records (portal/templates/privacy.html). #}
+{# `build` is set (context processor in app.py) only for a signed-in person on the list: the login page and the public pages never show it.
+   The hover text carries the full commit and the Cloud Run revision; the script below turns the UTC build time into the viewer's own. #}
+<footer class="sitefoot"><a href="{{ url_for('privacy') }}">Privacy: what this site records</a>
+{% if build %}<span class="build" title="{{ build_tip }}">build {{ build.short }}{% if build.built_at %} &middot; <time id="build-time" datetime="{{ build.built_at }}">{{ build_label }}</time>{% endif %}</span>{% endif %}</footer>
+{% if build and build.built_at %}
+<script>
+  /* The footer's build time in the viewer's own clock (the server only knows UTC); without script the UTC text stays. */
+  (function () {
+    var el = document.getElementById("build-time"), t = el && new Date(el.getAttribute("datetime"));
+    if (!t || isNaN(t)) return;
+    var s = t.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+    if (t.toDateString() !== new Date().toDateString()) s = t.toLocaleDateString([], {month: "short", day: "numeric"}) + " " + s;
+    el.textContent = s;
+  })();
+</script>
+{% endif %}
+{% endif %}
+{% if user and request.endpoint != 'index' and not bridge %}
+  <a id="home-btn" href="{{ url_for('index') }}" aria-label="Home" title="Home">&#8962;</a>
+{% endif %}
+{# One-click copy for everything people are expected to copy (codes, addresses, passwords, commands, blocks): see the header of the file. #}
+<script src="{{ url_for('static', filename='copy.js') }}" defer></script>
+{% if user %}<script>window.SKIPPY_THEMES = {{ control_themes | tojson }};{% if is_admin %} window.SKIPPY_THEME_PICK = {url: {{ url_for('themes_set') | tojson }}, choices: {{ theme_choices | tojson }}, order: {{ theme_choices.colours | list | tojson }}, fancyCss: {{ url_for('static', filename='themes-fancy.css') | tojson }}};{% endif %}</script>{% endif %}
+<script src="{{ url_for('static', filename='keys.js') }}"></script>{# SkippyKeys.busy and the lamps' tooltips: not deferred, page scripts call it #}
+{% if user and telemetry_on %}
+<script>
+  /* Usage beacon (portal/telemetry_web.py): a tap on anything marked data-tel (a tile, a demo) is reported, signed-in
+     people only. It carries the tile's id and the page it was on, nothing else. /privacy says what is kept. */
+  (function () {
+    function tap(e) {
+      var el = e.target.closest && e.target.closest("[data-tel]");
+      if (!el || !navigator.sendBeacon) return;
+      try {
+        navigator.sendBeacon("{{ url_for('telemetry_tap') }}",
+          new Blob([JSON.stringify({e: el.getAttribute("data-tel"), p: location.pathname})], {type: "application/json"}));
+      } catch (err) { /* a blocked beacon costs nothing */ }
+    }
+    document.addEventListener("click", tap, true);
+    document.addEventListener("auxclick", tap, true);
+    // What was on screen (portal/adaptive.py tells a key nobody taps from one nobody sees): each data-tel control once a day per
+    // browser, after the page settles and after each tap (a sheet that opened shows new ones).
+    function seen() {
+      var day = new Date().toISOString().slice(0, 10), key = "tel-seen:" + day, had = {}, ids = [];
+      try { had = JSON.parse(localStorage.getItem(key) || "{}"); } catch (err) { return; }
+      document.querySelectorAll("[data-tel]").forEach(function (el) {
+        var id = el.getAttribute("data-tel");
+        if (!id || had[id] || ids.indexOf(id) >= 0 || el.closest("[hidden]") || !el.getClientRects().length) return;
+        ids.push(id);
+      });
+      if (!ids.length || !navigator.sendBeacon) return;
+      ids = ids.slice(0, 40);
+      try {
+        navigator.sendBeacon("{{ url_for('telemetry_seen') }}", new Blob([JSON.stringify({ids: ids, p: location.pathname})], {type: "application/json"}));
+        ids.forEach(function (id) { had[id] = 1; });
+        for (var i = localStorage.length - 1; i >= 0; i--) { var k = localStorage.key(i); if (k && k.indexOf("tel-seen:") === 0 && k !== key) localStorage.removeItem(k); }
+        localStorage.setItem(key, JSON.stringify(had));
+      } catch (err) { /* private mode or a blocked beacon: nothing is counted, nothing breaks */ }
+    }
+    setTimeout(seen, 2500);
+    document.addEventListener("click", function () { setTimeout(seen, 900); }, true);
+  })();
+</script>
+{% endif %}
+{% if bridge %}
+<script>
+  (function () {                                       // the full-screen key: the Fullscreen API where the browser has it; on iPhone, how to install
+    var key = document.getElementById("fs-key"), tip = document.getElementById("fs-tip");
+    if (!key) return;
+    var el = document.documentElement, mm = window.matchMedia;
+    var installed = (mm && (mm("(display-mode: fullscreen)").matches || mm("(display-mode: standalone)").matches)) || navigator.standalone === true;
+    if (installed) return;                              // already opened from the home screen: nothing to add
+    var can = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+    var ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    var on = function () { return !!(document.fullscreenElement || document.webkitFullscreenElement); };
+    function paint() { key.querySelector("use").setAttribute("href", on() ? "#g-fsx" : "#g-fs"); var t = on() ? "Leave full screen" : "Full screen"; key.setAttribute("aria-label", t); key.title = t; }
+    if (can) {
+      key.hidden = false;
+      key.addEventListener("click", function () {
+        try {
+          if (on()) (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+          else { var p = (el.requestFullscreen || el.webkitRequestFullscreen).call(el); if (p && p.catch) p.catch(function () {}); }
+        } catch (e) {}
+      });
+      document.addEventListener("fullscreenchange", paint); document.addEventListener("webkitfullscreenchange", paint); paint();
+    } else if (ios) {                                   // iPhone Safari has no Fullscreen API: Add to Home Screen is the way
+      key.hidden = false;
+      key.addEventListener("click", function () { tip.textContent = "For full screen on iPhone: tap Share, then Add to Home Screen, and open Skippy from its icon."; tip.hidden = !tip.hidden; });
+    }
+  })();
+</script>
+{% endif %}
+</body>
+</html>

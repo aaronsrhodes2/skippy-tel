@@ -1,0 +1,7 @@
+Write a Python module that defines `evaluate(expr: str) -> float`, a calculator for arithmetic expressions, without using eval, exec, compile or the ast module.
+
+It must support: numbers (integers and decimals like 3, 0.5, .5, 2.), the binary operators + - * / % and ** (power, right-associative and binding tighter than unary minus on its left, as in Python: -2**2 == -4, 2**-1 == 0.5), unary + and -, parentheses, and spaces anywhere between tokens. Precedence and associativity follow Python's.
+
+Raise ValueError for anything malformed: empty input, unbalanced parentheses, a dangling operator, two numbers in a row, unknown characters. Division or modulo by zero raises ZeroDivisionError.
+
+Reply with the whole module in one ```python block.

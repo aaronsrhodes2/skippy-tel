@@ -1,0 +1,960 @@
+# Maker Portal
+
+One page, gated to you and whoever you allow: game servers with their
+Discord channels, the other services, a text chat with Skippy, and an admin
+page. Code in [`portal/`](../../portal); deployed on every push by
+[CI/CD](../cicd.md) to Cloud Run as `skippy-portal`.
+
+| Page | Who | What |
+|---|---|---|
+| `/dashboard` | allowlist | Server status, start (game picker + auto-sleep) / stop, per-game connect info, `#game` and 🔊 voice Discord links |
+| `/chat` | allowlist | Text chat with Skippy (Claude, Skippy persona) |
+| `/admin` | admins | Game settings (world names, passwords, Dragonwilds owner ID), **Restart & update**, **Set up / repair Discord channels**, the **Recovery** cards (below) |
+| `/starcontrol/` | everyone signed in | **Star Control Zero**: the Captain's fan game, played in the browser; a card in Browser Games (`/play`) (see below) |
+| `/doomloop/` | everyone signed in | **Doom Loop**: the Captain's work-in-progress game, the newest build from its repo, with a dev-build badge; a card in Browser Games (`/play`) (see "Doom Loop dev channel" below) |
+| `/shifting-prophesy/` | everyone signed in | **Shifting Prophesy**: purple Skippy's shake-down cruise, with Haiku as the reference; both live builds and every turn, scored; a card in Browser Games (see "Shifting Prophesy" below) |
+| `/music` | admins | **Bilby's Audio Service**: the Captain's music collection streamed from skippy-pc to any browser (see below). `/bilby` redirects here |
+
+## Friends: play without the Captain online
+
+The server lives in Google's cloud on its own persistent disk. Nothing about
+it depends on your PC or on you being signed in.
+
+1. **Grant access:** Admin → **Friends** → their email + the games they may
+   see → **Add friend**, then **Invite ✉** (opens a ready-written email in your
+   own mail app). Instant, no deploy. Any Google account works, Gmail or not.
+   Friends see, start and chat about only their games, and may stop the server
+   only when every running game is theirs. Stored in the VM's `portal-friends`
+   metadata ([`portal/friends.py`](../../portal/friends.py)); `ALLOWED_EMAILS` in
+   the deploy workflow stays for core users who always see everything.
+2. **They play:** Games app (a grid of cards like the launcher; the game that's up glows) →
+   tap the game's card → **Play RuneScape: Dragonwilds** on its page. The VM
+   wakes, the server updates itself and loads the saved world. The tile shows
+   "Starting — booted N min ago" until it's typically joinable (~6 min), then
+   the join steps (an invite code and the address to copy, where to type them) and the join
+   password, shown in plain text on purpose (see `CLAUDE.md`, "Join passwords").
+3. **It cleans up after itself:** after the auto-sleep window with nobody
+   playing, worlds are saved and the VM powers off. The next friend to click
+   Play wakes it again, with the same world.
+
+**Asking for access.** Each game's pinned Discord post has a **Maker Portal** field
+linking to that game's page (`/games/<id>`; the link's host is `PORTAL_URL` in the VM's
+settings, which the portal's Discord setup fills in from the address it is served on, so a
+custom domain later needs only a re-run of setup). Someone without access signs in with
+Google (a link to a game page survives the sign-in) and lands on **Request access**: pick a
+game, add a short note, send. The request is stored with the email **Google verified**
+(nobody can ask for an address they don't own; typed emails are ignored) in VM metadata
+`portal-requests` (`portal/access_requests.py`; Terraform ignores it). Until approved they are
+a "visitor" (`session["visitor"]`): they can reach the request page and nothing else. It shows
+up in **Admin → Friends** above your friends, with **Approve** (the ordinary add-friend; it
+**adds to** what an existing friend already has, and needs something ticked) and **Dismiss**,
+plus a badge on the Admin tile and a line on the dashboard. Once approved, the person opens the
+Discord link again and is in: no second sign-in or second request. Approving part of a
+request leaves the rest waiting (and says so); Approve only ever *adds* to a friend's access.
+Limits: one request per email (asking again adds games), 3 per hour per person, 6 per address
+(an IPv6 address counts as its /64), 60 overall; at most 50 waiting, and a full list turns
+*new* people away rather than evicting anyone already waiting; requests expire after 60 days.
+Name and note are one short plain line (control, invisible and blank-looking characters and
+"zalgo" combining marks removed). The friends list and the queue are read fresh and **refuse to
+write if that read failed**, so a VM API hiccup can't wipe them; failed writes are reported, never
+a raw error. One caveat: the lock is per process, so two portal revisions overlapping during a
+rollout could lose a simultaneous request (the portal normally runs one instance).
+**A custom domain later:** set `PORTAL_URL=https://your.domain` in the portal's deploy settings and
+re-run Discord setup; the pins (and the VM, via `PORTAL_URL` in its settings) then link there. The
+per-address limit reads the last `X-Forwarded-For` hop, which is right behind Cloud Run's own front end.
+
+Guardrails for non-admins: auto-sleep can be 15–120 minutes, never "off";
+**one game at a time, and only the Captain changes it**: a friend can only
+wake the game the server is currently set to, and asking for another one
+(in the page or in Skippy's chat) says to ask Aaron to switch it (`ops.start_games`;
+the attempt shows in the dashboard's Watcher). The launcher's Games tile
+names the game that's up, or the one set for the next wake-up; settings,
+Restart, Discord setup and starting several games at once are admin-only.
+
+**Set a world password.** Dragonwilds lists the world publicly, so without a
+password anyone who searches the name can join. With one set, the portal
+becomes how the password reaches your friends: signed-in players see it on
+the tile, and the Discord post points to the portal instead of printing it.
+
+**How fast is the popup?** Roughly: VM boot ~1 min, server update check +
+world load ~3–5 min. Right after a Dragonwilds patch, the first start also
+downloads the update (a few extra minutes). The Discord channel gets a
+"starting up" ping, so people can wait there.
+
+## How it fits together
+
+- **Auth:** Google sign-in; `ALLOWED_EMAILS` / `ADMIN_EMAILS` + the Friends list re-checked on
+  every request ([`portal/auth.py`](../../portal/auth.py)).
+- **Games:** the portal runs as `skippy-agent` (roles/compute.admin) and
+  drives the games VM through the Compute Engine API
+  ([`portal/gcp.py`](../../portal/gcp.py)). Server **settings** live in the
+  VM's `games-env` metadata; the VM writes them to `/srv/games/.env` on each
+  boot. So: edit settings → Restart → applied. No `.env` files, no `nano`.
+- **Restart = update:** every boot re-pulls the server images, and
+  Dragonwilds/Valheim update their game files on start.
+- **Server admin card (admin only):** on each game's page, in the Admin block: installed version, image age, mods, when it
+  last updated, the update policy in effect. The facts come from the VM's snapshot (`diag.sh` runs
+  [`game_facts.py`](../../infra/gcp-games/game_facts.py) every 2 minutes; [`portal/diagnostics.py`](../../portal/diagnostics.py)
+  parses it; [`portal/admin_panel.py`](../../portal/admin_panel.py) builds the card and its one refresh route,
+  `GET /admin/games/<game>/panel`, admin-only: a friend gets 403). Controls are ordinary Admin settings. Per-game details:
+  [docs/games/MODS_AND_UPDATES.md](../games/MODS_AND_UPDATES.md).
+- **Recovery cards (admin only, on `/admin`):** **Live version** (the serving commit and revision from `/version`, and how
+  many pushes `main` is ahead of it), **Deploy pipeline** (the newest deploy runs; Roll back, Undo a rollback, Re-run the
+  failed jobs of the newest deploy, Cancel a deploy stuck for over 20 minutes) and **Private Skippy** (cancel the current run,
+  clear a stuck record, pause). Code: [`portal/recovery.py`](../../portal/recovery.py) (the rules and the GitHub client) and
+  [`portal/recovery_web.py`](../../portal/recovery_web.py) (`POST /admin/recovery/<action>`). Every button is an admin-only
+  POST from the portal's own page (Origin, else Referer), confirmed (the page asks, then sends `confirm=yes`; without it the
+  server asks on a page of its own), rate limited per action and logged as one stdout line
+  `{"event": "recovery", "action", "by", "result", "ok"}`; the last 20 show on the card. None of it is a chat tool. The deploy
+  buttons use `GITHUB_ACTIONS_TOKEN` (fine-grained, this repo, Actions read/write only; deploy.yml copies the repo secret
+  `PORTAL_ACTIONS_TOKEN` into Secret Manager), which never enters `app.config`; the client can call five endpoints (list deploy
+  runs, one run's jobs, dispatch `rollback.yml`, re-run failed jobs, cancel a run), checked inside the one method that sends,
+  never follows a redirect, and turns errors into plain sentences. Without the token the pipeline card says "Not configured".
+  The pause lives in portal memory (a deploy clears it). What to press when: [remote-recovery.md](remote-recovery.md).
+- **Discord:** the admin button ([`portal/discord_admin.py`](../../portal/discord_admin.py))
+  creates `#game` + 🔊 voice channels, a webhook and a pinned status post per
+  game, and stores the IDs/webhooks in `games-env` — which is where the
+  dashboard's links and the VM's status posts both come from.
+- **Stops are graceful however they happen:** the VM's shutdown-script
+  saves worlds and posts to Discord for the portal's Stop button, the idle
+  watchdog, or a manual stop alike (the watchdog posts its own "went to sleep", with the
+  reason, and leaves a note so the script doesn't post a second one).
+
+## Chat
+
+Direct Claude API (`claude-haiku-4-5`: cheap and quick for server questions; set by `CHAT_MODEL` in the deploy workflow — Opus 5-family models also get the server-side refusal fallback), with
+Skippy's persona from `services/flask-api/app/skippy_persona.md`. Everyone,
+the Captain included, gets that default model whatever they type: there is no
+model picker and no phrase that upgrades it (the Captain's Opus is meant for
+his private dashboard chat, not this one). History
+lives in the browser tab and is sent with each message; the server keeps
+nothing.
+
+**Server tools** (`portal/chat_tools.py`): Skippy can check the server's
+status, start games and stop the server; admins also get restart. Same
+rights and guardrails as the dashboard buttons (both go through
+`portal/ops.py`), and tool output never includes settings values: Skippy has no
+passwords to give, and sends people to the game's page, where the join password is
+on the Password line beside how to join. Skippy asks for
+confirmation before stopping or restarting.
+
+**Barney Style (Haiku on or off).** A checkbox under the chat box, OFF by default and remembered in the browser. Off, the page
+sends the question straight to Mentat as typed and shows Mentat's own answer unedited; on, Haiku explains it simply as before.
+Comparing the two shows what Haiku adds or loses. No model is called when it is off; same Mentat, same physics permission and
+rate limit as a normal message (the page sends `raw: true` on `POST /chat/send`; `raw_mentat` in `portal/app.py`). Switching it
+on fills the box with "Give it to me Barney Style"; sending that makes Haiku read the whole chat (the straight-to-Mentat answers are
+in the history, marked as Mentat's own) and explain it in plain words using only what Mentat found, with no tools. Because
+everything goes to Mentat while it is off, server questions ("is Valheim up?") need Barney Style on.
+
+**Mentat gaps are auto-filed.** When Mentat answers with `value: null` (sigma-ground can't model the question, or recognised it
+and couldn't run it), the chat replies "failed due to incompetence" (straight to Mentat) or has Haiku say it, and the portal logs
+a bug: one line `{"event": "mentat_gap", ...}` in Cloud Run's logs and a `mentat_gap` event in the activity record skippy-pc
+collects (`log_mentat_gap` in `portal/app.py`, `mentat_gap` in `portal/chat_tools.py`). The question and Mentat's reason are kept
+only for the Captain or someone who ticked "Allow us to save your questions"; for anyone else it records that a gap happened and
+how it was read. To find them: search the logs for `mentat_gap`, then fix what sigma-ground is missing. An outage (Mentat or Qwen
+down) is not a gap. Tests: `portal/tests/test_chat_raw.py`.
+
+**Everywhere, for everyone:** the chat is docked bottom-right on every page
+(same conversation as the Chat page, carried across pages in the tab) and
+knows which page you're on. Friends get it too, with two privacy walls:
+the system prompt tells Skippy a friend is not the Captain and his personal
+life is off limits (`chat._FRIEND_RULES`), and **`portal/tool_policy.py`**
+decides which skippy-tel-core MCP servers each audience may use: `physics`
+for everyone; mail, calendar, Drive, memory, contacts, SMS, location … for
+admins only; anything unlisted is admin-only by default.
+
+**Not yet connected to skippy-tel-core or your MCP tools.** Cloud Run has no
+route into the home Tailscale mesh where skippy-tel-core runs. Next step
+(tracked in the roadmap): give the portal a way in — Tailscale on the
+portal side or a tunnel from the home side — then route chat through
+skippy-tel-core's `/intent/unmatched` and expose its capabilities as tools.
+
+## Private Skippy (the left side of `/me`)
+
+The Captain's own chat: Claude Code (Sonnet 5.5 at medium effort, hard-coded in the bridge, all the time; Opus until 2026-10-10)
+running with full permissions on skippy-pc. Ask for a change and it edits its own
+clone of the repo, runs the tests, pushes to `main`, watches the deploy and health
+checks it. Only an admin can reach it (Google login plus `ADMIN_EMAILS`; every call
+also needs an `X-Workshop` header, so another site can't drive it). It is not linked
+to skippy-tel-core's services (Mentat, Bilby, mail…): that is deliberate, for now.
+
+```
+browser ── /me/workshop/send ──> portal (portal/workshop.py) ── job "workshop" ──> home reporter
+                                                                                      │ POST /workshop
+browser <── poll /me/workshop/events ── portal <── POST /home/workshop/<task> ── reporter ──> bridge
+                                                                                      │ (services/claude-bridge/workshop_engine.py)
+                                                                                    claude -p (Sonnet 5.5, medium) in its own clone
+```
+
+- **Every project, not just SkippyTel.** `services/claude-bridge/projects.json` (checked by `projects.py` at bridge start)
+  lists the Captain's repos: SkippyTel plus every repo directly under `D:\Aaron\development` whose origin is
+  `github.com/aaronsrhodes2/...` (zPhone left out: shelved; quarksum left out: an older checkout of sigma-ground). Each has its own working clone `D:\Aaron\development\<name>-workshop`, made by `git clone` on first
+  use and never the Captain's checkout (the registry refuses a clone that is, or is inside, any checkout), and the
+  checkout itself is only passed with `--add-dir`. The card's picker shows the open conversation's project (fixed once it has
+  a message); **New chat** asks which project the next one is for. The prompt (`workshop_prompt.md`) keeps SkippyTel's
+  deploy rules for SkippyTel only; for any other project the rule is that repo's own CLAUDE.md, else run its tests, push to
+  its branch (solo repos, Platinum 17) and say plainly what was not deployed. One run at a time **per brain** across all projects (2026-11-05):
+  a Core run and a Claude (orange) run go side by side, so a long Core run never holds orange in line. A message behind a running one of its own brain
+  waits in a **line that is kept in the bucket** (`workshop/queue.json`, so a portal deploy no longer empties it; one older than 2 h is dropped on
+  restore); when the run ahead is from another conversation and has gone 5 minutes, it is **paused** ("Paused so another chat could go first"),
+  the waiting message runs, and the paused conversation then **carries on by itself** (an automatic "carry on from where you stopped"). Code:
+  `portal/workshop.py` (`_lane`, `_advance`, `_preempt_for`, `_persist`/`_restore`), the bridge's `start()` per brain (`workshop_engine.py`) and its
+  front door's per-brain busy check (`front.py`).
+  Sessions are kept per project (SkippyTel keeps the bare conversation id, so older chats carry on).
+- **Conversations.** The **Conversations** button lists the newest 50 (title = the first message, project, how many
+  messages, when, "working now"); tap one to read it and carry on in it (a turn still running is followed live). The bridge
+  keeps a turns index beside each conversation's Markdown in `D:\Aaron\conversations\private-skippy`
+  (`<date>_<conv>.turns.json`: his messages, Skippy's text and tool lines, how each ended) and serves it on `GET
+  /workshop/conversations` and `GET /workshop/conversation/<conv>` (home token); the portal asks for them as home jobs
+  (`workshop_conversations`, `workshop_conversation`) and shows only the asker's own.
+- **Proof it's live (the ship card).** When a run ends, the bridge compares its clone's HEAD with where it started and
+  whether `origin/<branch>` now contains it; if the run pushed, its last event is `{"t":"ship", project, repo, branch,
+  sha, subject, workflow}` (strictly checked by the portal's `ship_event`). The answer shows a card that polls
+  `GET /me/workshop/ship?sha=` every 10 s until final (`portal/ship.py`; only for a commit one of your own runs pushed):
+  for SkippyTel, that commit's deploy run (one new read-only call on the recovery client's allow-list: deploy runs by
+  `head_sha`) as tests → build → deploy, green only when `/version`'s commit is that sha (or a later deploy that contains it
+  is live), red with the run's link and **Roll back** (Admin page) when it failed. Other projects: the commit link and
+  "pushed (no deploy pipeline here)", or a link to their deploy workflow (the portal's token reads skippy-tel only).
+- **What it did versus what it said (the toolchain strip).** Every run ends with one `chain` event
+  (`services/claude-bridge/toolchain.py`): each tool call in order, with a short summary (the command, the path, the URL), how
+  long it took and whether it failed, timed from the tool results the engines already stream. The chat draws it as the reply's
+  bottom border (`static/skippy-chain.js`): a 3 px hairline, one segment per call, width by time, coloured by kind (read cyan,
+  edit white, shell green, git violet, web pink, deploy and live checks amber, Mentat and the house orange, a failed call red).
+  Hover or tap a segment for the call (a copy chip); the chain key beside the copy key opens the whole list to copy. A warning
+  glyph marks a reply whose words claim what its calls don't show (pushed or committed with no git call, deployed or live with
+  no deploy and no look at the live service, tested with no test run, code edited with no test run) and the reverse (a push,
+  deploy, restart, kill or destructive command it never mentions). `python tools/purple_audit.py` runs the same rules over the
+  conversation indexes in bulk (the typical toolchain per kind of request, every mismatch); the nightly ledger carries its line.
+- **Tell me when it's done (Discord).** When a run the portal saw going ends (done, failed, stopped, or done on a question
+  for you), `portal/notify.py` sends the Captain one Discord DM through the portal's bot: project, the first words of the
+  request, the outcome, and the link to `/me` (at most 200 characters; never code, the agent's text or the error; pings
+  nobody). Only the Captain: `DISCORD_CAPTAIN_ID` in the VM settings, else the owner of `DISCORD_GUILD_ID`'s server. Once
+  per run: only when a record this process held as queued/running becomes final, never for a run that ended over 10 min
+  ago (the reporter sends `finished_age_s` with a finished run, and a record a fresh portal rebuilds from an already
+  finished run never notifies). The card's **Discord me when done** switch (default on) is kept in VM metadata
+  `portal-workshop-notify`. Discord trouble is swallowed and logged once per kind.
+- **Show me the result (screenshots).** After a pushed change to `portal/templates` or `portal/static`, the prompt has
+  the agent run `python tools/workshop_screenshot.py me --out .skippy-shots/me.png` (the checkout's portal with
+  `portal/tests`' fakes, a scratch admin session signed with a random key, served on 127.0.0.1 only, shot at phone size by
+  a headless Chrome or Edge already on the PC; it installs nothing and exits 3 without one) and print
+  `SKIPPY_IMAGE: .skippy-shots/me.png` on its own line (`.skippy-shots/` is git-ignored). The bridge strips that line and,
+  as the run ends, attaches the file as `{"t":"image", mime, name, b64}` only if it is inside the project's clone, at most
+  400 KB and really a PNG or JPEG by its first bytes (3 per run). The reporter keeps each push under 700 KB of JSON. The
+  portal checks it again (`image_event`), keeps it in memory for its owner (3 per task, 40 in all), puts
+  `{"t":"image","n"}` in the chat and serves the bytes from `GET /me/workshop/image?task=&n=` as that type with
+  `nosniff` and a CSP that allows nothing; the card shows it under the answer. A portal deploy forgets them (the card says
+  so), and a reopened conversation shows a line where one was.
+- **A portal deploy doesn't lose the conversation.** History and progress live on
+  skippy-pc (the bridge keeps every event and one Claude session per conversation);
+  the reporter tells the portal what it has, and a redeployed portal replies "I hold N
+  events", so the reporter re-sends the rest. The page keeps its transcript in
+  `localStorage` and re-attaches to a running task after a reload or a deploy.
+- **How it recovers (the reconciler).** The run itself lives on the bridge; the portal's copy is in memory and goes with
+  every deploy, and a deploy also wipes the portal's job queue. So the reporter doesn't wait to be asked: every 10 s (2 s
+  while the chat is open) `WorkshopSync` in `services/home-reporter/reporter.py` reads the bridge's runs (`GET
+  /workshop/runs`) and the portal's records (`GET /home/workshop`) and repairs any difference: a run the portal lacks or
+  holds only part of is pushed (from the portal's own `have`), a run still going gets a push every pass even with nothing new
+  (the heartbeat that keeps it from showing "stalled"), a run nothing is streaming is handed to the quick relay (`attach`,
+  which can only join a run the bridge already has, never start one), and a task the portal thinks is going but the bridge no
+  longer has ends with "skippy-pc lost this task ... Send your message again" instead of hanging. It only acts when both
+  sides answered, never invents an error, and is idempotent: the push says where its events start, the portal answers with how
+  many it holds, and a finished task can't be reopened by a late "running", so racing the streaming relay costs nothing.
+  Result: after any order of portal deploy, reporter rebuild and bridge restart, the chat catches up within about 30 s of all
+  three being up, whether or not the queue still had the job. A job the queue offers again only ever re-attaches if the portal
+  already saw the task running (so a bridge that forgot it can't redo the work), and the reporter exits by itself (Docker
+  restarts it) after 15 minutes without one successful report to the portal. If the chat still shows it went quiet, **Check
+  again** asks the reconciler to look now; Send comes back after 30 s of quiet; `GET /home/workshop` is the portal's side of it
+  (home token) and `ops home` shows what the portal sees.
+- **What crosses the wire:** your messages, the agent's text, and one activity line per
+  tool call (name and command or path, credentials redacted), never tool output. The
+  portal logs who and how long, never the message.
+- **Setup on skippy-pc:** run `make bridge` (it needs `SKIPPY_HOME_TOKEN`, read from the
+  vault `.env`), make sure `claude` there is signed in (`claude`, then `/login`), and
+  rebuild the reporter (`CLAUDE_BRIDGE_URL` is in `docker-compose.override.yml`). The card
+  says plainly when the workshop isn't answering, and why when the bridge knows: the reporter passes the bridge's
+  `workshop.login` (`ok` / `expired` / `unknown`) and, when it is not ready, its `reason` ("SKIPPY_HOME_TOKEN isn't
+  configured on this PC", "Claude's login on skippy-pc expired: run `claude auth login` there", or, when the bridge doesn't
+  answer at all, that) in the report's `capabilities.workshop`; the card and Send's refusal show it.
+- **The report is the heartbeat, and a slow service can't delay it.** The portal calls skippy-pc silent after 60 s and then
+  offers nothing, the chat included. The reporter used to ask its services one after another (about 45 s worst case when
+  flask-api or Ollama is slow) and then pull telemetry before the next report, so a slow flask-api could make a healthy PC
+  look gone. Now `gather()` asks them side by side under one 9 s budget (`GATHER_BUDGET`): a probe that is late or fails is
+  missing from that report (`None`, `ready: false`, never a stale answer), the telemetry pull has its own thread, and the
+  loop sleeps the interval minus the work done, so reports keep coming about every 15 s. The report's shape is unchanged.
+- **Limits:** one task at a time; **Stop** cancels it. A task the portal hears nothing about for 2 minutes is never given
+  up on: the card says how long it has been quiet and that skippy-pc reconnects by itself (a long think or build with no
+  new event is not quiet: a run still going is pushed every pass), asks the reconciler to look (and on **Check again**),
+  gives Send back after 30 s (sending then leaves the old task behind; if the bridge is still busy it answers "still
+  working on the last one") and keeps polling, slower, for as long as the page is open. The agent's rules are in
+  `services/claude-bridge/workshop_prompt.md` (it must ask before touching workflows,
+  auth, secrets or its own harness). Those rules are a prompt, not a sandbox: the
+  real guards are the login, the token and the tests.
+
+## Bilby's Audio Service (the Captain's music, `/music`)
+
+The Captain's whole music collection (21k MP3/AAC files on skippy-pc) in any browser: iPhone, Mac, PC, the Tesla. Admin only, a tile
+on the launcher (it says "library offline" when skippy-pc's music gate isn't answering). The browser is the universal client (the
+Android apps are shelved), so this is the one player. It replaces the old `/bilby` page (a mirror of the Mac's DJ decks): `/bilby` and
+everything under it now answers a 301 to `/music`, so old links keep working. The `bilby` portal grant still exists and now only
+gates the chat's `now_playing` tool; `/music` itself is the Captain's alone.
+
+```
+browser ── /music (page, /music/gate pass, /music/checkin + /music/command: Connect) ──> portal  (portal/player.py)
+   │
+   └── https://skippy-pc.<tailnet>.ts.net/t/<pass>/{catalog.json,lyrics.json,a/<path>,art/<path>?w=} ──> music-gate on skippy-pc
+```
+
+The music never passes through the portal: the portal signs a pass (the key comes from the home token's sha256, the same one the gate
+derives; no new secret), the browser carries it in the URL path to the gate, which Tailscale Funnel puts on the internet. A pass is
+good for 8 to 14 hours and is the same string for everyone asking inside one six-hour window, so the browser's own cache (covers for a
+week, songs for a day) still works across page loads. The gate's address is only ever signed for when it is on the tailnet
+(`*.ts.net`); `Player(gate_url_re=...)` exists for the dev script alone.
+
+**The direct door** (2026-11-05, `docs/direct-door.md`): every gate pass (music, video, books, voice, and the pop-ups' one-file pass) also carries `"direct": "https://home.makerportal.live/<prefix>"`
+(`null` when `EDGE_HOST` is empty or the portal's own probe of `https://EDGE_HOST/ping` says the door is shut right now; `portal/edge.py`, built from `EDGE_HOST` alone, never from a reporter's
+word). `url` stays the Funnel address, behind the same strict `*.ts.net` check. A page's `SkippyDirect.pick(g)` (`static/direct.js`, loaded by `base.html` in the head) swaps `g.url` for `g.direct` only when
+`GET <direct>/health` answers JSON within 2.5 s (remembered 120 s, or 300 s for a silence) and keeps `g.funnel`; a call that gets no answer from the door is made once more through the Funnel (`demote`). Both
+doors take the same pass, so only the address differs. Drive's page (the Tesla's, the glasses') picks it for its book, music and wake-word gates too.
+
+**Files:** `portal/templates/music.html` (the shell), `portal/static/bilby-player.js` (the logic that needs no browser: the catalog,
+search, the queue, Bilby DJ's pick, the autoplay state, paging (`paginate`/`pageOf`), the way back after a dead zone; run under Node by the tests),
+`bilby-app.js` (the browser side: audio, views, Connect, media keys), `bilby-player.css` (portal colour variables only),
+`portal/player.py` (the pass and Connect). **Bilby DJ** is on by default: when the queue runs out it picks the next track by the
+real Bilby's rule (70 % the same artist, 30 % anything; never the current track, nothing from the last 50), 30 s before the end, so
+it is queued and preloaded in time. **The lyric line** under the title is the one sentence about what the song is about
+(`lyrics.json`, from the Mac's lyric stores through flask-api and the gate); it hides when a track has none.
+
+**On the bridge.** One screen that never scrolls. Home is a deck of controls (artists, albums, songs, genres, recently added, recently
+played, Bilby DJ, shuffle everything; a count on each, and a lit one when another device is playing so you can pick it up). Any list is
+cut into screens by `BilbyCore.paginate` and drawn by `PList` in `bilby-app.js` (only the rows of the current screen exist, so 21,000
+songs are about ten rows of DOM): flip with a swipe, the wheel, PageUp/PageDown, or drag along the bar under the list, which shows where
+you are in the whole and names the letter you are over; the A-Z key opens the whole alphabet on one screen. Along the bottom: the
+player strip (cover, what is playing, previous/play/next, and a lamp for the signal) and a row of glyph keys (Home, shuffle, repeat,
+Bilby DJ, the queue with its count, keyboard help). Now Playing and the Queue are panels over the stage (the strip stays in reach);
+a song's options, the sleep timer and other devices are small panels of glyph keys. Words appear only where they are names (a song,
+an artist, a device) or an error. The lamp is lit when all is well, a triangle while the line is lost, a diamond when the library is
+out of reach.
+
+**Losing the signal (the mountains).** The playing song and the next 20 minutes of the queue (at least two songs; his dead zone over the
+mountains is ~17 minutes; up to 14 songs or 220 MB) are held in memory (the **signal shield**, on by default;
+a shield key in Now Playing turns it off, and it stands down by itself when the browser asks to save data), so a song finishes and the
+next one starts with no network at all. If a song that was playing fails or stalls for 8 s, the player keeps the place and the wish to
+play, keeps the lock screen and the car showing "playing", and retries at 2, 4, 8, 15 and then every 30 s for as long as it takes,
+and at once when the phone says it is back online or the page comes forward. A song that never started is the file's business (skipped
+after a retry), not the line's. The price: the song that is playing downloads twice (once into memory, once for the element).
+
+**Why it sometimes asks for a tap.** A browser only lets a page make sound after a tap on that page, and that starts over at every
+reload (Safari and iOS are the strictest: the permission belongs to the audio element a tap started, so there the player re-sources
+ONE element). So the player never calls `play()` without a tap. When a saved queue comes back after a reload, or another device asks
+it to play, or the browser refuses, it shows a **Tap to start the sound** bar with a one-line explanation and carries on exactly where
+it was. After one tap everything works without more: the next song, previous, skip, and a remote's commands. Each device says in its
+Connect check-in whether it is `armed` (a `play()` has worked since the page loaded) or waiting for a tap, so another device's remote
+says "needs a tap first" instead of failing silently. Expect one tap after every deploy or reload; it is not an error.
+
+**Connect.** Every open player checks in every few seconds (what it plays, where, a window of its queue). Another device lists them
+under the devices button (the speaker icon, "Other devices"): **Play here** picks up the queue and place (and pauses the other), or use it as a remote (Pause, Play,
+Next). In memory on the portal (one instance); a redeploy forgets it and the players check in again. A device's listening history
+never goes to the portal: it stays in that browser, and telemetry only ever sees the tile tap.
+
+**The speakers on skippy-pc (Play on Downstairs / Upstairs / Both).** Two stereos hang off skippy-pc: downstairs on HDMI (`EPSON PJ (NVIDIA High Definition Audio)`),
+upstairs on Bluetooth (`Speakers (Enclave Audio)`). Each is a browser window on skippy-pc, started by `python tools/room_players.py` (Chrome app windows on
+`/music?room=downstairs|upstairs`, one shared profile: sign in once as the Captain; flags let it make sound untouched and keep running hidden). A room window is a
+fixed Connect device (`room-<key>`) that `setSinkId`s both its audio elements to the output whose name matches `ROOMS[key].match` in `portal/player.py` (looked up
+again every 20 s and on `devicechange`, so a Bluetooth speaker that wakes later is found), checks in every 1.5 s, and is listed even while idle. In the devices panel
+of any other player a **Play on** row has a key per live room and **Both**: each chosen room is sent a `take:<source>` command and picks up the source's queue and place
+(the source is this device if it is playing, else the room that is); the source pauses unless it is also a target. The two rooms start within about a second or two of
+each other, not sample-locked: fine for two floors. A renamed speaker is a change to its pattern in `ROOMS`. Tests: `test_player.py`, `tools/tests/test_room_players.py`.
+
+**Looking at it without skippy-pc:** `python portal/tests/dev_music.py` (needs ffmpeg and Pillow) runs the real portal app beside the
+REAL music-gate (`services/music-gate`'s own Flask app, over a generated tagged library in the temp folder; only the source of the
+lyric lines is a few lines of stand-in), then open `http://127.0.0.1:8765/dev-login`. `--fake 21000` adds 21,000 stub tracks to see
+the virtual lists at full size; `/dev/gate-down` and `/dev/home-off` show the "isn't reachable" states. Tests: `portal/tests/test_player.py`
+(routes, passes, Connect, the page's markup against the script's lookups, the colour rule), `test_player_js.py` (runs
+`portal/tests/js/*.test.js` under Node 18+ and feeds a catalog built by the real gate to the player's parser; both are skipped, not
+failed, when Node or mutagen is missing). What only a browser can show (the audio element, drag and drop, the lock screen, the
+layouts) was checked by hand, not by a test.
+
+### The house stereo: his library and Spotify as one source
+
+The house stereo (skippy-pc's hub, Connect device `skippyroom-stereo`) plays his library and his Spotify in ONE queue, so Bilby shows it as one source:
+a **House stereo** tile on Home (arcs glyph, lit while it plays, the queue length on it) opens `#stereo`, a pane with the now-playing hero (a Spotify badge
+when that is what plays, the counts of library songs and Spotify songs), the keys (previous, play/pause, next, and **mix**: the stereo's DJ mode, the
+same switch as "Skippy, DJ mode on") and the queue a screen at a time. Each row has its source glyph (note = library, arcs in green = Spotify) and, where
+it is entered from the one before, a mix glyph: Spotify into Bilby fades (`SPOTIFY_XFADE_S`), Bilby into Bilby is beat-matched while DJ mode is on, every
+other change is a cut. The bar under the lists shows what the stereo plays when nothing plays in this browser, and tapping it opens the pane.
+The data is the stereo's Connect state (`portal/player.py` `_state`, sent by `services/satellite/music.py`): `titles` (names for the queue's Spotify URIs,
+sent with the queue) and `mix` (`{on, xfade}`); the commands are the usual `play`/`pause`/`next`/`prev` plus `mix:on` / `mix:off`. The pure reading of that
+state is `BilbyCore.stereoView` (`portal/tests/js/stereo.test.js`). A hub that does not send `titles`/`mix` yet still shows (names fall back to the catalog
+or the file name, the mix key hides), so the page and the hub deploy in either order; the hub needs its restart to send them.
+
+**The speakers' switches, the hold and the books** (2026-11-05; the Captain: *"a single audio stream going out and the devices decide if they are outputting that stream or not"*, *"If no
+devices are listening, the stream should pause"*). The House stereo's state also carries `kind` (`song` / `spotify` / `book`), `outs` (each speaker: `{id, name, on, open, floor}`: the Sony,
+the Enclave, a room's box `pod:<room>`) and `held` (`{why, since}` or null: the stream is waiting because no speaker listens, and carries on by itself when one is back). The pane shows one
+hexagon toggle per speaker (lit = on, `data-tel`; a speaker that is on but gone says so) and the command is `out:<id>:on|off`; the radio keeps the switches on disk
+(`services/satellite/outputs.py`, `state/radio/outputs.json`), so a restart of the radio or the hub changes nothing. An audiobook is an item of the queue (`book:<id>`, named in `titles`): it shows
+by title, "Play here" refuses it like a Spotify row, and while it is current the state's `track` is empty (the car's hand-over reads the newest track as Bilby). All the fields are additive:
+an old radio sends none of them and the page hides what it does not get; an old page ignores them.
+
+## Audiobooks (the Captain's converted audiobooks, `/audiobooks`)
+
+His own DRM-free conversions of books he bought (OpenAudible writes them to `D:\Audiobooks`: `books/`, `art/`, `books.json`), in any browser and on a pod. **The Captain
+only: not in `catalog.PORTALS`, so no friend can be granted it** (`portal/tests/test_audiobooks.py` fails if a "book" grant appears). Nothing here opens, decrypts or logs in to
+Audible or OpenAudible; there is no Audible sync (Audible has no official API; OpenAudible's data has only a `finished` flag), so the app keeps its own places.
+
+* **Pieces:** `portal/audiobooks.py` (the pass and Play on), the `audiobooks` blueprint in `app.py`, `templates/audiobooks.html`, `static/audiobooks-{app,pure}.js` + `audiobooks.css`
+  (the bridge: a shelf of covers shown a screen at a time with `Bridge.PList`, a book's panel, a player strip; glyphs, no scrolling), and **`services/audiobook-gate`** on skippy-pc.
+* **The gate** (a pass the portal signs, label `audiobook-gate-v1`: a music, video or voice pass never opens it, and the portal signs only for a `*.ts.net` address ending in `/books`):
+  Tailscale Funnel carries `https://skippy-pc.<tailnet>.ts.net:10000/books` to it (127.0.0.1:3009). Funnel has only three ports, so it is a **path on the voice gate's :10000**, like the
+  popup-gate's `/in` (`host_ops.FUNNEL_DOORS`; `funnel on` opens it). The browser fetches the **catalog, covers, the audio (with Range) and the places straight from the gate**: the files
+  never pass through the portal. The catalog is OpenAudible's `books.json` joined to the files, and a book's id is the hub's own (`audiobooks.slug` of the file name), so a place means the
+  same to the page and to "Skippy, read my book". Covers are served by the gate from `art/` (thumbnails cut in memory), never through the portal.
+* **Places:** the browser PUTs its place to the gate (every 15 s while playing, on pause, seek and close). The gate writes one small file per book into `state/audiobooks-inbox/`; the hub's
+  `audiobooks.Store` merges that inbox (newest `last_played` wins, either way), so "continue my book" by voice starts where the page stopped, and the page reads the hub's
+  `state/audiobooks.json` back through the gate. (This replaces writing places back through the home reporter: no extra hop, and no portal in the way.)
+* **Play on a pod (since 2026-11-05 the book is an item of Bilby's one stream):** the **House stereo** (the house radio, Connect device `skippyroom-stereo`) says what its book is doing (`state.book`,
+  never as a `track`) and the page lists the live boxes (`/audiobooks/rooms`) and queues `book:play:<id>[:<second>]`, `book:pause`, `book:resume`, `book:skip:<±s>`, `book:chapter:<±1>`,
+  `book:speed:<x>` (`/audiobooks/command`; the same grammar in `player.BOOK_CMD` and `audiobooks.COMMAND`, a test keeps them equal). The radio plays it as the queue's item `book:<id>` on whichever
+  speakers are switched on (a room's box forwards its command and that room's speakers play it) and the page becomes its remote. The hub holds no book player, so a hub restart never stops a book.
+* **Home reporter:** capability `book_gate` (ready only when the gate's own `/health` says there are books); `docker-compose.override.yml` gives it `BOOK_GATE_URL` and `BOOK_GATE_PUBLIC`.
+* **Dev:** `python portal/tests/dev_books.py` runs the portal beside the REAL gate on the real library (read-only; places go to a temp inbox, or `--real-state`), with a stand-in
+  "Office" box, then open `http://127.0.0.1:8765/dev-login`. Tests: `portal/tests/test_audiobooks.py`, `tests/js/books.test.js`, `services/audiobook-gate/tests`,
+  `services/satellite/tests/test_sat_audiobooks.py`.
+* **Privacy:** no title is logged (the gate has no access log: the pass is in every URL); the library folder is mounted read-only.
+
+## Skippy's voice (the mic and the speaker on `/chat` and `/me`)
+
+Both Skippy chats (the portal chat, with its Mentat / Barney Style toggle, and the Captain's personal Skippy on `/me`) have two glyph keys:
+a **mic** (tap to record, tap to stop; the words land in the message box for you to read and send) and a **speaker** (reads each reply
+aloud). Neither does anything until tapped, and the choice is remembered per browser.
+
+```
+browser ── /chat/voice/gate (a pass) ──> portal  (portal/voice.py)
+   │
+   └── https://skippy-pc.<tailnet>.ts.net:10000/t/<pass>/{stt, tts} ──> voice-gate (services/voice-gate) ──> Whisper / flask-api /tts/stream
+```
+
+Voice-to-text: the browser records with MediaRecorder (webm/opus on Chrome and Firefox, mp4 on Safari) and the home Whisper transcribes it
+(translating to English, as the rest of the home stack does); no browser vendor hears it. Text-to-voice: the Captain's pass lets the gate
+speak in Skippy's cloned voice (personal use only, so any other pass is refused); everyone else, and any failure, gets the device's own
+voice, so it works everywhere. The pass has its own label and signed text (`voice-gate-v1`, `voice:<exp>` / `voice-speak:<exp>`): a music
+or video pass never opens it. Tests: `portal/tests/test_voice.py` (the pass against the gate's own code, the route, the pages' markup,
+the helpers under Node) and `services/voice-gate/tests`. A real microphone was not exercised in the dev browser (it blocks capture).
+
+**The ear comes back after a reopen** (`EAR_KEY` in localStorage, set once the microphone has answered, cleared when it is blocked or the
+agent's ear key is turned off). On load: mic allowed → it listens for "Skippy" at once; if the phone keeps sound asleep until a touch
+(iOS starts every AudioContext suspended), the status strip says "Tap anywhere to wake the ear" and any tap wakes it, no question asked.
+Not allowed (Safari's per-site "Ask", or no Permissions API) → the same strip, and the first tap asks once; on an iPhone/iPad the strip then
+names the setting that stops the asking (aA › Website Settings › Microphone › Allow). Only a Safari tab has that setting: Chrome, Firefox
+and Edge on iOS, and a Home Screen launch (its own web app with its own storage and no aA menu), are told to open the portal in a Safari tab. Tests: `portal/tests/js/voice/ear-reopen.test.js`.
+
+## Drive (the Captain's keys at the wheel, `/drive`: admin only, never a grant)
+
+For the Tesla's browser: one bridge screen of six big keys (`portal/drive.py`, `templates/drive.html`, `static/drive-{app,pure}.js`).
+**The book** resumes his current audiobook at its last place: the same places the pods use (audiobook-gate's `places.json` merges the hub's
+`state/audiobooks.json` with the browsers' saves in `state/audiobooks-inbox/`, which the hub's `audiobooks.Store` reads back), and the page saves
+its place there as it plays. **Bilby Shuffle** has two keys: discovery (every Bilby song, his favorites about one in four) and library (his
+favorites). **Skippy** is a pod in the car: the trained "Skippy" wake word runs in the browser (`static/skippy-wake.js`, onnxruntime-web in
+`static/vendor/ort/`, the three models from voice-gate's `/t/<pass>/wake/`, the Captain's pass only; its scores match the pods' Python
+openWakeWord exactly on the held-out clips); when it can't load, Typing's Whisper listening takes over. A turn goes to the house brain through
+the Home chat (`/home-chat/send`, answered silently at home) and is spoken here. Play/pause and next (30 s on in a book) are the other keys.
+
+**Music and Skippy at once** (all pages, not only Drive): the voice plays its silent unlock clip once per page, not on every tap (each one took the
+sound from the music in another tab, or from the car's own player), and while Skippy hears or speaks it ducks every player on the device
+(`static/skippy-duck.js`, loaded by base.html: a window event plus a BroadcastChannel to the other tabs). Bilby, Audiobooks and Drive follow it,
+and a pause the system made while he had the floor is undone when he is done.
+**Spotify in the shuffles** (the Captain, 2026-10-31: "use the car's Spotify"): a browser can't play Spotify, so a Spotify row plays on the
+car's OWN Spotify, a Connect device of type Automobile (`SPOTIFY_CAR_DEVICE` names it instead), through skippy-pc: `/drive/spotify/{mix,car,play,pause}`
+-> the reporter's `spotify` job (four operations only) -> `services/spotify` (`/mix`, `/car`, `/car/play`, `/car/pause`, `CarPlayer`). Library =
+favorites + his liked songs; discovery adds suggestions (his most-liked artists' other songs: Development Mode has no recommendations endpoint).
+The car plays a track as its album from that track; the page watches `/car` every 4 s and moves on when the album goes on, the car stops, or the
+length has passed (`DrivePure.carDone`). No car Spotify (not open, home silent): the shuffle goes on with Bilby's rows. When Skippy has spoken over
+a Spotify row and the car paused it, the page plays it on.
+
+## Texts (the Captain's Google Voice texts, `/texts`: admin only, never a grant)
+
+With his phone on Wi-Fi only (2026-11-02) his texts, and the codes in them, reach him through Google Voice, which **forwards each text to his
+Gmail** (the one manual step: Google Voice > Settings > Messages > Forward messages to email; the mails come from `txt.voice.google.com`, subject
+"New text message from Alice (+1 555-123-4567)", Voice's footer after a `--` line). `portal/texts.py` reads them with the read-only grant that
+Connect Google for Skippy already holds (`gmail.readonly`, `portal/google_link.py`): `from:txt.voice.google.com newer_than:7d`, each mail
+`format=full`, a mail parsed once and remembered in memory until it leaves the 7 days, Gmail asked again at most every 30 s. It sends nothing and
+stores nothing. Not connected, mail not allowed (the Gmail box unticked at Google's consent), Gmail refusing or stumbling are a plain `why` in the
+JSON and on the page, never an error; a stumbling Gmail keeps showing the last good list.
+- **A code** is a 4-8 digit run within 80 characters of code, verification, verify, OTP, passcode, PIN, password or one-time (the nearest one wins;
+  beside such a word even `2024` is a code), else the one number in a short text (80 characters) unless it is a year or has a unit after it.
+  A phone number, a date, an amount, a percentage, a link is never a code. A split code (`123 456`) is joined into one beside a keyword.
+- **The page** (`GET /texts`, `templates/texts.html`): newest first, a screen at a time (`Bridge.PList`), each text its sender, time and
+  two lines; a code is a `<code class="code">` chip (one tap copies, `static/copy.js`). Launcher tile "Texts" (admin only).
+- **The code chip** (`static/texts-chip.js`, on `/hud` and `/drive` through `data-texts` on `#drive`): polled every minute while the page is
+  visible. A code under five minutes old (`fresh` in `GET /texts/state`: `{code, sender, at, age_s}`, worked out at the moment of asking and using
+  the portal's own `age_s`, so a car's wrong clock does not matter) is a big green chip beside the now-playing line until its five minutes are up;
+  a tap copies it and puts it away for good; **in hub mode it is said once**, digit by digit ("Your code is 4 8 2 9 1 3").
+- **Purple** has `texts_latest_code` (`services/purple-tools`, machine door `GET /home/texts/code`): the code, who sent it and how long ago, or why there is none.
+- Tests: `portal/tests/test_texts.py` (parsing, cache, fresh, every failure, the doors), `portal/tests/js/texts.test.js`, `services/purple-tools/tests/test_texts_tool.py`.
+
+## The glasses: `/hud`, Skippy-vision and the sign-in link (the Captain's phone and Viture glasses, `/hud`: admin only)
+
+The S23 is his only phone and the Viture glasses plug into it; the portal is the interface. `/hud` is Drive's page in its hud mode (`templates/drive.html`,
+`static/drive-app.js`): Drive's keys, purple Skippy behind the voice (the agent; his conversation is kept in the browser two hours), a hands-off hub mode like the pods, the apps
+one key away, a battery lamp in the strip, and the screen kept awake. On the glasses the same page runs inside OpenViture's WebView (`viture-android`, `HudHostActivity`), which
+adds `window.OpenViture` (head pose, the RGB frame, a flash of all three cameras with the 7 s ring buffer, heat, an easing-off switch, a recorder and, on glasses that have one, a dimmer).
+
+**Skippy-vision** saves a *moment*, the screens and cameras of everything involved at one instant:
+
+| What | Where it comes from |
+|---|---|
+| the page and the phone's cameras | the page, with the flash (`POST /vision/flash`, JPEGs under 3 MB, names checked against a list, bytes against their magic number) |
+| the glasses' RGB + stereo pair | the host's `OpenViture.flash(hold)` |
+| the pods' and the PC's screens | a `flash` job: the home reporter asks the bridge (`POST /flash/screens`, `services/claude-bridge/flash_screens.py`), each file comes back with `PUT /home/media/<job>?name=` |
+| the Tesla's Drive page | `/drive` polls `GET /vision/moments?since=` and adds its own picture to a young moment (`POST /vision/moment/<id>/file?name=drive-page.jpg`) |
+| a hold's clip | 3.2 s after a hold, the host's `flashClip()` (7 s before, 3 s after, one zip) |
+
+A moment is `moments/<UTC id>/` in the Tabletop bucket with an `index.json` `{id, at, by, hold, kept, files, seen, said, pending}`. Stills stay for ever; the clip goes after 90 days unless he pressed
+Keep (`tools/nightly.py` calls `POST /home/vision/sweep`). After a flash the glasses' frame (else the phone's) is read for writing that is not English and described in one sentence, both Skippy Core's
+vision slot through `portal/eyes_client.py` (`POST /vision/read` and `/vision/look`, `?moment=` keeps the answer); a sign becomes a caption that turns into English word by word (`#heard`, the same
+animation as heard speech). Words that never reach Skippy: "snap" (a flash), "snap it big time" / "hold it" (a hold), "read that", "what am I looking at", "steady on" / "steady off" (a reading
+every 5 s while worn in hub mode; it stops by itself at a SEVERE thermal status). Forget (the trash key, 10 s) and Keep act at once; **Your chats > Moments** lists them (Forget waits 10 s to be undone).
+purple's tools: `vision_flash` (the pods and the PC) and `vision_moment` (list, or save one moment's pictures into `.purple-out/`).
+
+**The sign-in link** (`portal/authlink.py`): the WebView has no cookies. In a normal browser `/hud` shows "Sign the glasses in", which `POST /auth/link/new`s (an admin, with the `X-Link` header) a link
+`<nonce>.<mac>` and opens OpenViture's `HudLinkActivity` with it (`intent://makerportal.live/auth/link?t=...` on Android Chrome; else copy / share). `GET /auth/link?t=` is public but only an
+OpenViture user agent can spend it; the link is good for 5 minutes or one use, kept in the bucket (`auth-links/`), HMAC-bound to the portal's secret key, rate limited per address, refused if the bucket
+cannot confirm the spend or the minter is no longer an admin, and every use is a Discord DM.
+
+## Nagatha's Video Service (the Captain's films, `/video`)
+
+The Captain's Jellyfin library on skippy-pc (285 films, 11 collections) in any browser: a phone, a laptop, a TV browser. Admin only,
+a tile on the launcher next to Bilby's (it says "library offline" when the home reporter's `video_gate` capability isn't ready). The
+sibling of Bilby's Audio Service and built the same way; the name is branding only (no Gemini).
+
+```
+browser ── /video (page) + /video/gate (a pass) ──> portal  (portal/video.py)
+   │
+   └── https://skippy-pc.<tailnet>.ts.net:8443/t/<pass>/{catalog.json, img/<id>/<kind>?w=, v/<id>/direct, v/<id>/hls/..., sub/<id>/<i>.vtt, progress}
+                                                                       ──> video-gate on skippy-pc (services/video-gate) ──> Jellyfin
+```
+
+The film never passes through the portal. The portal signs a pass from the home token's sha256 with the video gate's own label
+(`video-gate-v1`, signed text `video:<exp>`), so a music pass never opens the video gate and a video pass never opens the music gate.
+The pass lasts 8 to 14 hours on a six-hour grid (the poster URLs stay the same across page loads, so the browser cache works) and is
+only signed for an `https://*.ts.net` address with no port or Funnel's `:8443` (`Video(gate_url_re=...)` is for the dev script alone).
+The reporter calls the gate ready only when its `/health` says `ready` (a catalog exists AND Jellyfin answers), not just a 200.
+
+**On the bridge.** One screen that never scrolls, built from the same pieces as Bilby's page (`bridge.css`, `Bridge.PList`, the glyphs). Home
+is a deck of controls with a count on each: Continue watching (lit while something is part-way through), Recently added, Movies, Collections.
+A list is posters a screen at a time (as many across as fit, three on a phone; `NagathaCore.gridShape` and `BridgePure.paginate` do the arithmetic):
+swipe, PageUp/PageDown, or drag along the bar under it, which names the letter you are over; the A-Z key opens the whole alphabet, the sort key
+cycles A-Z / recently added / newest / best rated. A film's details are a panel over the list (poster, facts, a play key that shows where it will
+resume, a start-over key, the summary), and the film plays over everything with glyph keys. Words are film titles, summaries, subtitle and audio
+language names, and errors.
+
+**Losing the signal.** If the film's connection dies (an error with no answer from the gate, hls.js with no HTTP answer, or "waiting" with no
+progress for 8 s) the player keeps the place and the wish to play, shows a warning-triangle lamp and the spinner instead of an error box, and
+retries at 2, 4, 8, 15 and then every 30 s for as long as it takes, and at once when the phone says it is back online or the page comes forward
+(`NagathaCore.recoverDelay`/`stalled` are `BridgePure`'s, shared with the music player). A retry is quiet: it re-opens the film at the saved second
+and reports nothing to the gate. hls.js holds about 90 s ahead (240 s at most), so a short dead zone is never seen. Pause or close the film to
+stop waiting. Untested on a real phone in a real dead zone: it was checked in a browser by cutting the page's own network and watching it resume.
+
+**How a film plays.** Direct play (the original MP4, no work for skippy-pc) when the gate's catalog says `direct` and the first audio
+track is wanted; otherwise the gate's transcoded HLS: hls.js (self-hosted: `portal/static/vendor/hls-1.6.15.min.js`, byte for byte
+the cdnjs release, its SRI and the Apache-2.0 licence beside it; loaded only when needed) or Safari's/iOS's own HLS. Choosing another
+audio language switches a direct film to HLS at the same moment (a browser can't switch a plain MP4's audio). If a browser refuses a
+"direct" file, the player falls back to HLS by itself; a 403 (a pass that ran out) fetches a new pass and carries on from the same
+second; a third simultaneous transcode (the gate's cap is 2) says so in a sentence. Subtitles are the gate's WebVTT on `<track>`
+elements (hls.js's own caption handling is off: left on, it empties every text track when it loads a manifest).
+
+**Resume and Continue Watching.** The player reports `start`, then `progress` every 10 s while playing and at once on a pause or seek,
+and `stop` on close or at the end (a `sendBeacon` when the tab closes); the gate writes it to Jellyfin, so Jellyfin's own apps agree.
+The browser also keeps its own last position (newest 200 films), used when it is newer than the catalog it loaded. Reloading on a film
+(`#watch/<id>` in the address) brings it back at that second; where the browser wants a tap first it shows **Tap to continue at …**,
+the same autoplay rule as the music player.
+
+**Files:** `portal/templates/video.html` (the shell), `portal/static/nagatha-core.js` (logic that needs no browser: the catalog,
+search, shelves, resume, which way a film plays, progress timing, keys; run under Node by the tests), `nagatha-app.js` (the wall,
+the details sheet, the player: custom accessible controls, full screen, picture in picture, Media Session, keyboard: Space/K, arrows,
+F, M, C, P, 0, Esc, `/`, `?`), `nagatha.css` (portal colour variables only; the accent is amber), `portal/video.py` (the pass).
+
+**Looking at it on skippy-pc:** `python portal/tests/dev_video.py` runs the real portal app against the REAL running video gate
+(`http://127.0.0.1:3006`) with a scratch Captain sign-in: open `http://127.0.0.1:8775/dev-login`. It reads `SKIPPY_HOME_TOKEN` into
+memory only (the gate takes only passes from that token) and never prints it. Progress it sends is real Jellyfin watch state.
+Tests: `portal/tests/test_video.py` (routes admin-only, the pass checked by the gate's OWN code in a separate process, a music pass
+refused, the URL rule, the tile and pill, the manifest, the page's markup against the script's lookups, the colour rule, hls.js's
+bytes), `test_video_js.py` (runs `portal/tests/js/video/*.test.js` under Node 18+ and feeds a catalog the real gate builds from its
+fake Jellyfin to the player's parser; skipped, not failed, without Node).
+
+## The Tabletop (Heroes of Chance, `/tabletop`)
+
+The Captain's Daggerheart campaign, as one page. A launcher tile for the Captain and for friends granted **"Tabletop (RPG boards)"**
+in Admin > Friends. There is no list of tabletops and no list of boards: the page is the campaign.
+- **Along the top:** a card per hero (face, name, class and level, player, project clock). The GM's **+** adds a hero.
+- **Below, the cork board:** the one surface where everything about the game that isn't one hero's is added **and** shown, as cue
+  cards (notes) and polaroids (pictures). Drag to pan, pinch or scroll to zoom, the fit key shows the whole spread.
+- **In the top bar:** the Fear (the flame), and the keys to pin a note, pin a picture, and fit the board.
+
+**The cork board.**
+- **Cards:** anyone with the grant pins a note (an ink from the passthrough palette) or a picture (a polaroid with a caption), from
+  the keys, by dropping a picture on the board, or by pasting one. Big photos are shrunk on the device to 2000 px JPEG first; GIFs and
+  small PNGs go as they are. You can drag, edit and take down your own cards; the GM can do that to any card. Dragging someone else's
+  card pans the board instead. A card appears at once for the person who adds it and for everyone else within about 4 s.
+- **Notes** can have a title (a cast card: "The Remnant", then its description).
+- **Who sees a card (the GM's call, card by card):** *shown* (everyone), *fogged* (the players see a drifting fog of war where the
+  card is and nothing of what it is, until it's revealed as the game goes on) or *hidden* (a GM-only campaign note: the players can't
+  see that it exists). The GM sets it on the card's sheet (three keys), flips a card between shown and fogged with the small key on the
+  card, and chooses what the cards they add next start as with the eye key in the top bar. Revealing lifts the fog off the card for
+  everyone within about 4 s; a hidden card that's shown is pinned up. A player's own cards are always shown.
+- **This is enforced on the server, not on the screen.** A player's copy of the board has the hidden cards left out entirely, and a
+  fogged card reduced to its position (no text, title, author, picture name or shape); a fogged or hidden picture is not served to a
+  player (404); a player can't move, edit or take down a card that isn't shown. The GM's own view marks fogged and hidden cards.
+- **Live:** the page polls `GET /tabletop/board?since=<rev>` every 4 s. While nothing has changed, the reply is `{"rev": n, "fear": n}`.
+
+**Heroes.** A hero's card opens three tabs:
+- **Sheet:** every field of the official Daggerheart sheet and its character-guide page (`tabletop.SPEC`). A change is checked against
+  SPEC, saved within a second, and logged with who made it and when.
+- **Project:** the hero's current project, with a progress clock.
+- **Folder:** PDFs and pictures (30 MB each) the hero's player or the GM adds, served behind the grant and opened sandboxed.
+- **Avatar:** the person key in the sheet's header takes a picture from the device and makes it the hero's face (it also goes into the
+  folder). The person key on any picture in the folder does the same for one already there. The crop is a focus point and a zoom (1 to
+  4), so a full-length painting can show just the face; the GM sets it with `POST /tabletop/h/<id>/avatar`
+  `{"file": id, "focus": {"x", "y", "zoom"}}`. A PDF can't be an avatar.
+- **Who changes what:** the hero's player (set by the GM) and the GM change the sheet and add to the folder; everyone else reads.
+  The print key opens `/tabletop/h/<id>/print`, every field in the official sheet's order, black on white, for players on paper.
+- **GM only:** a quick reference per hero (storytelling details, never sent to a player), the change log, who plays whom.
+
+**Fear.** The GM's Fear (0-12) is in the top bar for everyone and rides on every board poll. Only the GM changes it, and it carries
+over to the next session. Its sheet is a canvas of "Fear...", a void of stars, ghostly wireframe skulls and wireframe tentacles
+lashing and mingling: lines only (black stays see-through), running only while the sheet is open, and a still frame for anyone whose
+device asks for reduced motion.
+
+**Storage and safety.**
+- The private GCS bucket `skippy-tel-tabletop` holds `board.json`, `images/<card>.<ext>`, `heroes.json`, `heroes/<id>.json`,
+  `heroes/<id>/files/<file>` and `fear.json`. It's created by `infra/bootstrap` with versioning, so deleted files stay for 30 days.
+  Only the portal's runtime identity can read or write it; the portal serves files back behind the grant. `TABLETOP_BUCKET` is set by
+  `deploy.yml`.
+- A missing bucket is an error the page states ("the storage bucket doesn't exist yet"), never an empty table. A failed save drops the
+  portal's in-memory copies, so nothing is shown that wasn't kept.
+- The board is 6400 x 5000 units (`BOARD_W`, `BOARD_H`) so a campaign's worth of cards fits: the lore band, the glossary bands, the
+  hidden GM notes. The cards that go up at the start live in the campaign repo (`board/assets.json`, built by `board/make_assets.py`).
+- Every write needs the `X-Tabletop: 1` header, which another site's page can't add. Pictures and PDFs are recognised by their first
+  bytes, never by name. Text is drawn with `textContent`, never parsed as HTML.
+
+**Code:** `portal/tabletop.py`, `templates/tabletop.html` and `tabletop_print.html`, `static/tabletop{,-heroes}.js` and
+`tabletop.css`. Tests: `portal/tests/test_tabletop.py`.
+
+**Ideas for players, not built yet:** see [tabletop-backlog.md](tabletop-backlog.md) (a Discord session feed, Discord sign-in and a
+"join the table" link for a remote player, scheduled events, a Hope/Fear roller, recap threads; and what not to build).
+
+## Star Control Zero (the Captain's game, `/starcontrol`)
+
+The Captain's Star Control fan-game prequel ([star-control-precursors](https://github.com/aaronsrhodes2/star-control-precursors)),
+played in the browser. Everyone who can sign in can play it: core users and every friend, whatever games they were
+granted (it is not a game server, so there is nothing to grant, wake or pay for). Its card in Browser Games (`/play`) links to it once the game is in the image, and says "coming soon" until then.
+
+**How it gets here.** The game is Python (pygame); its repo's `tools/build_web.py` compiles it to WebAssembly with pygbag and
+writes a folder of plain files, published as a GitHub Release (`scz-web.tar.gz`). `portal/Dockerfile` runs
+`portal/starcontrol_fetch.py`, which downloads the release pinned in `deploy.yml` (`STARCONTROL_REF`, with its SHA-256 in
+`STARCONTROL_SHA256`), refuses it if the hash differs, and unpacks it to `starcontrol_static/` in the image
+(`STARCONTROL_DIR` overrides the folder). That step sits before the portal's own files in the Dockerfile, so the
+half-gigabyte layer is rebuilt only when the pin changes. An empty `STARCONTROL_REF` builds a portal without the game:
+no tile, and `/starcontrol/` says it isn't bundled.
+
+| File | What |
+|---|---|
+| `index.html` | the door: on a computer it loads the game at once; on a phone or tablet it waits for a controller (or a real key press), so a device that can't play never downloads it |
+| `game.html` | the game's own page (pygbag's, patched to fetch the bundle in parts) |
+| `web.tar.gz.partNN` | the game: code, art and sound effects, about 75 MB, split into parts of 24 MB because Cloud Run caps one response at 32 MiB |
+| `assets/music/<track>/<stem>.mp3` | the music, about 460 MB, streamed a track at a time while you play; never downloaded up front |
+| `version.json` | the build id, the game commit, sizes |
+
+**Routes** (`starcontrol` blueprint in `app.py`, helpers in `portal/starcontrol.py`):
+`GET /starcontrol/` (signed in) is `index.html` with the portal's app bar injected above the game (‹ Home, the title, the round
+Home button; the page is not a template, like Radiance); `GET /starcontrol/<path>` (signed in) is any file in the folder, with
+its type sent explicitly and Range answered (the music needs it); the bundle parts are cached for a year when their `?v=` is
+this build's id, everything else for an hour. `GET /starcontrol/version` is public (a build id and sizes): the deploy's smoke
+test reads it to prove the game shipped. The WebAssembly runtime itself (Python, pygame) comes from pygbag's CDN,
+`pygame-web.github.io`, pinned to one version by the build.
+
+**Playing.** Keyboard: WASD or the arrows, Space / Enter to select, Esc to go back. Controller: any pad the browser reports
+with the standard layout. No touch controls. Saves live in that browser's own storage (`localStorage`, keys `scz-save/...`):
+they survive a reload and a new release, but they do not follow the player to another device.
+
+**Shipping a new build of the game.** In the game repo: `python tools/build_web.py --tarball`, then
+`gh release create <tag> build/scz-web.tar.gz`, then put the tag and `sha256sum build/scz-web.tar.gz` in `deploy.yml` and push.
+
+Tests: `portal/tests/test_starcontrol.py` (who gets in, the page and its app bar, each file's type and caching, Range, no
+reading outside the folder, the public version probe, the tile, a build without the game, the fetch script's checksum and
+archive checks, the Dockerfile and `deploy.yml` pins). The game itself is tested in its own repo; its scripted walks also run
+inside the browser build (`?test=<walk>` on the game's page).
+
+## The bridge (the one interface the portal is moving to)
+
+A page built on the bridge is **one phone screen**: the page is exactly the viewport (`100dvh`, `overflow: hidden`, no scroll, no
+scrollbar, no pull-to-refresh), a grid shares the height among its controls, and anything longer than a screen is paged or swiped, not
+scrolled. It looks like the manual controls of a Maxolhx starship (the cat-eyed, sabre-toothed patron race of the Expeditionary Force
+books): cut corners, three claw slashes and two fangs on every control, a lamp that breathes when the thing behind it is ready, a light
+that runs along the edge of a live control, a plate that floods with colour while a finger is on it. Black base, crisp edges, no gradients
+(black is see-through on the Viture glasses). Code: `portal/static/bridge.css` and `bridge.js`, the glyphs in `portal/templates/_glyphs.html`,
+the shell in `portal/templates/base.html`.
+
+**Language-agnostic.** Say it with a glyph. Words appear only where they are a name or syntax people look up (a game server's name, a join
+code, a password, a commit id). The words for a screen reader are on each control (`aria-label`, `title`), never on the page. Add a glyph to
+`_glyphs.html`; never an emoji, never an image. A lamp says its state by shape as well as colour: lit circle = ready or live, ring = asleep,
+diamond = down, triangle = needs attention. Skippy chat is the one place with a **language choice** (13 languages, each in its own script;
+`chat.LANGUAGES`): the choice rides each message and the system prompt tells Skippy to answer in it while leaving names, codes, passwords,
+commands and numbers untouched.
+
+**Building a bridge page.** Extend `base.html`, add `{% block ui %}bridge{% endblock %}` and `{% block glyph %}NAME{% endblock %}` (the glyph
+in the strip along the top; `{% block hud_back %}` if "back" isn't Home). For a grid of controls use `.deck` with
+`style="--rows: N; --rows-wide: N; --rows-side: N"` (rows per layout) and a `.unit` per control (see `home.html`, `play.html`); content that is
+more than a screen goes in pages the person flips, never in a scroller (a drag is blocked everywhere except `textarea`, `input`, `select` and
+anything marked `data-pan`). Tests: `portal/tests/test_bridge.py`.
+
+**Modules and the Graveyard.** Every launcher control is a module (`portal/modules.py`: id, glyph, page, a name for a screen reader). Who may use
+a module is still the grants (`auth.py`); the Captain decides whether it is on the launcher at all. **Admin → Graveyard** (the first thing on the
+page) is a key per module: lit = on the launcher, dark = retired; press to retire or revive. Retiring hides the control for everyone; the page
+still answers at its own address and nothing is deleted. Admin itself can't be retired. The list is stored in the games VM's metadata
+(`portal-modules`, ignored by Terraform), read fail-open (an unreadable list retires nothing) and written fail-closed (a read that fails or a list
+that can't be read is never overwritten). Retirement is manual for now; it does not yet use the activity record to suggest what is unused.
+
+**Pages, not scrolling.** `Bridge.pager` (`static/bridge.js`) shows anything longer than a screen: the content flows into CSS columns exactly as wide
+as its panel; a page is a column; you flip with the keys or swipe sideways; a thin rail shows where you are. Used by the chat's conversation, tools
+and past-conversation lists.
+
+**Skippy chat on the bridge** (`templates/chat.html`, `_chat.html`): the conversation is pages; keys (all glyphs, each with its words for a screen reader):
+new chat, Barney Style (lit = Haiku explains; dark = straight to Mentat), language, tools, past conversations (Captain), saving, earlier, later, send;
+the language, tools, past-conversation and saving panels are sheets that slide over the conversation. Who spoke is a glyph (you, the can, the atom for
+Mentat on its own); what did the work is glyphs with a lamp (lit = answered, diamond = didn't, triangle = Mentat had no physics: also auto-filed as a
+gap). The one sentence of consent for saving stays as text. **The living background** (`static/bridge-alive.js`): neon wireframe spirals wander on
+random, regularly re-tuned paths, attach to each other or to the screen's corners with a wire for a few seconds, then snap loose with sparks; they
+brighten as a question goes out and an answer comes back. It draws dim behind the interface, never takes a tap, paints one still frame for anyone who
+asks for reduced motion, and uses no timers (the browser pauses it when the tab is hidden).
+
+**Game Servers on the bridge** (`games.html`, `game.html`). The list is a control per game: its own glyph (`Game.glyph`: rune, crest, cog, factory, wand), its name
+(the one word on it, a name people look up) and a lamp (lit = up, amber ring = coming up, ring = asleep, diamond = not the game on the server right now);
+each game keeps its own colour from its theme. A power key stops the server; the Captain also gets a key that opens a sheet to start several at once. A game's
+page is **panes you flip through** (a key per pane, lit while you are on it, plus earlier/later): Play (the lamp, a power key and the time it takes, or how to
+join: the invite code, address and password stay text, they are what people look up; players as a person glyph and a count), Facts and the game's own sites,
+Discord (the way in as glyph keys and a read-only copy of the channel, paged), and the Captain's Admin (the server card, its keys, this game's settings).
+The game's official art is behind everything under a flat dim (no gradient). The third-party font the old page loaded is gone. The live polls are
+unchanged (`/games/<id>/live`: a code drops in by itself and the page reloads when the server comes up or sleeps). Tests: `test_bridge.py` and the old
+game-page tests, rewritten for the glyph markup.
+
+**Admin on the bridge.** `/admin` is the control room: a deck of controls (Graveyard, Server, Recovery, Set up, Settings, Friends, Discord), a lamp or a
+count on the ones that need the Captain (the server's state, a warning when a game cannot start, how many people are asking for access), and
+a control opens its pane. A pane is pages you flip (`Bridge.pager`: swipe, PageUp/PageDown, the bar under it), never a scrolled page, and the
+address remembers which pane is open (`/admin#friends`), as does the tab across a form post, so a save lands you back where you were. It is the
+one bridge page that keeps its sentences, because it is where the settings, the friends and the recovery buttons are explained. Every section
+and every form is as it was; only the layout changed. `static/bridge-panes.js` only switches panes (shared with the Dashboard); `static/bridge-panes.css` is the panes' look. A field in
+a later page flips to its page when focused (`Bridge.pager` keeps the clipped panel from scrolling). The server logs (`/admin/logs`) are pages too.
+
+**The Dashboard on the bridge** (`/me`, admin only) uses the same panes as Admin (`static/bridge-panes.js`): a deck of controls, each with a lamp where something may need the Captain (the workshop ready or not, the VM, the core's verdict, whether home is reporting, any watcher warnings), and a control opens its pane. The first is the private Skippy (`_workshop.html`): a `data-flat` pane, because it lays itself out as a chat, with its log and its list of conversations as pages (`Bridge.pager`; a new turn takes you to the last page, and the pane tells the chat when it is shown with a `pane-shown` event). Every other widget (Server, Core, Home, Activity, Watcher, Spend, People, Experiments, Links) is a pane of pages, as it was. The private Skippy's script is tested in node against a fake browser (`test_workshop_ui.py`; its fake now has a `Bridge.pager` stub).
+
+**The experiment demos on the bridge.** The inventory (`/experiments`) and every demo page are bridge pages, public like before. The **N-body
+shootout** (`/experiments/nbody`) is a flip-book: plates you flip through (swipe, the arrow keys, the bar under them, or the play key, which flips by
+itself), each a view of one data file, `static/demos/nbody/flipbook.json`, drawn by `static/nbody-flipbook.js` (a canvas; it calculates no physics, only
+a log scale and screen positions). The file is made from a real run of sigma-ground's rolling-window shootout: `scripts/nbody_run.py` runs it (it
+only reads sigma-ground and points the shootout's own results file at ours; it records the commit it ran), `scripts/nbody_flipbook_build.py` turns the
+raw runs into medians and quartiles across the windows plus the time-lapse frames. Re-run it whenever the integrator changes:
+`python scripts/nbody_run.py --out build/nbody_a.json --predictors pure_newton standard` (and the other predictor groups, the slow fine-step ones one
+window per process), then `python scripts/nbody_flipbook_build.py build/nbody_*.json`. The plates: what was run, the ranking of the predictors,
+before and after the 2026-10-10 fix to the 1PN signs (against the shootout's own earlier fixture), every body at five years, two time-lapses (the inner
+planets monthly, Jupiter's moons daily; the integrator's own track with DE440's yearly positions as rings), one plate per body, then the earlier
+recorded 26-year Jovian results exactly as they were, and how to read it. The **double-slit** keeps its simulation script unchanged (the two canvases take
+the stage, sliders and glyph keys drive it, the explanation is behind the info key). The **Mentat playground** is a list of tools shown a screen at a
+time, a search, a key that steps through the domains, and a panel per tool with its form and its answer (formula, source). The **benchmark** is pages.
+Radiance (sigma-ground's own WebGL viewer) and Weapon vs. Armor (in Browser Games) are separate apps and are untouched.
+
+**On the bridge now:** the launcher, Browser Games (`/play`), Skippy chat, Game Servers, Bilby's Audio Service (`/music`), Nagatha's Video Service (`/video`), Admin (`/admin`, with its Graveyard and the server logs), the Dashboard (`/me`), and the Experiments inventory (`/experiments`, public: tiles as rows shown a screen at a time with `Bridge.PList`, a key that steps through the kinds, search, and an about panel; the tiles are rendered hidden as the page's data so a tap is still a `data-tel` tile tap).
+Still the old look, to move in batches: the demo pages themselves, request access, privacy.
+
+### Toggles, clickers and the lamps (2026-11-02)
+
+**A toggle is a hexagon, a clicker has the cut corner.** A toggle (any key with `aria-pressed`: Hands-off, the camera, Speak aloud,
+Bilby's shuffle and repeat) has exactly two looks: **lit** (filled, black glyph) when on, **dark** (outline) when off. Its glyph
+breathes while it is working (the voice key thinking), and nothing else changes; there are no lamps inside toggles. A clicker (a
+one-shot action: Shuffle library, the car's star, New chat) keeps the cut corner and its glyph breathes while its job runs
+(`SkippyKeys.busy(el, work)` in `static/keys.js`, at least 450 ms so a quick one is still seen). The styles are at the end of
+`static/bridge.css`. A key never turns green or black on hover: on a touch screen hover sticks to the last key tapped.
+
+**The lamps.** The dot in a control's top-left corner is the state of the thing behind it. A control whose thing has no state shows no
+lamp. Hovering (or long-pressing) a control names the state in its tooltip.
+
+| Lamp | Meaning |
+|---|---|
+| filled, breathing slowly | running (a game server up, music reachable, Skippy listening) |
+| hollow ring | standing by (up, nothing happening) |
+| amber ring, breathing fast | starting, or working on something (also a clicker that is busy) |
+| amber triangle | something is wrong (the house: one of its parts is not answering) |
+| red diamond, control dimmed | off or out of reach |
+
+### The portal tidies itself (2026-11-02)
+
+The controls are pruned, reordered and checked for merges from what people actually tap, every night, with no confirm box and with
+every change undone in one tap. `portal/adaptive.py` holds the rules, and `tools/adaptive_ui.py` (run by `tools/nightly.py`) is
+skippy-pc's half.
+
+- **What it counts.** Taps on anything marked `data-tel`. Since 2026-11-02 it also counts the days each control was **on screen**:
+  base.html's `seen` beacon, at most once a day per control per browser, stored as `seen:<id>` and left out of the top-taps lists.
+  That separates a key nobody wants from one nobody sees.
+- **Prune.** A control on screen on at least 14 of the last 30 days and tapped on at most 0.15 of those days (4 taps in a month)
+  goes to the Graveyard, least used first. At most one per surface (the chat's keys, the launcher, the `/me` panes) per week.
+  Until the beacon has a control's own days, only the chat's long-standing keys may use the days the chat was open instead; a
+  tile waits for its own 14 days.
+- **Promote.** The launcher's order follows use. A tile tapped more than twice as often as the one before it (at least 5 times) moves
+  up one place, one move a week. Skippy's tile stays first.
+- **Merge.** Two controls almost always tapped one after the other (B within 15 s of A on 60% of A's taps, at least 5 times) are written
+  down as a candidate. A merge needs code, so it is a suggestion only.
+- **Any control, not only the Graveyard's.** Every control is counted: templates carry `data-tel` (`tools/tel_tag.py` added them;
+  `portal/tests/test_tel_coverage.py` fails on a new control without one), and a key a script builds is named `<app>:<act>` (or
+  `<app>:deck-<u>`) by `static/keys.js`. The least-used control on each page goes after 14 days of its own on screen, one per
+  page a week. It is hidden on every page (base.html, from `Adaptive.hidden()`) and listed in the Graveyard as `ctl:<id>`.
+- **Media never falls off** (the Captain): songs, books, films, game cards, browser games, demos and every row or cell in a list
+  are content. Their taps are counted, but only controls are tidied (`adaptive.MEDIA`).
+- **Floors, never retired** (`adaptive.FLOOR_CTL`): Back, Close, Home, Send, Stop, Play/Pause, the voice key, sign in and out, the
+  pager, and the Admin, sign-in and access pages.
+- **Never touched:** Admin, Skippy's tile, and anything revived by hand. A revive in the Graveyard pins it; retiring it by hand takes
+  the pin away.
+- **Where you see it:** Admin > Graveyard > "Tidied by use" lists each change, its reason and a Revive key. The overnight report
+  names the night's changes. `python tools/adaptive_ui.py --show` prints what would be sent and changes nothing.
+
+## Telemetry: what the portal records, and where it goes
+
+The Captain records how signed-in people use the portal (what gets opened, tapped and asked, what breaks), so he can
+see what to keep and what to remove, and it says so: the public **`/privacy`** page, linked from every page's footer,
+the sign-in page and the Skippy chat. That page is **rendered from `RECORDED`, `NOT_RECORDED` and `ALSO` in
+`portal/telemetry.py`**, the same lists the recorder is written against, so it can't promise what the code doesn't do
+(a test swaps the lists and checks the page follows). Change what is recorded → change those lists in the same commit.
+
+```
+browser ─tap─> POST /telemetry/tap ─┐                              (signed-in people only; taps on [data-tel])
+portal hooks (telemetry_web.py) ────┴─> Telemetry (in memory, ≤5000) <─ GET /home/telemetry ── home reporter (each ~15 s)
+                                                                                   │ POST /telemetry/site_events (≤100 KB batches)
+                                                       flask-api: site_events table in ui_telemetry.db (skippy-pc)
+                                                                                   │ GET /telemetry/site_summary → report `site_activity`
+                                   /me → "Activity" widget (admin only) <──────────┘
+```
+
+- **Recorded**, for a signed-in person still on the list, each event tagged with their email, role and a random id
+  for that sign-in: `page` (a GET that returned HTML: its path, never the query string), `action` (every non-GET: the
+  endpoint, whether it worked, the field NAMES, and values only for the `SAFE_VALUES` allow-list in
+  `telemetry_web.py`: game ids, idle minutes and the like, each checked against a pattern), `ui` (a tap on anything
+  marked `data-tel`: the launcher's tiles, the Games cards, the experiments), `chat` (the message and reply, the model,
+  the tools used with their arguments, redacted), `error`.
+- **Never**: IP addresses or browser details (nothing reads them), signed-out people and visitors, a tool's result, setting
+  values, passwords. Polls, media and the machine endpoints (`SKIP_ENDPOINTS`) and the private Skippy (`/me/workshop/*`)
+  aren't recorded at all. A test pins every skipped name to a real endpoint, so a renamed route can't start recording, and
+  a second test scans every template for what its scripts request by themselves (`url_for` inside a `<script>`, a `data-*`
+  URL a script reads, literal paths) and fails unless each such GET endpoint is in `SKIP_ENDPOINTS` or doesn't answer a
+  page: a new poller that returns an HTML fragment (the Server admin card's 60 s refresh was the first) must be added there.
+- **Secrets in text** are scrubbed by `telemetry.redact()` (API keys, bearer tokens, JWTs, `password: …`, `password is …`,
+  `VALHEIM_PASSWORD=…`, long token-looking strings), anything under a key that sounds secret is dropped, and a code a tool
+  returned that Skippy then repeats is removed from the reply. Best effort: the chat says "don't type secrets".
+  The scrubbing must stay cheap, because the portal is one process and a regex holds it for everyone: text is cut to its
+  cap (+256 characters, so a secret at the cut is still seen) BEFORE it is scanned, `redact()` never scans more than
+  `MAX_SCAN`, and no pattern may backtrack (no nested quantifiers: `test_fix_telemetry_redos.py` runs every compiled
+  pattern in the module against adversarial input at the real sizes, in a child process with a hard time limit).
+  A lone surrogate (`"\ud800"`: valid JSON, unencodable) is replaced by U+FFFD wherever it appears in what is recorded.
+- **No ack, no loss.** The portal is stateless, so it keeps the newest 5000 events in memory (`dropped` counts overflow).
+  Each pull says which portal process (`boot`) and the last `seq` it has stored; the portal forgets only up to that, and
+  the reporter moves on only after flask-api answered ok. flask-api stores each `(boot, seq)` once, so a retry or a
+  restarted reporter can't double count. A redeploy of the portal loses what was still waiting (seconds' worth).
+  flask-api being away (no answer, 404, 502/503/504) or failing every write (500 to everything) only delays: nothing is
+  skipped. A 500 makes the reporter halve the batch (a few POSTs, bounded) to find an event flask-api will never store;
+  it skips such an event only after flask-api has stored other events meanwhile and the event still gets a 500 alone, and
+  says so in its log. flask-api itself repairs a lone surrogate and refuses a row it can't bind without failing the batch.
+  If the portal's oldest waiting event is over 15 minutes old while home keeps pulling, the widget says **stuck**, not ok.
+- **Kept 180 days** (`KEEP_DAYS`; flask-api prunes at start and hourly), in the same SQLite file as the phone UI's
+  clicks (`ui_events`), in the `site_events` table. Read it with
+  `curl -s localhost:3003/telemetry/site_summary?days=30` (the same summary the widget shows) or SQLite directly.
+- **Deleting a person's events** (the page tells people to ask): on skippy-pc,
+  `curl -s -X POST localhost:3003/telemetry/site_forget -H 'content-type: application/json' -d '{"user":"pal@example.com"}'`
+  answers how many rows it deleted. Events still waiting in the portal's memory arrive after that (they're seconds old):
+  run it again a minute later, or remove the person from Admin → Friends first, since only people on the list are recorded.
+- **Switch**: `TELEMETRY_ENABLED=false` (a deploy env var; default on) records nothing, hides the beacon and the notices,
+  and `/privacy` says it is off.
+- **Adding a tile**: put `data-tel="tile:<name>"` on it (an app tile) or `demo:<slug>`; a test checks every id the launcher,
+  Games and Experiments templates use is one the Activity widget knows (`known_taps()`), which is how the widget lists
+  tiles nobody has tapped.
+- **Order of a rollout**: skippy-pc needs flask-api (the new routes and table) and home-reporter (the collector) rebuilt
+  (the safe stop / rm / up sequence for `flask-api` and `home-reporter`); the portal deploys from `main` as usual. Until the
+  reporter is running the new code the widget says "never collected", and the portal's buffer fills to 5000 and then
+  drops the oldest. A flask-api without the routes only makes the reporter retry (it never loses a pulled event).
+
+## Known rough edges
+
+- Choosing different games while the VM is **running** saves the choice;
+  it applies at the next restart.
+- Restart is synchronous (stop → start can take a few minutes); the page
+  waits. Fine for one admin; a background job + progress view is the fix if
+  it gets annoying.
+
+## Doom Loop dev channel (`/doomloop`)
+
+The Captain's work-in-progress game (github.com/aaronsrhodes2/doom-loop), playable in the browser at its newest build, so
+any push can be played on its intended target. Unlike Star Control Zero it is **not baked into the portal image**:
+nothing about a new build redeploys the portal.
+
+**How a build gets here:** doom-loop's CI (`.github/workflows/dev-deploy.yml` in that repo) runs the game's tests, builds
+the static site (`dist/`: `index.html`, `assets/`, and `version.json` written last) and uploads it to the folder
+`dev/` of the bucket `skippy-tel-doomloop-dev`. It authenticates as `doomloop-publisher` through Workload Identity
+Federation (no key file): a second provider (`doomloop`) in the same pool trusts only doom-loop's `main`, and
+`doomloop-publisher` can only write objects in that one bucket. It is **not** `skippy-deployer`, whose `run.admin` /
+`compute.admin` roles another repo's CI must never hold. All of it is in `infra/bootstrap/` (applied by hand in Cloud
+Shell, like the rest of bootstrap: see [docs/cicd.md](../cicd.md)).
+
+**Routes** (`doomloop` blueprint in `app.py`, helpers in `portal/doomloop.py`): `GET /doomloop/` (signed in) is the build's
+`index.html` with the portal's app bar and a "dev build <commit>" badge injected above the game; `GET /doomloop/<path>`
+(signed in) is any file of the build, read from the bucket with the portal's own service account (`skippy-agent` has
+`objectViewer` on the bucket), sent with the right content type and revalidated by ETag; a path that leaves the folder is a
+404 before storage is asked. `GET /doomloop/version` is public (build id, commit, time, branch): the deploy's smoke test
+reads it and accepts "no build yet". The build id is cached for 10 seconds, so a new build shows within seconds of its
+upload. With no bucket configured (tests, local runs) or before the first build, the page says there is no build yet and the
+card in `/play` says "coming soon".
+
+**The game's side of the contract:** the site must ask for its files by relative path (Vite `base: './'`) so they resolve
+under `/doomloop/`; no single file may exceed Cloud Run's 32 MiB response cap; saves stay in the player's browser.
+
+**Setup once** (after the code is deployed): in Cloud Shell, `git pull` and apply `infra/bootstrap` (it creates the
+bucket, the publisher and the second provider), then give doom-loop two repository variables (Settings → Secrets and
+variables → Actions → Variables): `WIF_PROVIDER` = the `doomloop_workload_identity_provider` output and
+`WIF_SERVICE_ACCOUNT` = the `doomloop_publisher_service_account` output. Neither is a secret.
+
+Tests: `portal/tests/test_doomloop.py` (who gets in, the page and its badge, file types and revalidation, no path escape,
+new builds without a redeploy, damaged or unsafe `version.json`, no-bucket behavior, the `/play` card).
+
+## Shifting Prophesy (`/shifting-prophesy`)
+
+Purple Skippy's shake-down cruise: the private Skippy on its Private brain (Skippy Core's coder), running as itself in the
+workshop, builds a whole top-down adventure game from a written spec, one prompt from the Captain at a time, in
+`D:\Aaron\development\shifting-prophesy-purple` (opened in place as `f-shifting-prophesy-purple`). Its turns go through
+`tools/retest_failures.py`, a new conversation per turn, which the Captain follows live in the chat. Claude Haiku 5.5 gets the
+same prompts with every Claude Code tool, as the reference. Where purple falls short is what it needs next. The referee
+(`D:\Aaron\development\shifting-prophesy\referee`) runs the turns on skippy-pc, grades both builds against the spec on hidden
+seeds, screenshots them, and keeps the record. All three are local git repositories with no remote (Platinum §23). The
+referee's README is the cruise's manual; this section is only the portal's side.
+
+**How things get here:** after each turn the referee's runner uploads each build (`prophesy/haiku/`, `prophesy/purple/`,
+`version.json` last, then `finish` drops the previous build's leftovers) and the turn's record (`prophesy/turns/`,
+`index.json` last) into the portal's own bucket (`TABLETOP_BUCKET`), through `PUT /home/prophesy/<folder>/<path>` and
+`POST /home/prophesy/<folder>/finish` with the home token, like the reporter's other machine routes. No GitHub, no CI and no
+extra cloud identity are involved. The hidden seeds and full transcripts never leave skippy-pc.
+
+**Routes** (`prophesy` blueprint in `app.py`, helpers in `portal/prophesy.py`, path and file-type rules from `doomloop.py`):
+`GET /shifting-prophesy/` (signed in) is the board, in pages you flip with the pager (swipe, arrow keys): the first is each
+arm's live build and running score; then ONE PAGE PER TURN, oldest to newest (it opens on the newest, or on the attempt a
+`#purple:1:7` link names). A turn's page is its prompt and the Captain's scores, then every ATTEMPT at it as a section that
+opens by itself (one at a time): the reference first, then the rest in the order they were made, named `model:turn:attempt`
+(`haiku:1:1`, `purple:1:7`; the early fix-up turns are `purple:1:1+fix1`). A closed attempt shows its outcome, the referee's six
+checks as six boxes, its parity verdict and its time and calls; open, it shows the result (time, cost, commits, context and
+segments), the referee's rates, parity with the reference (each measure, the reference's minimum against the attempt's median),
+what it did beside the reference's own tool-call numbers, the harness it ran under (engine, SDK, model, sampling), its
+screenshots, and links to its reply, tool calls and report. The data is each turn row's `attempts` in `index.json` (the
+referee's `board.mjs`, which also uploads every trial's readable files under `turns/<Tnn>/`); a row from before attempts
+existed (only `arms`) shows as one attempt per arm. `GET /shifting-prophesy/<arm>/` (signed in) frames that arm's build under the app bar, with the query
+string passed through (the spec's `?seed=...&screen=x,y` URLs); the build's own page is never edited. `GET
+/shifting-prophesy/<arm>/<path>` and `/shifting-prophesy/turns/<path>` (signed in) are files from the bucket, as Doom Loop's.
+`GET /shifting-prophesy/<arm>/version` is public: the referee's runner and the deploy's smoke test read it. The record's
+`index.json` is checked on the way in (turn ids, labels, screenshot and file paths inside their own attempt's folder, numbers as numbers).
+
+**Setup:** none beyond a paired home token (which skippy-pc already has).
+
+Tests: `portal/tests/test_prophesy.py` (including: only the home token uploads, uploads stay inside the cruise's folders, a new
+build replaces the old one, the record only grows, an oversize file is refused, no bucket is a 503).

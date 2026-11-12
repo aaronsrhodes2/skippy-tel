@@ -1,0 +1,56 @@
+{# Recovery is ONE operation (recovery_web.py, doctor.py): "Put everything back". Admin only: admin.html is the only page that includes this.
+   The doctor keeps everything at its baseline by itself; the checklist shows every part (green or red, and why) and what the doctor did
+   lately; the button puts it all back at once and acts at once (the Captain's rule: no confirm boxes). The card refreshes itself from
+   /admin/recovery/state while the Recovery pane is open. #}
+{% set rs = recovery_state() %}
+<div id="recovery" class="recovery-one">
+  <form method="post" action="{{ url_for('recovery.repair') }}">
+    <button type="submit" class="repair-all" data-tel="recovery:repair"><svg class="g" aria-hidden="true"><use href="#g-loop"/></svg> Put everything back</button>
+  </form>
+  <p class="help">Everything back to its known good state: the portal redeployed if it's behind or broken, skippy-pc's Docker and every
+    service up and answering, the private Skippy's bridge restarted (never mid-run), Skippy Core repaired. Code is never reverted.</p>
+  {% if rs.maintenance %}<p class="warn">The stack was stopped on purpose: the doctor waits until it's back on.</p>{% endif %}
+
+  <ul class="checklist" aria-live="polite">
+    {% for r in rs.rows %}
+    <li data-ok="{{ 'yes' if r.ok else 'no' }}"><i class="lamp" data-s="{{ 'on' if r.ok else 'off' }}"></i>
+      <span class="what">{{ r.label }}{% if r.short %} <code class="code">{{ r.short }}</code>{% endif %}</span>
+      <span class="why">{{ r.why }}</span></li>
+    {% endfor %}
+  </ul>
+
+  {% if rs.repair %}
+  <p class="repair-state">{% if not rs.repair.done %}<i class="lamp" data-s="on"></i> Putting skippy-pc and Skippy Core back…{% elif rs.repair.ok %}Put back: {{ rs.repair.summary }}{% else %}<span class="warn">It didn't all come back: {{ rs.repair.summary }}</span>{% endif %}</p>
+  {% endif %}
+
+  {% if rs.actions %}
+  <h3>What the doctor did lately</h3>
+  <ul class="doctor-log">
+    {% for a in rs.actions %}<li>{{ (a.ago_s // 60) }} min ago: {{ a.what }}{% if a.why %} ({{ a.why }}){% endif %}{% if a.by != 'doctor' %} · {{ a.by }}{% endif %}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</div>
+<script>
+  (function () {
+    // While the Recovery pane is open, the checklist follows what the doctor sees (every 10 s); nothing is fetched while it is closed.
+    const box = document.getElementById("recovery"), list = box.querySelector(".checklist"), pane = box.closest(".apane");
+    async function refresh() {
+      if (pane && pane.hidden) return;
+      try {
+        const r = await fetch("{{ url_for('recovery.state_json') }}", {cache: "no-store"});
+        if (!r.ok) return;
+        const s = await r.json();
+        list.replaceChildren(...s.rows.map(row => {
+          const li = document.createElement("li"); li.dataset.ok = row.ok ? "yes" : "no";
+          const lamp = document.createElement("i"); lamp.className = "lamp"; lamp.dataset.s = row.ok ? "on" : "off";
+          const what = document.createElement("span"); what.className = "what"; what.textContent = row.label + (row.short ? " " + row.short : "");
+          const why = document.createElement("span"); why.className = "why"; why.textContent = row.why || "";
+          li.append(lamp, what, why); return li;
+        }));
+        const rep = box.querySelector(".repair-state");
+        if (rep && s.repair) rep.textContent = !s.repair.done ? "Putting skippy-pc and Skippy Core back…" : (s.repair.ok ? "Put back: " : "It didn't all come back: ") + (s.repair.summary || "");
+      } catch (e) { /* the portal blinked: the next look tries again */ }
+    }
+    setInterval(refresh, 10000);
+  })();
+</script>

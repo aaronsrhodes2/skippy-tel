@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Orion Trail — Browser Games{% endblock %}
+{% block app %}play{% endblock %}
+{% block public_up %}{{ url_for('play_index') }}{% endblock %}
+{% block public_up_label %}Browser Games{% endblock %}
+{% block mainclass %}wide{% endblock %}
+{% block head %}
+<style>
+  /* The game is one self-contained page (static/orion-trail/, vendored from its own repo): framed under the app bar so its
+     full-screen CSS and its controls stay its own. It plays by keyboard or by touch (a tap for every key); on a phone it
+     takes the whole screen under the bar. */
+  .orion { display: block; width: 100%; height: calc(100vh - 150px); height: calc(100dvh - 150px); min-height: 560px; border: 1px solid var(--line);
+           border-radius: 8px; background: #000; }
+  @media (max-width: 700px) { .orion { min-height: 0; height: calc(100vh - 118px); height: calc(100dvh - 118px); border-radius: 0; border-left: 0; border-right: 0; } }
+  .orion-note { margin: 6px 0 0; }
+</style>
+{% endblock %}
+{% block content %}
+<section>
+  <iframe class="orion" id="orion" src="{{ url_for('static', filename='orion-trail/orion-trail.html') }}"
+          title="Orion Trail" allow="fullscreen"></iframe>
+  <p class="help orion-note">Tap or type: <b>New voyage</b>, then <b>Engage</b> (or <b>Space</b>) to travel a day. Works on a phone.
+    Your voyage saves in this browser.
+    <a href="https://github.com/aaronsrhodes2/orion-trail" target="_blank" rel="noopener">Source</a></p>
+</section>
+<script>
+  // Keys go to the game straight away, without a first click.
+  (function (f) { f.addEventListener("load", () => { try { f.contentWindow.focus(); } catch (e) {} }); })(document.getElementById("orion"));
+</script>
+{% endblock %}

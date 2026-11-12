@@ -1,0 +1,33 @@
+{
+ "n": 24,
+ "title": "Round 4, Haiku 5.5: won the match 4-0 (the coder's code failed)",
+ "model": "Claude Haiku 5.5 (Anthropic's API) as a vanilla agent: Claude Code with purple's system prompt and an empty setup (no skills, no memory, no checker), effort high, a 131K window; only MineBench's tool-mode prompt in the folder",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 233793,
+ "minutes": 8,
+ "size": "256 x 63 x 256",
+ "verdict": "Won round 4 and the match, 4-0, without a judge: the coder's build doesn't run, which loses under the match's rules. A black locomotive with a red cab, smokestack and a dark smoke plume, a coal tender and two green coaches, in one line on a fenced track beside a small station, across a 256-wide meadow with a river, trees and flowers. The train is small in a big, mostly empty field. 8 minutes, 29 turns, $0.27. Haiku's four rounds cost about $0.65 in all.",
+ "stats": {
+  "started": "2026-11-01T16:37:43.554Z",
+  "minutes": 8,
+  "tokens": {
+   "input": 169370,
+   "cache_read": 1681710,
+   "output": 98665,
+   "total": 1949745
+  },
+  "models": [
+   {
+    "name": "Claude Haiku 5.5",
+    "tokens": {
+     "input": 169370,
+     "cache_read": 1681710,
+     "output": 98665
+    }
+   }
+  ]
+ },
+ "series": "h2h",
+ "request": "experiments/minebench/h2h-r4-haiku/request.txt"
+}

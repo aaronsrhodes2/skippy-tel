@@ -1,0 +1,1225 @@
+{# Skippy chat on the bridge (static/bridge.css). The conversation is a SCROLLING TRANSCRIPT (the Captain's rule, 2026-10-23: long text
+   is the one place a scrollbar belongs) that follows new words while you are at the bottom and offers a "jump to latest" key when
+   you are not. Every turn can be copied; your last message can be edited and Skippy's last reply retried, and the versions stay
+   behind ‹ n/m › arrows. The composer takes typing, pasted or dropped pictures and files, and a long paste becomes an attachment
+   chip (the whole text still goes). The controls are glyph keys; Your chats, the apps and the tools are sheets over the transcript.
+   The open conversation lives in sessionStorage (it follows you within a tab); your chats are kept on the portal (chat_history.py)
+   with a copy in this browser. Behind it, templates/front.html runs the living background (static/bridge-alive.js). #}
+<div class="skippy-chat chat-bridge">
+  {% if not chat_enabled %}
+    <p class="error"><span class="lamp" style="width:10px;height:10px" data-s="off"></span> Skippy Core isn't configured yet.</p>
+  {% endif %}
+  <div class="stage">
+    {% if is_admin %}
+    <div class="continuing" hidden><span></span><button type="button" class="key sm drop-ctx" aria-label="Stop continuing this conversation" title="Stop continuing this conversation" data-tel="chat:stop-continuing-this-conversation"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
+    {% endif %}
+    <div class="log" aria-live="polite"><div class="flow"></div></div>
+    <button type="button" class="key jump" hidden aria-label="Jump to the latest" title="Jump to the latest (End)" data-tel="chat:jump-to-the-latest"><svg class="g" aria-hidden="true"><use href="#g-down"/></svg><b class="badge"></b></button>
+    {% if captain %}
+    {# The permanent Home chat (housechat.py, static/skippy-home.js): the house conversation through the room hubs, words only; opened from the
+       first row of Your chats. Its composer is this chat's box: "say to Skippy" (as if spoken in the room) or "make Skippy say". #}
+    <div class="home-view" hidden>
+      <div class="home-bar">
+        <span class="home-title"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg>Home</span>
+        <span class="home-modes" role="group" aria-label="What the box does" style="display:contents">
+          <button type="button" class="key sm" data-mode="say" aria-pressed="true" aria-label="Say to Skippy: as if spoken in the room" title="Say to Skippy: as if spoken in the room" data-tel="chat:say-to-skippy"><svg class="g" aria-hidden="true"><use href="#g-talk"/></svg></button>
+          <button type="button" class="key sm" data-mode="announce" aria-pressed="false" aria-label="Make Skippy say this" title="Make Skippy say this" data-tel="chat:make-skippy-say-this"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg></button>
+        </span>
+        <select class="home-room" aria-label="Which room" data-tel="chat:which-room"><option value="*">all rooms</option></select>
+        <button type="button" class="key sm home-speak" aria-pressed="true" aria-label="Speak aloud" title="Speak aloud (off: the answer only appears here)" data-tel="chat:speak-aloud"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg></button>
+        <button type="button" class="key sm home-forward" aria-pressed="true" aria-label="Forwarding" title="Forwarding" data-tel="chat:forwarding"><svg class="g" aria-hidden="true"><use href="#g-eye"/></svg></button>
+      </div>
+      <div class="home-state" hidden aria-live="polite"></div>
+      <div class="home-flow" aria-live="polite"></div>
+    </div>
+    {% endif %}
+    {% if captain and workshop_brains is defined %}
+    {# The Captain's agent, in the same stage: shown instead of the log in Private and Auto. Its own composer is hidden; this
+       chat's composer, keys and sheets drive it through window.SkippyAgent. It has its own scrolling transcript. #}
+    <div class="agent-view" hidden>{% include "_workshop.html" %}</div>
+    {% endif %}
+
+    {% if chat_modes|length > 1 %}
+    {# The Captain's three modes (portal/brains.py MODES): Public = this chat on Skippy Core; Private (his default) and Auto (the
+       fallback) = the agent, thinking with Skippy Core's coder or with Claude. Guests have one mode and never see this. #}
+    <div class="sheet" data-sheet="brain" hidden>
+      <div class="brain-list">{% for m in chat_modes %}
+        <button type="button" class="brain-opt mode-{{ m.theme }}" data-brain="{{ 'agent-' ~ m.agent if m.agent else 'core' }}" data-mode="{{ m.id }}" aria-pressed="false"{% if not m.ready %} disabled{% endif %} data-tel="chat:mode-{{ m.id }}"><svg class="g" aria-hidden="true"><use href="#g-{{ m.glyph }}"/></svg>{{ m.label }}{% if m.agent == 'claude' %} <span class="paid" title="paid">$</span>{% endif %}<i class="lamp" data-s="{{ 'on' if m.ready else 'off' }}"></i></button>
+      {% endfor %}</div>
+    </div>
+    {% endif %}
+    <div class="sheet" data-sheet="apps" hidden>
+      <div class="app-tray"></div>
+    </div>
+    {# Your chats: every conversation in one list, starred ones first, then by day (Today, Yesterday, the last 7 and 30 days, then
+       by month); a search over names and words. For the Captain it also holds the agent's conversations (Private and Auto, kept on
+       skippy-pc) and Skippy Memory (other AIs' saved chats, to continue here), with a filter row to narrow it. #}
+    <div class="sheet" data-sheet="chats" hidden>
+      <div class="chats-top">
+        <input type="search" class="chats-filter" aria-label="Search your chats" placeholder="Search">
+        <button type="button" class="key sm chats-new" aria-label="New chat" title="New chat" data-tel="chat:new-chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
+      </div>
+      {% if is_admin %}
+      <div class="chats-kinds" role="group" aria-label="Which chats">
+        <button type="button" data-kind="all" aria-pressed="true" data-tel="chat:all">All</button>
+        <button type="button" data-kind="chat" aria-pressed="false" data-tel="chat:can"><svg class="g" aria-hidden="true"><use href="#g-can"/></svg>Chats</button>
+        <button type="button" data-kind="agent" aria-pressed="false" data-tel="chat:console"><svg class="g" aria-hidden="true"><use href="#g-console"/></svg>Agent</button>
+        <button type="button" data-kind="archive" aria-pressed="false" data-tel="chat:past"><svg class="g" aria-hidden="true"><use href="#g-past"/></svg>Archive</button>
+        <button type="button" data-kind="moments" aria-pressed="false" data-tel="chat:moments"><svg class="g" aria-hidden="true"><use href="#g-camera"/></svg>Moments</button>
+      </div>
+      {% endif %}
+      {% if is_admin %}<div class="chat-row"><button type="button" class="chat-open chat-home" aria-label="Home: the house conversation" data-tel="chat:home"><svg class="g" aria-hidden="true"><use href="#g-home"/></svg><span class="chat-title">Home</span><span class="chat-when">the house, live</span></button></div>{% endif %}
+      <div class="pg"><div class="pg-flow chats-list"></div></div>
+      <div class="pips" aria-hidden="true"><i></i></div>
+    </div>
+    <div class="sheet" data-sheet="tools" hidden>
+      <div class="pg"><div class="pg-flow verb-list"></div></div>
+      <div class="pips" aria-hidden="true"><i></i></div>
+    </div>
+  </div>
+
+  <form class="ask">
+    <div class="vstat" hidden aria-live="polite"></div>
+    <div class="editing" hidden><svg class="g" aria-hidden="true"><use href="#g-pen"/></svg><span>Editing your last message</span><button type="button" class="key sm" aria-label="Stop editing" title="Stop editing (Esc)" data-tel="chat:stop-editing"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
+    <div class="queue" hidden aria-live="polite"></div>
+    <div class="quotes" hidden></div>   {# the parts of messages this one replies to (static/skippy-reply.js): select words, tap Reply #}
+    <div class="files" hidden></div>
+    <input type="file" class="file-pick" multiple hidden accept="image/jpeg,image/png,image/webp,audio/wav,audio/mpeg,audio/flac,audio/ogg,application/pdf,text/*,.md,.csv,.json,.py,.js,.ts,.tsx,.jsx,.html,.css,.yml,.yaml,.xml,.sh,.kt,.java,.c,.h,.cpp,.rs,.go,.sql,.toml,.ini,.log">
+    <textarea rows="1" aria-label="Message" placeholder="Message Skippy" required></textarea>
+    <div class="keybar">
+      {% set buried = chat_buried or [] %}
+      <button type="button" class="key apps-key" data-open="apps"{% if 'apps' in buried %} data-buried hidden{% endif %} data-tel="chat:apps" aria-label="Apps" title="Apps"><svg class="g" aria-hidden="true"><use href="#g-apps"/></svg></button>
+      <button type="button" class="key" data-open="chats" data-tel="chat:chats" aria-label="Your chats" title="Your chats"><svg class="g" aria-hidden="true"><use href="#g-chats"/></svg></button>
+      <button type="button" class="key clear" data-tel="chat:new"{% if 'new' in buried %} hidden{% endif %} aria-label="New chat" title="New chat"><svg class="g" aria-hidden="true"><use href="#g-new"/></svg></button>
+      <button type="button" class="key clip" data-tel="chat:attach"{% if 'attach' in buried %} hidden{% endif %} aria-label="Attach pictures or files (or paste, or drop them here)" title="Attach pictures or files (or paste, or drop them here)"><svg class="g" aria-hidden="true"><use href="#g-clip"/></svg></button>
+      {% if captain %}{# the camera (static/skippy-camera.js): a tap opens the viewfinder, a second takes the photo; the Captain only #}
+      <button type="button" class="key cam" data-tel="chat:camera" aria-pressed="false" aria-label="Camera: photos, every camera, or the screen" title="Camera: photos, every camera, or the screen"><svg class="g" aria-hidden="true"><use href="#g-camera"/></svg><i class="lamp"></i></button>{% endif %}
+      {% if chat_modes|length > 1 %}<button type="button" class="key brain-key" data-open="brain" data-tel="chat:mode" aria-label="Mode" title="Mode"><svg class="g" aria-hidden="true"><use href="#g-core"/></svg></button>{% endif %}
+      {# the voice key (static/skippy-voice.js two modes): Typing listens only for "Skippy"; Hands-off listens and speaks until "thanks" #}
+      <button type="button" class="key voice" data-tel="chat:voice" aria-pressed="false" aria-label="Typing: tap to talk" title="Typing: tap to talk"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
+      <button type="button" class="key" data-open="tools" data-tel="chat:tools"{% if 'tools' in buried %} hidden{% endif %} aria-label="Tools" title="Tools"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
+      <span class="grow"></span>
+      <button type="button" class="key stopk" hidden aria-label="Stop" title="Stop" data-tel="chat:stop"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg><i class="lamp" data-s="on"></i></button>
+      <button type="submit" class="key send" data-tel="chat:send" aria-label="Send" title="Send (Enter; Shift+Enter for a new line)"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>
+    </div>
+    <nav class="app-row" aria-label="Apps" hidden></nav>   {# a wide screen keeps the tray as a slim row under the box; a phone has the key #}
+  </form>
+</div>
+<script>
+  (function (root) {
+    // The open conversation lives in this tab (sessionStorage) and is sent with each message.
+    const OWNER = {{ (chat_owner or "")|tojson }};                // whose chats these are (a one-way id of the signed-in person)
+    const KEY = "skippy-chat:" + OWNER;
+    const alive = () => window.skippyAlive || {pulse() {}};       // the living background, if this page has one
+    const form = root.querySelector(".ask"), logBox = root.querySelector(".log"), log = logBox.querySelector(".flow");
+    const msg = form.querySelector("textarea"), sendBtn = form.querySelector("button.send");
+
+    // ── The transcript scrolls. While you are at the bottom it follows new words; scroll up and it stays put, and the jump key
+    // (with how many replies came in meanwhile) takes you back. End (outside the box) does the same. ──
+    const jump = root.querySelector(".jump");
+    let stuck = true, unseen = 0;
+    const atEnd = () => logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 48;
+    function paintJump() { jump.hidden = stuck || logBox.hidden; jump.querySelector("b").textContent = unseen ? String(unseen) : ""; }
+    let lastTop = 0;                                              // only YOUR scrolling up stops the following (content that grows doesn't)
+    logBox.addEventListener("scroll", () => {
+      const up = logBox.scrollTop < lastTop - 2; lastTop = logBox.scrollTop;
+      if (atEnd()) { stuck = true; unseen = 0; } else if (up) stuck = false;
+      paintJump();
+    }, {passive: true});
+    const logPager = {                                           // (the name it had when the transcript was pages; same calls)
+      refresh() { if (stuck) logBox.scrollTop = logBox.scrollHeight; paintJump(); },
+      last() { stuck = true; unseen = 0; logBox.scrollTop = logBox.scrollHeight; paintJump(); },
+      lastNow() { stuck = true; unseen = 0; requestAnimationFrame(() => { logBox.scrollTop = logBox.scrollHeight; paintJump(); }); },
+    };
+    jump.addEventListener("click", () => { logPager.last(); msg.focus(); });
+    if (window.ResizeObserver) new ResizeObserver(() => logPager.refresh()).observe(log);   // a picture or a card that grows keeps the end in view
+    document.addEventListener("keydown", e => {
+      if (e.key === "End" && e.target !== msg && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) { e.preventDefault(); logPager.last(); }
+    });
+
+    const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", key: form.querySelector("button.voice"),
+      box: msg, status: form.querySelector(".vstat"), onSend: () => form.requestSubmit(),          // hands-free: a pause ends it, a countdown sends it
+      mode: () => (BRAINS.find(x => x.id === brain) || {}).mode,                                    // the voice follows the mode (the server decides which)
+      onHeard: (h) => heardLine(h),                                                                 // Hands-off: someone near you, in another language
+      where: () => { try { return homeOn() && home.aloud() ? "the pods answer out loud, not this device" : ""; } catch (e) { return ""; } }});                                                               // Hands-off: someone near you, in another language
+    // The agent (Private, Auto) answers in its own transcript; its finished reply comes back here so THIS voice says it: in Hands-off
+    // every reply is spoken (summarised when long), in Typing none is. null = no answer is coming (it failed or was stopped).
+    const hearAgent = () => { if (window.SkippyAgent) window.SkippyAgent.onReply = (t) => { quickSeq++; if (t == null) voice.resume(); else voice.say(t); }; };
+    // In a spoken conversation the agent takes a minute, so Skippy Core's chat model says one line at once (/chat/quick); the agent's
+    // answer is still spoken when it lands, and a quick line that arrives after it is dropped (quickSeq).
+    let quickSeq = 0;
+    function quickLine(text) {
+      if (!voice.chatting() || !voice.brief) return;
+      const mine = ++quickSeq;
+      const context = window.SkippyAgent.recent ? window.SkippyAgent.recent(6) : [];
+      fetch("{{ url_for('chat.quick_line') }}", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({message: text, context: context})})
+        .then(r => r.ok ? r.json() : {}).then(d => { if (mine === quickSeq && d && d.say && voice.chatting()) voice.brief(d.say); }).catch(() => {});
+    }
+    hearAgent(); window.addEventListener("skippy-agent-ready", hearAgent);
+    const sheets = {}; root.querySelectorAll(".sheet").forEach(s => { sheets[s.dataset.sheet] = s; });
+    let openSheet = null;
+    function showSheet(name) {
+      if (openSheet) sheets[openSheet].hidden = true;
+      const same = openSheet === name; openSheet = same ? null : name;
+      root.querySelectorAll("[data-open]").forEach(k => k.classList.toggle("lit", k.dataset.open === openSheet));
+      if (openSheet) { sheets[openSheet].hidden = false; sheets[openSheet].querySelectorAll(".pg").forEach(p => p._pager && p._pager.refresh()); }
+      else logPager.refresh();
+    }
+    root.querySelectorAll("[data-open]").forEach(k => k.addEventListener("click", () => {
+      if (!sheets[k.dataset.open]) return;
+      showSheet(k.dataset.open);
+      if (k.dataset.open === "tools") loadTools();
+      if (k.dataset.open === "chats") { paintChats(); chatsFilter.focus(); }
+      if (k.dataset.open === "apps") loadApps();
+    }));
+    document.addEventListener("keydown", e => { if (e.key === "Escape" && openSheet) showSheet(openSheet); });
+
+    // "Allow us to save your questions": off by default, switched on the privacy page (this browser remembers it), sent with
+    // each message. Unticked, the portal's activity record keeps nothing of what is said here.
+    const allowSave = () => { {% if telemetry_on %}try { return localStorage.getItem("skippy-chat-allow-save") === "yes"; } catch (e) {}{% endif %} return false; };
+    let history = [];
+    try { history = JSON.parse(sessionStorage.getItem(KEY) || "[]"); } catch (e) { history = []; }
+    // The last exchange's versions (Retry and Edit keep the old ones behind ‹ n/m ›): [{user, assistant}], `alt` the one shown.
+    let alts = [], alt = 0;
+    try { const t = JSON.parse(sessionStorage.getItem(KEY + "-alts") || "null"); if (t) { alts = t.alts || []; alt = t.alt || 0; } } catch (e) {}
+
+    // No language picker: Skippy answers in the language you write in, or the one you ask for (chat.language_instruction).
+
+    // The mode (portal/brains.py MODES). Guests have one (Public, Skippy Core) and no key; the Captain picks from the mode sheet,
+    // remembered in this browser: Private by default, Auto only as the fallback when Private can't run. Internally a mode is the
+    // brain it drives: "core" (this chat), "agent-core" (Private), "agent-claude" (Auto). The server decides in the end.
+    const BRAINS = {{ chat_modes|tojson }}.map(m => Object.assign({}, m, {mode: m.id, id: m.agent ? "agent-" + m.agent : "core"}));
+    const BRAIN_KEY = "skippy-chat-mode", brainKey = form.querySelector("button.brain-key");
+    const byMode = (id) => BRAINS.find(x => x.mode === id && x.ready);
+    let brain = (byMode("private") || byMode("auto") || BRAINS.find(x => x.ready) || BRAINS[0] || {id: "core"}).id;
+    try { const m = byMode(localStorage.getItem(BRAIN_KEY)); if (m) brain = m.id; } catch (e) {}
+    function paintBrain() {
+      if (!brainKey) return;
+      const b = BRAINS.find(x => x.id === brain) || BRAINS[0];
+      brainKey.querySelector("use").setAttribute("href", "#g-" + b.glyph);
+      brainKey.title = brainKey.ariaLabel = "Mode: " + b.label;
+      root.querySelectorAll(".brain-opt").forEach(o => { const on = o.dataset.brain === brain; o.setAttribute("aria-pressed", on ? "true" : "false"); o.classList.toggle("lit", on); });
+    }
+    // Private and Auto show the agent's transcript in this stage instead of the chat's log; the composer, New chat, Stop and the
+    // chats sheet then drive it (window.SkippyAgent).
+    const agentView = root.querySelector(".agent-view");
+    const isAgent = (id) => typeof id === "string" && id.indexOf("agent-") === 0;
+    function applyMode() {
+      leaveHome();
+      const agent = isAgent(brain) && !!agentView;
+      if (agentView) agentView.hidden = !agent;
+      logBox.hidden = agent;
+      root.classList.toggle("agent-mode", agent);
+      if (window.skippyTheme) window.skippyTheme((BRAINS.find(x => x.id === brain) || {}).theme || "green");
+      if (agent && window.SkippyAgent) {
+        const want = brain.slice(6);
+        if (window.SkippyAgent.setBrain(want) !== want) flash("This conversation already runs on the other agent brain: New chat to switch.");
+      }
+      paintStop(); if (!agent) logPager.lastNow();               // the public transcript opens at its end (agent transcript scrolls in its own script)
+    }
+    root.querySelectorAll(".brain-opt").forEach(o => o.addEventListener("click", () => {
+      brain = o.dataset.brain; try { localStorage.setItem(BRAIN_KEY, o.dataset.mode); } catch (e) {}
+      paintBrain(); showSheet("brain"); applyMode();
+      if (!isAgent(brain)) setContext(null);                      // a Skippy Memory conversation goes to the agent only, never to green
+    }));
+    paintBrain();
+
+    // A saved conversation being continued (Skippy Memory; the Captain only): it goes to the agent (Private) with his next message,
+    // never to green, which is the guest chat (2026-10-30). Kept in this tab until it has gone.
+    const CTX = KEY + "-ctx";
+    let context = null;
+    try { context = JSON.parse(sessionStorage.getItem(CTX) || "null"); } catch (e) { context = null; }
+    const banner = root.querySelector(".continuing");
+    function showContext() {
+      if (!banner) return;
+      banner.hidden = !context;
+      if (context) banner.querySelector("span").textContent = context.title + " · " + context.source + (context.updated ? " · " + context.updated.slice(0, 10) : "") + (context.cut ? " ✂" : "");
+      logPager.refresh();
+    }
+    const CONTEXT_MAX = 60000;                                    // about 15k tokens of the saved conversation, its newest part
+    function earlier(c) {
+      const when = (c.updated || "").slice(0, 10), src = String(c.source || "another AI");
+      return "I'm continuing an earlier conversation I had with " + src.charAt(0).toUpperCase() + src.slice(1) + (when ? " (" + when + ")" : "")
+        + (c.title ? ", titled \"" + c.title + "\"" : "") + ". Here it is as it was saved, oldest first. Pick up from where it left off and"
+        + " don't recap it unless I ask:\n<earlier_conversation>\n" + String(c.text || "").slice(-CONTEXT_MAX) + "\n</earlier_conversation>";
+    }
+    function setContext(c) { context = c; try { c ? sessionStorage.setItem(CTX, JSON.stringify(c)) : sessionStorage.removeItem(CTX); } catch (e) {} showContext(); }
+
+    // Text between backticks (join codes, addresses, commands) becomes a one-click copy chip; static/copy.js gives it its Copy button.
+    function fill(el, text) {
+      el.textContent = "";
+      text.split(/(`[^`\n]+`)/).forEach(part => {
+        if (part.length > 2 && part[0] === "`" && part[part.length - 1] === "`") {
+          const chip = document.createElement("code");
+          chip.className = "code"; chip.textContent = part.slice(1, -1);
+          el.appendChild(chip);
+        } else if (part) el.appendChild(document.createTextNode(part));
+      });
+    }
+    const SVG = "http://www.w3.org/2000/svg";
+    const FACE = "{{ url_for('static', filename='skippy/skippy-head.png') }}";
+    function glyph(id, cls) {
+      if (id === "can") { const i = document.createElement("img"); i.className = "g face" + (cls ? " " + cls : ""); i.src = FACE; i.alt = ""; i.width = i.height = 20; return i; }     // Skippy is his face now, not a can
+      const s = document.createElementNS(SVG, "svg"); s.setAttribute("class", "g" + (cls ? " " + cls : "")); s.setAttribute("aria-hidden", "true");
+      const u = document.createElementNS(SVG, "use"); u.setAttribute("href", "#g-" + id); s.appendChild(u); return s;
+    }
+    function keyBtn(glyphId, label, onClick, cls) {
+      const b = document.createElement("button"); b.type = "button"; b.className = "key sm" + (cls ? " " + cls : ""); b.title = b.ariaLabel = label;
+      b.append(glyph(glyphId)); b.addEventListener("click", onClick); return b;
+    }
+    async function copyText(text, btn) {                         // one click, as everywhere on the portal; the key lights to say so
+      try { await navigator.clipboard.writeText(text); if (btn) { btn.dataset.s = "on"; setTimeout(() => { delete btn.dataset.s; }, 1200); } }
+      catch (e) { flash("The browser wouldn't copy: select the text instead."); }
+    }
+    // Who said it is a glyph, not a name: you, Skippy (his face), or Mentat on its own (the atom).
+    // Skippy's turns are Markdown (static/skippy-md.js: built from DOM nodes, never innerHTML); yours stay as you typed them.
+    // What a reply produces (a plan, a document, long code, a playable html page, an svg) becomes a collapsible artifact card
+    // (static/skippy-artifacts.js); short code and prose stay in the words.
+    if (window.SkippyArtifacts) SkippyArtifacts.configure({glyph: id => glyph(id), md: t => SkippyMd.render(t, document),
+      pager: (pg, pips) => Bridge.pager(pg, {pips: pips}), modelViewer: "{{ url_for('static', filename='vendor/model-viewer-4.0.0.min.js') }}"});
+    const artifact = b => { const s = window.SkippyArtifacts && SkippyArtifacts.fromBlock(b); return s ? SkippyArtifacts.card(s, {onToggle: () => logPager.refresh()}) : null; };
+    function show(el, text, md) {
+      el._raw = text;                                             // what Copy takes: the words as written (Markdown kept)
+      if (md && window.SkippyMd && text !== "…") { el.replaceChildren(SkippyMd.render(text, document, {block: artifact})); el.classList.add("rich"); }
+      else fill(el, text);
+    }
+    // HEARD: what Hands-off heard someone else say in another language, as Whisper translated it (skippy-voice.js onHeard). It is not a
+    // message to Skippy: it is written into the chat, kept with it, and goes to the model with your next message as context.
+    const langName = (code) => { try { return new Intl.DisplayNames(["en"], {type: "language"}).of(code) || code; } catch (e) { return code; } };
+    function addHeard(t) {
+      const div = document.createElement("div"); div.className = "turn heard";
+      const body = document.createElement("div"); body.className = "tx";
+      const who = document.createElement("div"); who.className = "who"; who.textContent = "heard \u00b7 " + langName(t.lang || "") + " \u2192 English";
+      const said = document.createElement("div"); fill(said, t.content); body._raw = t.content;
+      body.append(who, said);
+      div.append(glyph("globe"), body);
+      const acts = document.createElement("div"); acts.className = "acts";
+      acts.append(keyBtn("sheet", "Copy", e => copyText(t.content, e.currentTarget), "copy-turn"));
+      div.append(acts);
+      log.appendChild(div);
+      if (!stuck) unseen++; logPager.refresh();
+      return body;
+    }
+    function heardLine(h) {
+      const text = String(h && h.text || "").trim(), lang = String(h && h.lang || "").slice(0, 8);
+      if (!text) return;
+      if (agentOn() && window.SkippyAgent.heard) { window.SkippyAgent.heard(text, lang, langName(lang)); return; }    // Private and Auto: in the agent's transcript
+      const turn = {role: "heard", content: text.slice(0, 2000), lang: lang};
+      addHeard(turn);
+      if (busy) { lateHeard.push(turn); return; }                  // a question is out: it joins the history after the reply, in the order seen
+      history.push(turn); paintTail(); save();
+    }
+    const lateHeard = [];
+    function add(role, text, extra) {
+      const div = document.createElement("div");
+      div.className = "turn " + role + (extra ? " " + extra : "");
+      const body = document.createElement("div"); body.className = "tx";
+      div.append(glyph(role === "user" ? "user" : extra === "raw" ? "atom" : "can"), body);
+      show(body, text, role === "assistant" && extra !== "raw");
+      if (role === "user" && window.SkippyReply) {                 // the parts it replies to, as quote blocks over your words
+        const s = SkippyReply.split(text);
+        if (s.quotes.length) { fill(body, s.rest); body.prepend(...s.quotes.map(q => SkippyReply.quoteNode(q, document))); body._raw = text; }
+      }
+      const acts = document.createElement("div"); acts.className = "acts";
+      acts.append(keyBtn("sheet", "Copy", e => copyText(body._raw || body.textContent, e.currentTarget), "copy-turn"));
+      div.append(acts);
+      log.appendChild(div);
+      if (role === "user") logPager.last(); else { if (!stuck) unseen++; logPager.refresh(); }
+      return body;
+    }
+    // The last exchange's own keys: Edit on your last message (or ↑ in an empty box), Retry and ‹ n/m › on Skippy's last reply.
+    function paintTail() {
+      log.querySelectorAll(".acts .tail").forEach(b => b.remove());
+      if (agentOn() || busy) return;
+      const turns = log.querySelectorAll(".turn"), last = turns[turns.length - 1], mine = turns[turns.length - 2];
+      if (!last || !last.classList.contains("assistant") || !mine || !mine.classList.contains("user") || !history.length) return;
+      mine.querySelector(".acts").append(keyBtn("pen", "Edit (↑)", () => startEdit(), "tail"));
+      const acts = last.querySelector(".acts");
+      if (alts.length > 1) {
+        const nav = document.createElement("span"); nav.className = "tail alts";
+        nav.append(keyBtn("back", "Earlier version", () => pickAlt(alt - 1)), document.createTextNode((alt + 1) + "/" + alts.length),
+                   keyBtn("back", "Later version", () => pickAlt(alt + 1), "flip"));
+        acts.append(nav);
+      }
+      acts.append(keyBtn("loop", "Retry", () => retry(), "tail"));
+    }
+    function saveAlts() { try { sessionStorage.setItem(KEY + "-alts", JSON.stringify({alts: alts, alt: alt})); } catch (e) {} }
+    function pickAlt(i) {
+      if (i < 0 || i >= alts.length || busy) return;
+      alt = i; history.splice(-2, 2, {role: "user", content: alts[i].user}, {role: "assistant", content: alts[i].assistant});
+      saveAlts(); save(); replay();
+    }
+
+    // ── Your chats: kept on the portal (portal/chat_history.py: your own file, keyed by who is signed in, never by the page; a
+    // guest's 30 days, the Captain's forever), with a copy in this browser so they open at once. Each {id, title, named, star,
+    // updated, history}; the tab's open one is this tab's sessionStorage. ──
+    const STORE = "skippy-chats:" + OWNER, CUR = KEY + "-id", MAX_CHATS = {{ 1000 if is_admin else 40 }};
+    const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    let chatId; try { chatId = sessionStorage.getItem(CUR); } catch (e) {}
+    if (!chatId) { chatId = newId(); try { sessionStorage.setItem(CUR, chatId); } catch (e) {} }
+    function chats() { try { return JSON.parse(localStorage.getItem(STORE) || "[]"); } catch (e) { return []; } }
+    function keepChats(list) {
+      for (const n of [MAX_CHATS, 40, 20, 8]) { try { localStorage.setItem(STORE, JSON.stringify(list.slice(0, n))); return; } catch (e) {} }   // full: keep fewer
+    }
+    const HIST = "{{ url_for('chat.history_list') }}";
+    const NAMED = /^[a-z]+(?:-[a-z]+){3,5}$/;             // a chat's name (portal/chat_names.py): four to six words, like a short sentence
+    const patchLocal = (id, fields) => keepChats(chats().map(x => x.id === id ? Object.assign({}, x, fields) : x));
+    function upload(c) {                                   // keep one chat on the portal; a failure only means it stays here
+      return fetch(HIST + "/" + encodeURIComponent(c.id), {method: "PUT", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({title: c.title, history: c.history})}).then(r => r.ok ? r.json() : null).then(d => {
+          if (!d || !d.title) return;                      // Skippy Core named it: the list shows the name from now on
+          patchLocal(c.id, {title: d.title, named: true});
+          if (openSheet === "chats") paintChats();
+        }).catch(() => {});
+    }
+    function patchOnPortal(id, fields) {
+      return fetch(HIST + "/" + encodeURIComponent(id), {method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify(fields)}).catch(() => {});
+    }
+    function forgetOnPortal(id) { fetch(HIST + "/" + encodeURIComponent(id), {method: "DELETE"}).catch(() => {}); }
+    let pushTimer = null;
+    function remember() {
+      if (!history.length) return;
+      const first = history.find(t => t.role === "user");
+      const words = (first ? first.content : "chat").replace(/\s*\[attached:[^\]]*\]/, "").replace(/\s+/g, " ").trim().slice(0, 70);
+      const had = chats().find(x => x.id === chatId) || {};
+      const named = had.named || NAMED.test(had.title || "");
+      const c = Object.assign({}, had, {id: chatId, title: named ? had.title : words, named: !!named, updated: new Date().toISOString(), history: history, archived: undefined, turns: undefined});
+      keepChats([c, ...chats().filter(x => x.id !== chatId)]);
+      clearTimeout(pushTimer); pushTimer = setTimeout(() => upload(c), 800);
+    }
+    // On load: the portal's list and this browser's are merged (the newer copy of a chat wins); a chat only this browser has
+    // (made before the portal kept chats, or while it couldn't) goes up once. A chat the portal archived (untouched 14 days, zipped:
+    // chat_history.archive) comes as a stub with no history, and this browser drops its own copy of the words too; opening it restores it.
+    fetch(HIST, {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(d => {
+      if (!d || !Array.isArray(d.chats)) return;
+      const mine = {}, theirs = new Set(d.chats.map(c => c.id));
+      chats().forEach(c => { mine[c.id] = c; });
+      d.chats.forEach(c => { if (!mine[c.id] || (mine[c.id].updated || "") < c.updated || (c.archived && (mine[c.id].updated || "") <= c.updated)) mine[c.id] = c; else Object.assign(mine[c.id], {title: c.title, named: c.named, star: c.star}); });
+      const all = Object.values(mine).sort((a, b) => (b.updated || "").localeCompare(a.updated || ""));
+      keepChats(all);
+      all.filter(c => !theirs.has(c.id)).slice(0, 40).forEach(upload);
+      if (openSheet === "chats") paintChats();
+    }).catch(() => {});
+    function save() { try { sessionStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {} remember(); }
+    const PIC = /\n*\[(picture|song|result):([A-Za-z0-9_-]{6,64})\]/g;    // a picture, song or pop-up result made for that reply (portal/patient.py keeps it)
+    function replay() {
+      log.replaceChildren();
+      history.forEach(t => {
+        if (t.role === "heard") { addHeard(t); return; }
+        const jobs = t.role === "assistant" ? [...t.content.matchAll(PIC)].map(m => ({kind: {song: "audio", picture: "image"}[m[1]] || "popup", job_id: m[2]})) : [];
+        const body = add(t.role, t.content.split("\n\n[Mentat's own answer")[0].replace(PIC, ""));   // the notes are for the models
+        jobs.forEach(j => body.parentElement.insertBefore(waitCard({...j, url: "{{ url_for('chat.media_file', job_id='JOB') }}".replace("JOB", j.job_id)}), body.parentElement.querySelector(".acts")));
+      });
+      unseen = 0; logPager.last(); paintTail();
+    }
+    function startChat(id, turns) {
+      chatId = id; history = turns; alts = []; alt = 0; saveAlts(); endEdit();
+      try { sessionStorage.setItem(CUR, chatId); sessionStorage.setItem(KEY, JSON.stringify(history)); } catch (e) {}
+      replay();
+    }
+
+    // What did the work, as glyphs: the tool, and a lamp (lit = answered, diamond = didn't, triangle = Mentat had no physics for it).
+    const TOOL_GLYPH = {ask_mentat: "atom", now_playing: "wave", make_music: "wave", music_result: "wave", make_image: "image", image_result: "image"};
+    function receipt(data, raw) {
+      const note = document.createElement("div"); note.className = "rcpt";
+      const used = [...new Set(data.tools || [])];
+      if (!used.length) {
+        const l = document.createElement("i"); l.className = "lamp"; l.dataset.s = data.mentat_available ? "idle" : "off";   // from its own knowledge; off = Mentat is down
+        note.append(glyph("can"), l);
+      }
+      used.forEach(t => {
+        const mentat = t === "ask_mentat", l = document.createElement("i"); l.className = "lamp";
+        l.dataset.s = mentat ? (data.gap ? "warn" : data.mentat_where === "home" ? "on" : "off") : "on";
+        note.append(glyph(TOOL_GLYPH[t] || "server"), l);
+      });
+      if (raw && !data.gap) note.append(glyph("simple", "dim"));
+      if (data.gap && data.gap.reason) { const r = document.createElement("span"); r.className = "why"; r.textContent = data.gap.reason; note.append(r); }
+      return note;
+    }
+
+    // Mentat's answer as a card under the reply: collapsed, the result with its units; opened, the proof (each step with
+    // its value, units and source), what Mentat assumed, its sources and notes. When the question left an input out,
+    // Mentat computed nothing and SUGGESTS values instead (it never fills one in): the card shows the suggestion, open,
+    // with no number, and a plain "yes" as the next message sends Mentat's own follow-up with exactly those values.
+    let mentatFollow = null;                  // {chat, follow}: the newest suggestion in this chat, for the next "yes"
+    function suggestionCard(c) {
+      const card = document.createElement("details"); card.className = "mentat-card mc-suggest"; card.open = true;
+      const head = document.createElement("summary");
+      const v = document.createElement("span"); v.className = "mc-value"; v.textContent = "?";
+      const t = document.createElement("span"); t.className = "mc-tag"; t.textContent = "SUGGESTED";
+      head.append(glyph("atom"), v, t);
+      const body = document.createElement("div"); body.className = "mc-body";
+      const q = document.createElement("p"); const qb = document.createElement("b"); qb.textContent = "?"; q.append(qb, document.createTextNode(" " + (c.question || ""))); body.append(q);
+      const ul = document.createElement("ul"); ul.className = "mc-steps";
+      Object.entries(c.suggestion.suggested || {}).forEach(([name, s]) => {
+        const li = document.createElement("li");
+        li.textContent = (s.label || name) + ": " + s.value + (s.units ? " " + s.units : "") + (s.why ? "  (" + s.why + ")" : "");
+        ul.append(li);
+      });
+      body.append(ul);
+      const say = document.createElement("p"); say.textContent = c.suggestion.sentence || ""; body.append(say);
+      card.append(head, body);
+      card.addEventListener("toggle", () => logPager.refresh());
+      return card;
+    }
+    function mentatCard(c) {
+      if (c.suggestion) return suggestionCard(c);
+      const card = document.createElement("details"); card.className = "mentat-card";
+      const head = document.createElement("summary");
+      const value = c.display || (c.value === null || c.value === undefined ? "∅" : String(c.value) + (c.units ? " " + c.units : ""));
+      const v = document.createElement("span"); v.className = "mc-value"; v.textContent = value;
+      head.append(glyph("atom"), v);
+      if (c.provenance_tag) { const t = document.createElement("span"); t.className = "mc-tag"; t.textContent = c.provenance_tag; head.append(t); }
+      card.append(head);
+      const body = document.createElement("div"); body.className = "mc-body";
+      const line = (label, text) => { if (!text) return; const p = document.createElement("p"); const b = document.createElement("b"); b.textContent = label; p.append(b, document.createTextNode(" " + text)); body.append(p); };
+      line("?", c.question);
+      line("≡", typeof c.interpreted_as === "string" ? c.interpreted_as : c.interpreted_as ? JSON.stringify(c.interpreted_as) : "");
+      line("ƒ", c.formula);
+      if ((c.steps || []).length) {
+        const ol = document.createElement("ol"); ol.className = "mc-steps";
+        c.steps.forEach(s => {
+          const li = document.createElement("li");
+          li.textContent = (s.label || "step") + ": " + (s.value || "") + (s.units ? " " + s.units : "") + (s.formula ? "  [" + s.formula + "]" : "");
+          if (s.source) { const src = document.createElement("code"); src.className = "mc-src"; src.textContent = s.source; li.append(" ", src); }
+          ol.append(li);
+        });
+        body.append(ol);
+      }
+      line("≈", c.assumed ? (typeof c.assumed === "string" ? c.assumed : JSON.stringify(c.assumed)) : "");
+      line("±", c.uncertainty ? String(c.uncertainty) : "");
+      line("§", c.source);
+      line("✎", c.notes);
+      card.append(body);
+      card.addEventListener("toggle", () => logPager.refresh());
+      return card;
+    }
+    // A picture Skippy is drawing (or drew): skippy-core draws for quality, so it may take minutes or hours. The card asks the
+    // portal now and then and turns into the picture when it's done, even after a reload or another day (the job and the picture
+    // are kept in the bucket: portal/pictures.py). Gone or given up on, it says so in one line.
+    const MEDIA_STATE = "{{ url_for('chat.media_state', job_id='JOB') }}";
+    // Pictures and songs are PATIENT jobs (portal/patient.py): made when their machine is quiet and its GPU mostly free, so the card says
+    // where the job is (in line and why, or being made) and turns into the picture or the player when it's done, even after a reload.
+    // A pop-up's result (portal/popups.py) is known only when it's done: the state then says which card it is (image, audio, video,
+    // model: a 3D viewer, or text: a JSON or text block).
+    const WAIT_GLYPH = {audio: "wave", image: "image", video: "pip", model: "cube", text: "note", file: "down"};
+    function waitCard(m) {
+      const song = m.kind === "audio", what = song ? "song" : m.kind === "image" ? "picture" : "result";
+      const box = document.createElement("div"); box.className = "picture-wait";
+      const done = (kind) => { if (window.SkippyArtifacts) box.replaceWith(SkippyArtifacts.card(SkippyArtifacts.fromMedia({kind: kind || m.kind || "image", url: m.url, title: m.title || "your " + what}), {onToggle: () => logPager.refresh()})); logPager.refresh(); };
+      const lamp = document.createElement("i"); lamp.className = "lamp"; lamp.dataset.s = "idle";
+      const words = document.createElement("span"); words.textContent = "In line…";
+      box.append(glyph(WAIT_GLYPH[m.kind] || "gear"), words, lamp);
+      let tries = 0;
+      async function look() {
+        if (!box.isConnected && tries) return;                     // the chat moved on: stop looking
+        tries++;
+        try {
+          const r = await fetch(MEDIA_STATE.replace("JOB", encodeURIComponent(m.job_id)), {cache: "no-store"});
+          const d = r.ok ? await r.json() : {state: "unknown"};
+          if (d.state === "done") return done(d.kind);
+          if (d.state === "unknown") { lamp.dataset.s = "off"; words.textContent = "That " + what + " is gone (it was given up on, or it expired)."; return; }
+          if (d.state === "failed") { lamp.dataset.s = "warn"; words.textContent = "That " + what + " failed: " + (d.why || "no reason given") + "."; return; }
+          if (d.state === "working") { lamp.dataset.s = "on"; words.textContent = song ? "Composing…" : d.tier === "hq" ? "Drawing (quality, up to an hour)…" : what === "picture" ? "Drawing…" : (d.popup || "Working") + (d.est_s ? " (about " + Math.max(1, Math.round(d.est_s / 60)) + " min)…" : "…"); }
+          else { lamp.dataset.s = "idle"; words.textContent = "In line: " + (d.why || "next up") + "."; }
+        } catch (e) { /* offline for a moment: keep waiting */ }
+        setTimeout(look, tries < 6 ? 10000 : 30000);
+      }
+      if (m.pending) setTimeout(look, 3000); else look();
+      return box;
+    }
+    window.SkippyWaitCard = waitCard;             // (the same card shows a picture the agent asked for)
+    const pictureNote = (media) => (media || []).filter(m => m.job_id)
+      .map(m => "\n\n[" + ({audio: "song", image: "picture"}[m.kind] || "result") + ":" + m.job_id + "]").join("");
+
+    // What goes into the history for a Mentat answer, so any later turn sees Mentat's own numbers.
+    function mentatNote(cards) {
+      return cards.map(c => c.suggestion
+        ? "\n\n[Mentat computed nothing for " + JSON.stringify(c.question) + ": the question left inputs out, and it suggested " +
+          JSON.stringify({sentence: c.suggestion.sentence, follow_up: c.suggestion.follow_up}).slice(0, 2500) + "]"
+        : "\n\n[Mentat's own answer to " + JSON.stringify(c.question) + ": " +
+        JSON.stringify({value: c.value, units: c.units, display: c.display, assumed: c.assumed, source: c.source, notes: c.notes, steps: c.steps}).slice(0, 2500) + "]").join("");
+    }
+
+    // ── Files with the next message: the clip key, paste, or drop anywhere on the chat. Pictures are shrunk here to a JPEG of at
+    // most 1600 px before they go; text, code and PDFs go as they are (the server checks every one again). A LONG PASTE (over
+    // 2,000 characters or 40 lines: a log, a stack trace, a file) becomes an attachment chip too, so the box stays readable; the
+    // whole text still goes to Skippy (as a file here, appended to the message for the agent). ──
+    const MAX_FILES = 4, MAX_BYTES = 1000000, pending_files = [], filesBox = form.querySelector(".files"), picker = form.querySelector(".file-pick");
+    const LONG_PASTE = 2000, LONG_LINES = 40;
+    let pasted = 0;
+    function readAs(file) { return new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(file); }); }
+    // What the server takes, as base64 characters (the smaller of its two limits: portal/tests/test_limit_chains.py), so a set of
+    // phone photos is shrunk to fit here instead of refused there.
+    const FILE_B64 = 1100000, FILES_B64 = 3100000, AGENT_TEXT = 120000;
+    const used = () => pending_files.reduce((n, f) => n + f.data.length, 0);
+    async function shrink(file, budget) {          // -> a JPEG data URL of at most `budget` characters, as big as that allows
+      const url = await readAs(file);
+      const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = url; });
+      for (const [edge, q] of [[1600, 0.85], [1600, 0.72], [1300, 0.7], [1000, 0.65], [800, 0.6]]) {
+        const k = Math.min(1, edge / Math.max(img.width, img.height));
+        const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        const out = c.toDataURL("image/jpeg", q);
+        if (out.length <= budget) return out;
+      }
+      throw new Error("too big");
+    }
+    const textData = (t) => "data:text/plain;base64," + btoa(unescape(encodeURIComponent(t)));
+    const dataText = (d) => decodeURIComponent(escape(atob(d.split(",")[1] || "")));
+    function paintFiles() {
+      filesBox.hidden = !pending_files.length;
+      filesBox.replaceChildren(...pending_files.map((f, i) => {
+        const chip = document.createElement("span"); chip.className = "file-chip" + (f.pasted ? " pasted" : "");
+        const pic = f.data.startsWith("data:image/");
+        if (pic) { const t = document.createElement("img"); t.src = f.data; t.alt = ""; chip.append(t); }
+        else chip.append(glyph(f.ref || f.sending || f.data.startsWith("data:audio/") ? "wave" : "note"));
+        const n = document.createElement("span"); n.className = "fn";
+        n.textContent = f.pasted ? f.name + " · " + f.lines + " lines" : f.sending ? f.name + " · sending home…" : f.ref ? f.name + " · " + (f.bytes / 1048576).toFixed(1) + " MB at home" : f.name;
+        chip.append(n);
+        if (pic && window.SkippyAnnotate) {          // mark it up (boxes and arrows, static/skippy-annotate.js): the marked copy REPLACES this picture, no question asked
+          const markUp = () => SkippyAnnotate.open({src: f.data, name: f.name, label: "✓ Done", onSend: (url, legend) => {
+            f.data = url; paintFiles();
+            if (legend) { msg.value = legend + (msg.value ? "\n" + msg.value : "\n"); grow(); }
+            msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
+          }});
+          chip.firstChild.style.cursor = "pointer"; chip.firstChild.title = "Mark it up"; chip.firstChild.addEventListener("click", markUp);
+          chip.append(keyBtn("pen", "Mark up " + f.name + " (boxes and arrows)", markUp, "markup"));
+        }
+        if (f.pasted) chip.append(keyBtn("in", "Put it back in the box", () => { pending_files.splice(i, 1); msg.value += (msg.value ? "\n" : "") + dataText(f.data); grow(); paintFiles(); }));
+        chip.append(keyBtn("x", "Remove " + f.name, () => { pending_files.splice(i, 1); paintFiles(); }));
+        return chip;
+      }));
+      logPager.refresh();
+    }
+    // A sound over the message limit (a whole track for a pop-up that splits it into stems) goes HOME first, straight to skippy-pc's
+    // popup-gate on a one-file pass (portal/popup_in.py, docs/popups.md "Big files"); the message then carries only its id.
+    const BIG_SOUND = /^audio\/(wav|x-wav|wave|mpeg|mp3|flac|x-flac|ogg)$/, BIG_MAX = 64 * 1024 * 1024;
+    async function sendHome(file) {
+      if (file.size > BIG_MAX) { flash(file.name + " is over 64 MB, the most one file can be."); return; }
+      const r = await fetch("{{ url_for('chat.popup_in_pass') }}", {method: "POST", headers: {"Content-Type": "application/json"},
+                                                                  body: JSON.stringify({bytes: file.size})});
+      let g = r.ok ? await r.json() : {ok: false, why: "The portal didn't answer."};
+      if (!g.ok) { flash(g.why || "That file can't go home right now."); return; }
+      const chip = {name: file.name, data: "", sending: true}; pending_files.push(chip); paintFiles();
+      try {
+        if (window.SkippyDirect) g = await SkippyDirect.pick(g, {fresh: true});      // straight to skippy-pc when its own front door answers right now, else the Funnel (static/direct.js)
+        const put = () => fetch(g.url + "/t/" + g.pass + "/file", {method: "PUT", body: file, headers: {"X-File-Name": file.name}});
+        let up;
+        try { up = await put(); }
+        catch (e) { if (!(window.SkippyDirect && SkippyDirect.demote(g))) throw e; up = await put(); }      // the door gave no answer to the upload: once more by the Funnel
+        const d = await up.json().catch(() => ({}));
+        if (!up.ok || !d.id) throw new Error(d.error || "the upload failed");
+        Object.assign(chip, {ref: d.id, type: d.type, bytes: d.bytes, sending: false});
+      } catch (e) {
+        pending_files.splice(pending_files.indexOf(chip), 1); flash(file.name + " didn't reach skippy-pc: " + e.message + ".");
+      }
+      paintFiles();
+    }
+    async function takeFiles(list) {
+      for (const file of [...list]) {
+        if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); break; }
+        if (BIG_SOUND.test(file.type) && file.size > MAX_BYTES) { await sendHome(file); continue; }
+        try {
+          const isPic = /^image\/(jpeg|png|webp|gif|bmp)$/.test(file.type);
+          const room = Math.min(FILE_B64, FILES_B64 - used());
+          if (room < 50000) { flash("That's all the room one message has: send these first."); break; }
+          const data = isPic ? await shrink(file, room) : await readAs(file);
+          if (!isPic && (file.size > MAX_BYTES || data.length > room)) { flash(file.name + " is too big to send (about 800 KB at most)."); continue; }
+          pending_files.push({name: isPic ? file.name.replace(/\.\w+$/, "") + ".jpg" : file.name,
+                              data: data.replace(/^data:;base64,/, "data:text/plain;base64,")});
+        } catch (e) { flash(file.name + " couldn't be read."); }
+      }
+      paintFiles();
+    }
+    function flash(text) { const s = form.querySelector(".vstat"); s.textContent = text; s.hidden = false; setTimeout(() => { s.hidden = true; }, 4000); }
+    // A marked-up picture coming back from the annotator (static/skippy-annotate.js): the copy goes with the next message, the legend
+    // into the box above what he types, so the change request is the picture AND the words.
+    window.SkippyCompose = {
+      attach(name, dataUrl, legend) {
+        if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); return false; }
+        pending_files.push({name: name, data: dataUrl}); paintFiles();
+        if (legend) { msg.value = legend + (msg.value ? "\n" + msg.value : "\n"); grow(); }
+        msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
+        return true;
+      },
+    };
+    // ── Reply to a part (static/skippy-reply.js): select words in any message, yours or Skippy's, here or in the agent's transcript,
+    // and tap the Reply key by them. Each quote waits over the box with its own remove key and goes at the start of the message as
+    // a markdown blockquote, so every brain and the agent know which part you mean. ──
+    const MAX_QUOTES = 6, pending_quotes = [], quotesBox = form.querySelector(".quotes");
+    function paintQuotes() {
+      quotesBox.hidden = !pending_quotes.length;
+      msg.required = !pending_quotes.length;                      // a quote alone may go
+      quotesBox.replaceChildren(...pending_quotes.map((q, i) => {
+        const row = document.createElement("div"); row.className = "quote-chip";
+        row.append(glyph("reply"), SkippyReply.quoteNode(q, document), keyBtn("x", "Remove this quote", () => { pending_quotes.splice(i, 1); paintQuotes(); msg.focus(); }));
+        return row;
+      }));
+      logPager.refresh();
+    }
+    function addQuote(q) {
+      q = SkippyReply.clean(q);
+      if (!q || pending_quotes.includes(q)) { msg.focus(); return false; }
+      if (pending_quotes.length >= MAX_QUOTES) { flash("At most " + MAX_QUOTES + " quotes to a message."); return false; }
+      pending_quotes.push(q); paintQuotes();
+      msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
+      return true;
+    }
+    window.SkippyCompose.quote = addQuote;
+    if (window.SkippyReply) SkippyReply.attach({scope: root.querySelector(".stage"), bodies: ".turn .tx, .me-chat .turn", onQuote: addQuote});
+    form.querySelector("button.clip").addEventListener("click", () => picker.click());
+    {% if captain %}{# The camera key (the Captain only): a photo of a screen goes with the message exactly like a pasted picture, kept
+       as large as the agent's limit allows (workshop.MAX_IMAGE_B64 each, MAX_IMAGES_B64 together) so the text on it stays readable. #}
+    const camKey = form.querySelector("button.cam");
+    if (camKey && window.SkippyCamera) {
+      const PHOTO_MAX = 1100000, PHOTOS_MAX = 3100000;
+      let shots = 0;
+      SkippyCamera.attach({key: camKey, stage: root.querySelector(".stage"), say: flash,
+        html2canvas: "{{ url_for('static', filename='vendor/html2canvas.min.js') }}",      // the page snapshot for iPhone and iPad, loaded on first use
+        budget: () => Math.min(PHOTO_MAX, PHOTOS_MAX - pending_files.reduce((n, f) => n + f.data.length, 0)),
+        onPhoto: (url, meta) => {                                  // each picture is an attachment with its own remove key (paintFiles)
+          if (pending_files.length >= MAX_FILES) { flash("At most " + MAX_FILES + " files to a message."); return false; }
+          pending_files.push({name: ((meta && meta.name) || "camera") + "-" + (++shots) + ".jpg", data: url}); paintFiles(); msg.focus();
+          return pending_files.length < MAX_FILES;
+        }});
+    }{% endif %}
+    picker.addEventListener("change", () => { takeFiles(picker.files); picker.value = ""; });
+    msg.addEventListener("paste", e => {
+      const cd = e.clipboardData || {}, fs = [...(cd.files || [])];
+      if (fs.length) { e.preventDefault(); takeFiles(fs); return; }
+      const t = cd.getData ? cd.getData("text") : "";
+      const lines = t ? t.split("\n").length : 0;
+      if (t && (t.length > LONG_PASTE || lines > LONG_LINES) && pending_files.length < MAX_FILES) {
+        e.preventDefault();
+        if (textData(t).length > Math.min(FILE_B64, FILES_B64 - used())) { flash("That paste is too long to send (about 800 KB at most)."); return; }
+        pending_files.push({name: "pasted-" + (++pasted) + ".txt", data: textData(t), pasted: true, lines: lines});
+        paintFiles();
+      }
+    });
+    root.addEventListener("dragover", e => { if ([...e.dataTransfer.types].includes("Files")) { e.preventDefault(); root.classList.add("dropping"); } });
+    root.addEventListener("dragleave", e => { if (e.target === root) root.classList.remove("dropping"); });
+    root.addEventListener("drop", e => { if (e.dataTransfer.files.length) { e.preventDefault(); root.classList.remove("dropping"); takeFiles(e.dataTransfer.files); } });
+
+    // The box grows with what you type (up to about two fifths of the screen, then it scrolls inside itself).
+    function grow() { msg.style.height = "auto"; msg.style.height = Math.min(msg.scrollHeight + 2, Math.round(innerHeight * 0.4)) + "px"; }
+    msg.addEventListener("input", grow);
+    // Typing "/" in an empty box lists the direct commands (the tools sheet); a box that no longer starts with "/" puts it away.
+    let slashSheet = false;
+    msg.addEventListener("input", () => {
+      if (msg.value === "/" && openSheet !== "tools") { showSheet("tools"); loadTools(); slashSheet = true; }
+      else if (slashSheet && !msg.value.startsWith("/")) { if (openSheet === "tools") showSheet("tools"); slashSheet = false; }
+    });
+
+    // The agent's half of the composer: what is typed (and any pictures) goes to Claude Code on skippy-pc, into its transcript.
+    const stopKey = form.querySelector("button.stopk");
+    const agentOn = () => isAgent(brain) && !!agentView && !!window.SkippyAgent;
+    // ── Home: the permanent house chat (the Captain only). Shown in the stage instead of the log or the agent; the box sends to the house. ──
+    const homeView = root.querySelector(".home-view"), homeRow = root.querySelector(".chat-home");
+    // In Hands-off the house's answer closes the turn: the pods say it (then this mic listens again, after they finish, so it never
+    // hears them), or with Speak aloud off this device says it. Before 2026-11-02 the key sat at "Thinking..." for good.
+    const homeReply = (ev) => {
+      if (!voice.chatting()) return;
+      if (home.aloud()) setTimeout(() => voice.resume(), Math.min(20000, 1500 + 70 * ev.text.length));
+      else voice.say(ev.text);
+    };
+    const home = homeView && window.SkippyHome ? SkippyHome.attach({view: homeView, composer: msg, restore: msg.placeholder, glyph: (id) => glyph(id), say: (t) => flash(t), onReply: (ev) => homeReply(ev),
+      urls: {events: "{{ url_for('housechat.home_chat_events') if is_admin else '' }}", send: "{{ url_for('housechat.home_chat_send') if is_admin else '' }}", forward: "{{ url_for('housechat.home_chat_forward') if is_admin else '' }}"}}) : null;
+    const homeOn = () => !!home && home.isOpen();
+    function leaveHome() {
+      if (!homeOn()) return;
+      home.close(); root.classList.remove("home-mode"); if (homeRow) homeRow.parentElement.classList.remove("lit");
+      logBox.hidden = agentOn(); if (agentView) agentView.hidden = !agentOn();
+    }
+    function enterHome() {
+      if (!home) return;
+      logBox.hidden = true; if (agentView) agentView.hidden = true;
+      root.classList.add("home-mode"); if (homeRow) homeRow.parentElement.classList.add("lit");
+      home.open(); msg.focus();
+    }
+    if (homeRow) homeRow.addEventListener("click", () => { enterHome(); if (openSheet === "chats") showSheet("chats"); });
+    let inflight = null;                                          // the public chat's request, while it waits (Stop aborts it)
+    let thinking = false;                                         // the face in the corner (skippy-3d.js): thinking while an answer is on its way
+    function paintStop() {
+      const busy = agentOn() ? !!window.SkippyAgent.busy() : !!inflight;
+      if (stopKey) stopKey.hidden = !busy;
+      if (busy !== thinking) { thinking = busy; dispatchEvent(new CustomEvent("skippy-thinking", { detail: busy })); }
+    }
+    if (stopKey) {
+      stopKey.addEventListener("click", () => { if (agentOn()) window.SkippyAgent.stop(); else if (inflight) inflight.abort(); });
+      setInterval(paintStop, 1000);
+    }
+    function askAgent(text) {
+      const long = text.length + pending_files.filter(f => f.data.startsWith("data:text/")).reduce((n, f) => n + dataText(f.data).length + f.name.length + 10, 0);
+      if (long > AGENT_TEXT) { flash("Too long for the agent (" + Math.round(long / 1000) + "K characters, " + AGENT_TEXT / 1000 + "K at most): put the file in its folder and name it."); msg.value = text; grow(); return false; }
+      const files = pending_files.splice(0); paintFiles();
+      const pics = files.filter(f => f.data.startsWith("data:image/")).map(f => f.data);
+      const texts = files.filter(f => f.data.startsWith("data:text/"));
+      texts.forEach(f => { text += "\n\n" + f.name + ":\n```\n" + dataText(f.data) + "\n```"; });          // a long paste or a text file: in the message
+      if (files.length > pics.length + texts.length) flash("The agent takes pictures and text here; put other files in its folder.");
+      if (!text && !pics.length) return;
+      quickLine(text);                                           // before send: the context is the turns before this message
+      if (context) { text = earlier(context) + "\n\n" + text; setContext(null); }   // Skippy Memory's conversation rides with the first message
+      window.SkippyAgent.send(text, pics);
+      alive().pulse(1); paintStop();
+    }
+
+    // When a reply lands while this tab is in the background, the tab's title says so until you come back.
+    const baseTitle = document.title;
+    function ping() { if (document.hidden) document.title = "● " + baseTitle; }
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) document.title = baseTitle; });
+
+    let busy = false;
+    // One exchange. opts.replace: the last exchange is being redone (Retry: the same words; Edit: new ones); the old one stays
+    // as a version behind ‹ n/m ›.
+    async function ask(text, opts) {
+      opts = opts || {};
+      const physics = /^\s*\/(mentat|physics)\s+\S/i.test(text || "");
+      if (agentOn() && !physics) { applyMode(); return askAgent(text); }
+      if (!text || busy) return;
+      if (agentOn()) { agentView.hidden = true; logBox.hidden = false; }   // the answer shows in the chat's own log; the next agent message brings its transcript back
+      busy = true; paintTail();
+      let answered = false;                                         // a reply landed: whatever queued meanwhile goes next
+      const files = pending_files.splice(0);                          // they go with this message only
+      paintFiles();
+      let before = history;
+      if (opts.replace) {
+        if (!alts.length && history.length >= 2) alts = [{user: history[history.length - 2].content, assistant: history[history.length - 1].content}];
+        before = history.slice(0, -2);
+        const turns = log.querySelectorAll(".turn"); [...turns].slice(-2).forEach(t => t.remove());
+      } else { alts = []; alt = 0; }
+      const shown = add("user", text);
+      if (files.length) {                                             // what you sent, under your words
+        const strip = document.createElement("div"); strip.className = "sent-files";
+        files.forEach(f => { if (f.data.startsWith("data:image/")) { const t = document.createElement("img"); t.src = f.data; t.alt = f.name; strip.append(t); }
+                             else { const c = document.createElement("span"); c.className = "file-chip"; c.append(glyph("note"), document.createTextNode(f.name)); strip.append(c); } });
+        shown.parentElement.insertBefore(strip, shown.parentElement.querySelector(".acts"));
+      }
+      sendBtn.disabled = true; sendBtn.dataset.s = "on";
+      alive().pulse(1);                         // a question goes out: the background stirs
+      const pending = add("assistant", "…");
+      inflight = new AbortController(); paintStop();
+      // Every message has a stable id and is kept (here, and as `pending` on the portal: prompts.py) until a real answer comes back.
+      const pid = opts.pid || ("p-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+      try {
+        // `page` lets Skippy know what you're looking at ("this game" = the one on screen).
+        const payload = {message: text, history: before, page: location.pathname, brain: BRAINS.length > 1 ? brain : undefined, prompt_id: pid,
+                         files: files.filter(f => !f.sending).map(f => f.ref ? {name: f.name, ref: f.ref, type: f.type, bytes: f.bytes} : {name: f.name, data: f.data}), save: allowSave(),
+                         // the suggestion this may be a yes to (the server uses it only for a plain yes)
+                         mentat_follow_up: mentatFollow && mentatFollow.chat === chatId ? mentatFollow.follow : undefined};
+        keepPending({chat: chatId, pid: pid, text: text, at: Date.now()});
+        const data = await untilAnswered(payload, pending, inflight.signal);
+        dropPending(pid);
+        pending.parentElement.classList.remove("waiting");
+        show(pending, data.reply, true);
+        voice.say(data.reply);
+        alive().pulse(data.gap ? 0.6 : 1.8);    // an answer comes back: it surges (less so for "failed due to incompetence")
+        const acts = pending.parentElement.querySelector(".acts");
+        pending.parentElement.insertBefore(receipt(data, false), acts);
+        (data.mentat || []).forEach(c => pending.parentElement.insertBefore(mentatCard(c), acts));
+        const follow = (data.mentat || []).map(c => c.suggestion && c.suggestion.follow_up).filter(Boolean).pop();
+        mentatFollow = follow ? {chat: chatId, follow: follow} : null;   // a reply with no suggestion ends the last one
+        (data.media || []).forEach(m => {           // what was made for this reply (a song, a picture): an artifact, opened
+          if (m.job_id) pending.parentElement.insertBefore(waitCard(m), acts);   // a job (picture, song, pop-up) in line, being made or done: the card waits
+          else if (window.SkippyArtifacts) pending.parentElement.insertBefore(SkippyArtifacts.card(SkippyArtifacts.fromMedia(m), {onToggle: () => logPager.refresh()}), acts);
+        });
+        const said = text + (files.length ? " [attached: " + files.map(f => f.name).join(", ") + "]" : "");
+        const answer = data.reply + pictureNote(data.media) + mentatNote(data.mentat || []);
+        history = before.concat({role: "user", content: said}, {role: "assistant", content: answer});
+        if (opts.replace) { alts.push({user: said, assistant: answer}); alt = alts.length - 1; }
+        saveAlts(); save(); ping();
+        answered = true;
+      } catch (err) {
+        const stopped = err.name === "AbortError";
+        dropPending(pid);                         // stopped, or a refusal the portal stands by: nothing is left to wait for
+        pending.parentElement.classList.remove("waiting");
+        pending.textContent = stopped ? "Stopped." : err.message;
+        pending.parentElement.classList.add("failed");
+        if (opts.replace) history = before.concat(history.slice(-2));    // a failed redo leaves the last exchange as it was
+        if (files.length && !pending_files.length) { pending_files.push(...files); paintFiles(); }   // not lost: try again
+        voice.resume();                           // no reply is coming: in a spoken conversation the turn comes back to him
+      } finally {
+        busy = false; inflight = null; paintStop();
+        if (lateHeard.length) { history = history.concat(lateHeard.splice(0)); save(); }
+        sendBtn.disabled = false; delete sendBtn.dataset.s;
+        logPager.refresh(); paintTail();
+        if (matchMedia("(pointer: fine)").matches) msg.focus();
+        if (answered) setTimeout(drainQueue, 0);                    // stopped or failed: the line waits for his next message
+      }
+    }
+    // ── A prompt is answered or it waits (prompts.py): a dropped connection, a 5xx, a redeploy or "still pending" is never the
+    // reply. The same prompt id goes again with backoff until a real answer (or a refusal the portal stands by) comes back. ──
+    const PENDING = KEY + "-pending", BACKOFF = [2, 4, 8, 15, 30], DAY = 86400000;
+    function keepPending(rec) { try { localStorage.setItem(PENDING, JSON.stringify(rec)); } catch (e) {} }
+    function dropPending(pid) { try { const r = JSON.parse(localStorage.getItem(PENDING) || "null"); if (!r || r.pid === pid) localStorage.removeItem(PENDING); } catch (e) {} }
+    function waiting(el, how) {
+      el.parentElement.classList.add("waiting");
+      el.textContent = "Waiting for Skippy, retrying" + (how && how.attempts ? " (try " + (how.attempts + 1) + (how.why ? ": " + how.why : "") + ")" : "") + "…";
+    }
+    const pause = (s, signal) => new Promise((ok, no) => {
+      const t = setTimeout(ok, s * 1000);
+      signal.addEventListener("abort", () => { clearTimeout(t); no(new DOMException("Stopped", "AbortError")); }, {once: true});
+    });
+    async function untilAnswered(payload, el, signal) {
+      const PEND = "{{ url_for('chat.pending_prompt', pid='PID') }}".replace("PID", encodeURIComponent(payload.prompt_id));
+      const watch = setInterval(() => {                              // while the portal retries, the bubble says so (and why)
+        fetch(PEND, {cache: "no-store"}).then(r => r.ok ? r.json() : null).then(v => { if (v && v.attempts && !signal.aborted) waiting(el, v); }).catch(() => {});
+      }, 3000);
+      try {
+        for (let tries = 0; ; tries++) {
+          let res = null, data = null;
+          try {
+            res = await fetch("{{ url_for('chat.send') }}", {method: "POST", headers: {"Content-Type": "application/json"}, signal: signal, body: JSON.stringify(payload)});
+            data = await res.json().catch(() => null);
+          } catch (err) { if (err.name === "AbortError") throw err; }   // the connection dropped: try again
+          const ours = !!data && data.prompt_id === payload.prompt_id;   // the portal's own word (not a front end's 502 during a deploy)
+          if (res && ours && res.status !== 202) {
+            if (res.ok) return data;
+            throw new Error(data.error || res.statusText);               // a refusal the portal stands by
+          }
+          if (res && !ours && res.status >= 400 && res.status < 500 && ![408, 425, 429].includes(res.status)) {
+            throw new Error((data && data.error) || res.statusText);     // not signed in, not allowed, too many: retrying won't help
+          }
+          waiting(el, data && data.pending ? data : null);
+          if (!(data && data.pending)) await pause(BACKOFF[Math.min(tries, BACKOFF.length - 1)], signal);   // "still pending": straight back in line
+        }
+      } finally { clearInterval(watch); }
+    }
+    function resumePending() {                                         // a reload mid-answer: the same prompt is asked for again
+      let rec = null; try { rec = JSON.parse(localStorage.getItem(PENDING) || "null"); } catch (e) {}
+      if (!rec || !rec.pid || !rec.text) return;
+      if (Date.now() - (rec.at || 0) > DAY) { dropPending(rec.pid); return; }
+      if (rec.chat !== chatId || busy || agentOn()) return;
+      const asked = history.length >= 2 ? history[history.length - 2] : null;
+      if (asked && asked.role === "user" && asked.content.startsWith(rec.text)) { dropPending(rec.pid); return; }   // it was answered after all
+      ask(rec.text, {pid: rec.pid});
+    }
+    // Retry: the last question again; Edit: your last message back in the box (or ↑ in an empty box), sent in its place.
+    const lastPair = () => history.length >= 2 && history[history.length - 2].role === "user" && history[history.length - 1].role === "assistant";
+    function retry() { if (lastPair() && !busy) ask(history[history.length - 2].content.replace(/\s*\[attached:[^\]]*\]$/, ""), {replace: true}); }
+    let editing = false;
+    const editBar = form.querySelector(".editing");
+    function startEdit() {
+      if (busy || !lastPair()) return;
+      editing = true; editBar.hidden = false;
+      const was = SkippyReply.split(history[history.length - 2].content.replace(/\s*\[attached:[^\]]*\]$/, ""));
+      pending_quotes.splice(0, pending_quotes.length, ...was.quotes); paintQuotes();     // its quotes back over the box, as they were
+      msg.value = was.rest; grow(); msg.focus();
+      msg.setSelectionRange(msg.value.length, msg.value.length);
+    }
+    function endEdit() { editing = false; editBar.hidden = true; }
+    const dropQuotes = () => { pending_quotes.length = 0; paintQuotes(); };
+    editBar.querySelector("button").addEventListener("click", () => { endEdit(); msg.value = ""; grow(); dropQuotes(); });
+    // ── The queue (static/skippy-queue.js, the same as the agent's): what is sent while Skippy answers waits here, under the box,
+    // and goes as ONE message when the reply lands; a repeat is taken out. Kept in this tab; a stopped or failed reply holds it. ──
+    const queueBox = form.querySelector(".queue"), QUEUE = KEY + "-queue";
+    let queue = []; try { queue = JSON.parse(sessionStorage.getItem(QUEUE) || "[]"); if (!Array.isArray(queue)) queue = []; } catch (e) { queue = []; }
+    function paintQueue() {
+      try { queue.length ? sessionStorage.setItem(QUEUE, JSON.stringify(queue.slice(0, 20))) : sessionStorage.removeItem(QUEUE); } catch (e) {}
+      queueBox.hidden = !queue.length;
+      queueBox.replaceChildren(...queue.map((q, i) => {
+        const row = document.createElement("div"), t = document.createElement("span"); row.className = "qrow"; t.className = "qt"; t.textContent = q;
+        row.append(t, keyBtn("x", "Take this out of the queue", () => { queue.splice(i, 1); paintQueue(); })); return row;
+      }));
+    }
+    function drainQueue() { if (queue.length && !busy && !agentOn()) { const all = queue.splice(0); paintQueue(); ask(SkippyQueue.gulp(all)); } }
+    paintQueue();
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      let text = msg.value.trim();
+      if (!text && !pending_quotes.length) return;
+      if (pending_quotes.length) { text = SkippyReply.compose(pending_quotes.splice(0), text); paintQuotes(); }   // the quotes ride at its start
+      if (homeOn()) { msg.value = ""; grow(); home.send(text).then(ok => { if (!ok) { msg.value = text; grow(); } }); return; }
+      if (busy && !agentOn()) {                                     // Skippy is answering: it waits in line, not lost
+        if (editing) { flash("Wait for the reply to edit your message."); return; }
+        SkippyQueue.add(queue, text); paintQueue(); msg.value = ""; grow(); return;
+      }
+      msg.value = ""; grow();
+      const redo = editing; endEdit();
+      if (queue.length && !redo && !agentOn()) { text = SkippyQueue.gulp([...queue.splice(0), text]); paintQueue(); }
+      ask(text, redo ? {replace: true} : {});
+    });
+    msg.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
+      else if (e.key === "ArrowUp" && !msg.value && !agentOn()) { e.preventDefault(); startEdit(); }
+      else if (e.key === "Escape" && editing) { endEdit(); msg.value = ""; grow(); dropQuotes(); }
+    });
+    function newChat() {                                                                // the one before stays in Your chats
+      leaveHome();
+      if (agentOn()) { window.SkippyAgent.newChat(); applyMode(); setContext(null); msg.focus(); return; }   // a new agent conversation (same folder and brain to start)
+      startChat(newId(), []); setContext(null); queue = []; paintQueue(); msg.focus();
+    }
+    root.querySelector(".clear").addEventListener("click", newChat);
+    if (banner) banner.querySelector(".drop-ctx").addEventListener("click", () => setContext(null));
+    showContext();
+
+    // ── Skippy Memory (the Captain's archive of other AIs' saved chats): a job for skippy-pc, polled until it answers ──
+    async function askHome(body) {
+      const r = await fetch("{{ url_for('chat.memory_ask') if is_admin else '' }}", {method: "POST",
+        headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || r.statusText);
+      for (let i = 0; i < 40; i++) {
+        await new Promise(res => setTimeout(res, 1500));
+        const p = await (await fetch("{{ url_for('chat.memory_result') if is_admin else '' }}?job=" + d.job)).json();
+        if (p.state === "done") return p.result;
+        if (p.state === "error" || p.state === "unknown") throw new Error(p.error || "skippy-pc couldn't answer.");
+      }
+      throw new Error("skippy-pc didn't answer within a minute.");
+    }
+
+    // ── Your chats, one list: starred first, then by day; a search over names and words; for the Captain a filter row and the
+    // agent's conversations and the archive in the same list. Tap to open; the star, rename and bin keys act at once. ──
+    const chatsList = root.querySelector(".chats-list"), chatsFilter = root.querySelector(".chats-filter");
+    const kinds = [...root.querySelectorAll(".chats-kinds button")];
+    let kind = "all", agentRows = null, archiveRows = null, archiveErr = "", momentRows = null, momentState = "idle", momentErr = "";
+    const AGENT_STARS = "skippy-agent-stars:" + OWNER;
+    const agentStars = () => { try { return new Set(JSON.parse(localStorage.getItem(AGENT_STARS) || "[]")); } catch (e) { return new Set(); } };
+    function setAgentStar(conv, on) { const s = agentStars(); on ? s.add(conv) : s.delete(conv); try { localStorage.setItem(AGENT_STARS, JSON.stringify([...s])); } catch (e) {} }
+    kinds.forEach(b => b.addEventListener("click", () => {
+      kind = b.dataset.kind; kinds.forEach(x => x.setAttribute("aria-pressed", x === b ? "true" : "false")); paintChats();
+    }));
+    function when(t) {                                             // the day group a time falls in
+      const d = new Date(t), now = new Date(), day = 864e5;
+      const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+      if (isNaN(d)) return "Earlier";
+      if (d >= midnight) return "Today";
+      if (d >= midnight - day) return "Yesterday";
+      if (d >= midnight - 7 * day) return "Previous 7 days";
+      if (d >= midnight - 30 * day) return "Previous 30 days";
+      return d.toLocaleDateString(undefined, {month: "long", year: "numeric"});
+    }
+    function rowsNow(q) {
+      const out = [], has = (s) => !q || (s || "").toLowerCase().includes(q);
+      if (kind === "all" || kind === "chat") chats().forEach(c => {
+        if (has(c.title) || (q && (c.history || []).some(t => has(t.content)))) out.push({kind: "chat", id: c.id, title: c.title || "chat", at: Date.parse(c.updated), star: !!c.star, c: c});
+      });
+      if (agentView && window.SkippyAgent && (kind === "all" || kind === "agent") && agentRows) {
+        const stars = agentStars();
+        agentRows.forEach(c => { if (has(c.title)) out.push({kind: "agent", id: c.conv, title: c.title || "conversation", at: (c.last || c.started || 0) * 1000, star: stars.has(c.conv), c: c}); });
+      }
+      if (kind === "archive" && archiveRows) archiveRows.forEach(r => {
+        if (has(r.title + " " + r.source + " " + (r.summary || ""))) out.push({kind: "archive", id: r.key, title: r.title, at: Date.parse(r.updated), star: false, c: r});
+      });
+      out.sort((a, b) => (b.star - a.star) || ((b.at || 0) - (a.at || 0)));
+      return out;
+    }
+    function paintChats() {
+      const q = chatsFilter.value.trim().toLowerCase();
+      if (kind === "moments") return paintMoments(q);
+      if ((kind === "all" || kind === "agent") && agentView && window.SkippyAgent && agentRows === null) {
+        agentRows = [];
+        window.SkippyAgent.conversations().then(rows => { agentRows = rows; paintChats(); }).catch(() => { agentRows = []; });
+      }
+      if (kind === "archive" && archiveRows === null) {
+        archiveRows = [];
+        askHome().then(got => { archiveRows = got.conversations || []; archiveErr = ""; paintChats(); })
+          .catch(err => { archiveRows = null; archiveErr = err.message; paintChats(); });
+      }
+      const rows = rowsNow(q), out = [];
+      let group = null;
+      rows.forEach(r => {
+        const g = r.star ? "Starred" : when(r.at);
+        if (g !== group) { group = g; const h = document.createElement("div"); h.className = "chats-head"; h.textContent = g; out.push(h); }
+        out.push(chatRow(r));
+      });
+      chatsList.replaceChildren(...out);
+      if (!rows.length) chatsList.textContent = kind === "archive" && archiveErr ? archiveErr : (kind === "archive" && !archiveRows) || (kind === "archive" && !archiveRows.length && !archiveErr) ? "…" : "∅";
+      root.querySelector('[data-sheet="chats"] .pg')._pager.refresh();
+    }
+    function chatRow(r) {
+      const row = document.createElement("div");
+      const current = r.kind === "chat" ? r.id === chatId && !agentOn() : r.kind === "agent" ? agentOn() && r.id === window.SkippyAgent.conv() : false;
+      row.className = "chat-row" + (current ? " lit" : "");
+      const open = document.createElement("button"); open.type = "button"; open.className = "chat-open";
+      const t = document.createElement("span"); t.className = "chat-title"; t.textContent = r.title;
+      const sub = document.createElement("span"); sub.className = "chat-when";
+      if (r.kind === "chat") sub.textContent = (r.c.archived ? r.c.turns || 0 : (r.c.history || []).filter(x => x.role === "user").length) + " · " + new Date(r.at).toLocaleString(undefined, {month: "short", day: "numeric", hour: "2-digit", minute: "2-digit"});
+      if (r.kind === "chat" && r.c.archived) { row.classList.add("archived"); sub.prepend(glyph("stack", "dim"), " "); }   // zipped on the portal: opens on demand
+      if (r.kind === "agent") {
+        const proj = (window.SkippyAgent.projects.find(p => p.id === r.c.project) || {name: r.c.project}).name;
+        sub.textContent = proj + " · " + (r.c.turns || 0) + (r.c.state === "running" ? " · working" : "");
+      }
+      if (r.kind === "archive") sub.textContent = r.c.source + " · " + (r.c.updated || "").slice(0, 10) + " · " + r.c.messages;
+      if (kinds.length) open.append(glyph(r.kind === "agent" ? "console" : r.kind === "archive" ? "past" : "can"));
+      open.append(t, sub);
+      open.addEventListener("click", () => openRow(r, open));
+      row.append(open);
+      if (r.kind !== "archive") {
+        const star = keyBtn("star", r.star ? "Unstar" : "Star", () => {
+          if (r.kind === "chat") { patchLocal(r.id, {star: !r.star}); patchOnPortal(r.id, {star: !r.star}); }
+          else setAgentStar(r.id, !r.star);
+          paintChats();
+        }, "star" + (r.star ? " on" : ""));
+        row.append(star);
+      }
+      if (r.kind === "chat") {
+        row.append(keyBtn("pen", "Rename", () => renameRow(r, row, t)));
+        row.append(keyBtn("trash", "Delete", () => {          // acts at once (the Captain's rule: no "are you sure" boxes)
+          keepChats(chats().filter(x => x.id !== r.id)); forgetOnPortal(r.id);
+          if (r.id === chatId) startChat(newId(), []);
+          paintChats();
+        }));
+      }
+      return row;
+    }
+    // ── Moments (portal/vision.py, static/vision.js): every flash of the glasses, the phone, the pods and the PC, newest first. Forget
+    // acts at once and waits 10 s to be undone; Keep holds the 7+3 s clip past its 90 days. The Captain only. ──
+    const MOMENT_URL = {list: "{{ url_for('vision.listing') if is_admin else '' }}", file: "{{ url_for('vision.moment_file', mid='_MID_', name='_NAME_') if is_admin else '' }}",
+                        del: "{{ url_for('vision.moment_delete', mid='_MID_') if is_admin else '' }}", keep: "{{ url_for('vision.moment_keep', mid='_MID_') if is_admin else '' }}"};
+    const momentUrl = (kindOf, id, name) => MOMENT_URL[kindOf].replace("_MID_", encodeURIComponent(id)).replace("_NAME_", encodeURIComponent(name || ""));
+    const momentPic = f => /^(?:hud-page|drive-page|phone-cam-\d|glasses-(?:rgb|left|right))\.jpg$|^(?:pod-[a-z0-9-]+|pc-screen-\d)\.png$/.test(f.name);
+    function paintMoments(q) {
+      if (momentState === "idle") {
+        momentState = "loading";
+        fetch(MOMENT_URL.list, {credentials: "same-origin", cache: "no-store"}).then(r => r.ok ? r.json() : Promise.reject(new Error("Moments aren't available here.")))
+          .then(d => { momentRows = d.moments || []; momentErr = ""; momentState = "done"; paintChats(); })
+          .catch(err => { momentErr = err.message; momentState = "idle"; momentRows = null; paintChats(); });
+      }
+      const has = s => String(s || "").toLowerCase().includes(q);
+      const rows = (momentRows || []).filter(m => !q || has(m.said) || (m.seen || []).some(s => has(s.text) || has(s.en)));
+      const out = []; let group = null;
+      rows.forEach(m => {
+        const g = when(m.at * 1000);
+        if (g !== group) { group = g; const h = document.createElement("div"); h.className = "chats-head"; h.textContent = g; out.push(h); }
+        out.push(momentRow(m));
+      });
+      chatsList.replaceChildren(...out);
+      if (!rows.length) chatsList.textContent = momentErr || (momentState === "done" ? "∅" : "…");
+      root.querySelector('[data-sheet="chats"] .pg')._pager.refresh();
+    }
+    function momentRow(m) {
+      const row = document.createElement("div"); row.className = "chat-row moment";
+      const open = document.createElement("div"); open.className = "chat-open";
+      const t = document.createElement("span"); t.className = "chat-title";
+      t.textContent = new Date(m.at * 1000).toLocaleTimeString(undefined, {hour: "2-digit", minute: "2-digit"}) + (m.hold ? " · clip" : "") + (m.kept ? " · kept" : "");
+      const sub = document.createElement("span"); sub.className = "chat-when";
+      const read = (m.seen && m.seen[0]) ? (m.seen[0].en || m.seen[0].text) : "";
+      sub.textContent = (m.said || read || (m.files || []).length + " files") + ((m.pending || []).length ? " · …" : "");
+      const strip = document.createElement("span"); strip.className = "moment-strip";
+      (m.files || []).filter(momentPic).slice(0, 5).forEach(f => {
+        const a = document.createElement("a"); a.href = momentUrl("file", m.id, f.name); a.target = "_blank"; a.rel = "noopener"; a.title = f.name;
+        const im = document.createElement("img"); im.loading = "lazy"; im.alt = f.name; im.src = a.href; a.append(im); strip.append(a);
+      });
+      const clip = (m.files || []).find(f => f.name === "glasses-rgb-7s.zip");
+      if (clip) { const a = document.createElement("a"); a.className = "moment-clip"; a.href = momentUrl("file", m.id, clip.name); a.title = "The 10-second clip"; a.append(glyph("rec")); strip.append(a); }
+      open.append(glyph("camera", "dim"), t, sub, strip); row.append(open);
+      row.append(keyBtn("star", m.kept ? "Let the clip expire" : "Keep the clip for good", () => {
+        fetch(momentUrl("keep", m.id), {method: "POST", credentials: "same-origin", headers: {"Content-Type": "application/json"}, body: JSON.stringify({on: !m.kept})})
+          .then(r => { if (r.ok) { m.kept = !m.kept; paintChats(); } });
+      }, "star" + (m.kept ? " on" : "")));
+      row.append(keyBtn("trash", "Forget this moment", () => forgetMoment(m, row)));
+      return row;
+    }
+    function forgetMoment(m, row) {
+      const gone = document.createElement("div"); gone.className = "chat-row moment-gone";
+      const undo = document.createElement("button"); undo.type = "button"; undo.className = "chat-open"; undo.title = undo.ariaLabel = "Undo: keep this moment";
+      undo.append(glyph("retry"), document.createTextNode("Forgotten · Undo"));
+      const timer = setTimeout(() => {
+        fetch(momentUrl("del", m.id), {method: "POST", credentials: "same-origin"}).then(r => { if (r.ok) { momentRows = (momentRows || []).filter(x => x.id !== m.id); gone.remove(); } });
+      }, 10000);
+      undo.addEventListener("click", () => { clearTimeout(timer); gone.replaceWith(row); });
+      gone.append(undo); row.replaceWith(gone);
+    }
+    function renameRow(r, row, label) {                            // the name becomes a box in place: Enter keeps it, Esc leaves it
+      const box = document.createElement("input"); box.type = "text"; box.className = "chat-rename"; box.value = r.title; box.maxLength = 70;
+      label.replaceWith(box); box.focus(); box.select();
+      const done = (keep) => {
+        const name = box.value.replace(/\s+/g, " ").trim();
+        if (keep && name && name !== r.title) { patchLocal(r.id, {title: name, named: true}); patchOnPortal(r.id, {title: name}); }
+        paintChats();
+      };
+      box.addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); done(true); } if (e.key === "Escape") { e.stopPropagation(); done(false); } });
+      box.addEventListener("blur", () => done(true));
+    }
+    async function openRow(r, btn) {
+      leaveHome();
+      if (r.kind === "chat") {
+        if (agentOn()) { const pub = BRAINS.find(x => x.id === "core"); if (pub) { brain = "core"; try { localStorage.setItem(BRAIN_KEY, "public"); } catch (e) {} paintBrain(); applyMode(); } }
+        if (r.c.archived) {                                          // zipped on the portal: fetch it back (it's restored there too)
+          btn.disabled = true; btn.dataset.s = "on";
+          try {
+            const res = await fetch(HIST + "/" + encodeURIComponent(r.id), {cache: "no-store"});
+            const full = await res.json();
+            if (!res.ok || !Array.isArray(full.history)) throw new Error(full.error || "That chat couldn't be opened.");
+            patchLocal(r.id, {history: full.history, archived: undefined, turns: undefined});
+            r.c = Object.assign({}, r.c, {history: full.history, archived: undefined});
+          } catch (err) { btn.disabled = false; btn.querySelector(".chat-when").textContent = err.message; return; }
+        }
+        startChat(r.id, r.c.history || []); showSheet("chats"); return;
+      }
+      if (r.kind === "agent") {
+        const m = BRAINS.find(x => x.agent === (r.c.brain || "core") && x.ready) || BRAINS.find(x => x.agent && x.ready);   // its own mode: Private, or Auto for a Claude run
+        if (m && m.id !== brain) { brain = m.id; try { localStorage.setItem(BRAIN_KEY, m.mode); } catch (e) {} paintBrain(); applyMode(); }
+        window.SkippyAgent.open(r.c); showSheet("chats"); return;
+      }
+      btn.disabled = true; btn.dataset.s = "on";                     // the archive: continue that conversation with the agent, in Private
+      const priv = byMode("private") || BRAINS.find(x => isAgent(x.id) && x.ready);
+      if (!priv) { btn.disabled = false; btn.querySelector(".chat-when").textContent = "The agent isn't answering, so there's nowhere to continue it."; return; }
+      try {
+        const c = await askHome({key: r.id});
+        if (priv.id !== brain) { brain = priv.id; try { localStorage.setItem(BRAIN_KEY, priv.mode); } catch (e) {} paintBrain(); }
+        applyMode(); if (window.SkippyAgent) window.SkippyAgent.newChat();
+        setContext({source: c.source, title: c.title, updated: c.updated, text: c.text, cut: c.cut});
+        showSheet("chats"); msg.focus();
+      } catch (err) { btn.disabled = false; btn.querySelector(".chat-when").textContent = err.message; }
+    }
+    chatsFilter.addEventListener("input", paintChats);
+    root.querySelector(".chats-new").addEventListener("click", () => { newChat(); showSheet("chats"); });
+
+    // ── Apps: the launcher's tiles as a tray (one key on a phone; on a wide screen a slim row under the box, always there) ──
+    const tray = root.querySelector(".app-tray"), appRow = form.querySelector(".app-row");
+    let appsLoaded = null;
+    function loadApps() {
+      if (appsLoaded) return appsLoaded;
+      appsLoaded = fetch("{{ url_for('app_tiles') }}").then(r => r.json()).then(d => {
+        const tile = (t, slim) => {
+          const a = document.createElement("a"); a.href = t.href; a.className = slim ? "key app-slim" : "app-tile"; a.title = t.label;
+          a.setAttribute("aria-label", t.label); a.dataset.tel = "tray:" + t.id;
+          a.append(glyph(t.glyph));
+          if (!slim) { const l = document.createElement("span"); l.textContent = t.label; a.append(l); }
+          if (t.state) { const lamp = document.createElement("i"); lamp.className = "lamp"; lamp.dataset.s = t.state; a.append(lamp); }
+          if (t.badge) { const b = document.createElement("b"); b.className = "badge"; b.textContent = t.badge; a.append(b); }
+          return a;
+        };
+        const all = {id: "all", glyph: "apps", label: "All apps", href: d.all};
+        tray.replaceChildren(...d.tiles.map(t => tile(t, false)), tile(all, false));
+        appRow.replaceChildren(...d.tiles.map(t => tile(t, true)));
+      }).catch(() => { tray.textContent = "∅"; appsLoaded = null; });
+      return appsLoaded;
+    }
+    const wide = matchMedia("(min-width: 900px)");
+    function placeTray() {
+      const key = form.querySelector(".apps-key");
+      appRow.hidden = !wide.matches || key.hasAttribute("data-buried");
+      if (!key.hasAttribute("data-buried")) key.hidden = wide.matches;
+      if (wide.matches && !key.hasAttribute("data-buried")) loadApps().then(() => logPager.refresh());
+    }
+    wide.addEventListener("change", placeTray); placeTray();
+
+    // Direct verbs: the syntax is the label (/physics), a glyph says which tool it aims at; fetched on first open.
+    const VERB_GLYPH = {physics: "atom", music: "wave"};
+    function loadTools() {
+      const tools = sheets.tools, list = tools.querySelector(".verb-list"); if (tools.dataset.loaded) return;
+      tools.dataset.loaded = "1";
+      fetch("{{ url_for('chat.badges') }}").then(r => r.json()).then(cats => {
+        list.replaceChildren(...Object.entries(cats).flatMap(([cat, items]) => items.map(it => {
+          const b = document.createElement("button"); b.type = "button"; b.className = "verb";
+          const what = document.createElement("small"); what.textContent = it.label;
+          b.append(glyph(VERB_GLYPH[cat.toLowerCase()] || "server"), document.createTextNode("/" + it.verb), what); b.title = it.label;
+          b.onclick = () => {
+            msg.value = "/" + it.verb + " " + msg.value.replace(/^\/[a-z]+\s*/i, "");
+            slashSheet = false; showSheet("tools"); msg.focus(); msg.setSelectionRange(msg.value.length, msg.value.length);
+          };
+          return b;
+        })));
+        tools.querySelector(".pg")._pager.refresh();
+      }).catch(() => { list.textContent = "∅"; delete tools.dataset.loaded; });
+    }
+    root.querySelectorAll(".sheet .pg").forEach(p => { Bridge.pager(p, {pips: p.parentElement.querySelector(".pips")}); });
+    replay();                                     // the open conversation (once everything it uses exists)
+    setTimeout(resumePending, 0);                // a prompt that never got its answer (a reload, a redeploy) goes again
+    applyMode();                                  // the mode this browser last picked (Private, for the Captain, unless he left it elsewhere)
+  })(document.currentScript.previousElementSibling);
+</script>

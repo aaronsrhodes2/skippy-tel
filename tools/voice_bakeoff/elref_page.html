@@ -1,0 +1,38 @@
+<title>Skippy Voice, ElevenLabs Print</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@700&family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono&display=swap">
+<style>
+/* Same console look as the re-run page. One column, bridge-console style, like the bake-off page: the table first, then each line with every engine's take. */
+:root { color-scheme: dark; --bg: #000; --panel: #07110d; --line: #0f3324; --fg: #e9f5ef; --dim: #8fb3a3; --green: #00ff88; --cyan: #00ccff;
+  --amber: #ffaa00; --red: #ff4444; --display: "Chakra Petch", "Segoe UI", sans-serif; --body: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", Consolas, monospace; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.5 var(--body); }
+.wrap { max-width: 900px; margin: 0 auto; padding-block: 28px 56px; padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 22px; }
+h1 { font: 700 clamp(26px, 6vw, 36px)/1.1 var(--display); color: var(--green); margin: 0; text-wrap: balance; }
+p { margin: 0; max-width: 70ch; color: var(--dim); }
+.box { overflow-x: auto; border: 1px solid var(--line); background: var(--panel); }
+table { border-collapse: collapse; width: 100%; font: 13px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+th { color: var(--dim); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; font-weight: 400; }
+.g { color: var(--green); } .a { color: var(--amber); } .r { color: var(--red); }
+section { background: var(--panel); border: 1px solid var(--line); padding: 16px; display: grid; gap: 12px; }
+.line { color: var(--fg); font-weight: 600; } .line b { color: var(--amber); font: 13px var(--mono); margin-right: 8px; }
+.takes { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.take { display: grid; gap: 4px; min-width: 0; } .take span { font: 12px var(--mono); color: var(--cyan); }
+audio { width: 100%; max-width: 100%; }
+</style>
+<div class="wrap">
+  <h1>Skippy Voice, ElevenLabs Print</h1>
+  <p>The local engines now clone zero-shot from a 9-second clip of ElevenLabs' own Skippy voice (the designed "Arrogant Asshole", the one the
+    chat plays), three settings each. Every take, ElevenLabs included, has been through the chat's own polish chain (RNNoise and the warmth EQ)
+    and has the same loudness.</p>
+  <div class="box"><table><thead><tr><th>Engine</th><th>Setting</th><th>First audio</th><th>Total</th><th>RTF</th><th>Word errors</th>
+    <th>Like ElevenLabs</th><th>Pause noise raw → polished</th></tr></thead><tbody><!--ROWS--></tbody></table></div>
+  <p>Averages over 3 lines. RTF is synthesis time over audio length (below 1 is faster than real time). The picture studio was using the GPU
+    during these runs, so the local timings are slower than on a quiet card (on a quiet card F5 was about 2 s a line). Like ElevenLabs is the
+    cosine between voice prints (Resemblyzer): about 0.8 and up usually means the same voice. Pause noise is the level in the quiet bits, dBFS:
+    lower is cleaner.</p>
+  <!--LINES-->
+  <p>Skippy the Magnificent &copy; Craig Alanson; narration voice R.C. Bray. Personal use only.</p>
+</div>

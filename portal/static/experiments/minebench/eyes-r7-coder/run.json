@@ -1,0 +1,33 @@
+{
+ "n": 32,
+ "title": "Eyes, round 7: the coder against Haiku's round 3",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8) as a vanilla agent (Claude Code with purple's system prompt, an empty setup, effort high, a 131K window) plus purple's generic help: the new eyes (Core's big model, Qwen3.6-35B-A3B with its vision projector, looks at each picture the coder opens with the task in mind and lists its faults, worst first) and the stop gate's work check (MineBench's runtime as the checker, the renderer as the viewer, an 80K output-token budget)",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 37032,
+ "minutes": 39,
+ "size": "139 x 29 x 71",
+ "verdict": "Haiku won, judged blind. Haiku's is a valley between grey mountains, a river crossing the line and a black locomotive with red coaches. The coder's is a huge grey cylinder lying along the track with two red sheds at one end, on a bare brown and green plate: a boiler, not a train. Core's eyes reviewed six of its pictures.",
+ "stats": {
+  "started": "2026-11-03T03:51:47.272Z",
+  "minutes": 39,
+  "tokens": {
+   "input": 98950,
+   "cache_read": 4128792,
+   "output": 97642,
+   "total": 4325384
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 98950,
+     "cache_read": 4128792,
+     "output": 97642
+    }
+   }
+  ]
+ },
+ "series": "eyes",
+ "request": "experiments/minebench/eyes-r7-coder/request.txt"
+}

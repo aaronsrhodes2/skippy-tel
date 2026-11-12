@@ -1,0 +1,462 @@
+def evaluate(expr: str) -> float:
+    """
+    Evaluate an arithmetic expression string without using eval, exec, compile, or ast.
+    Supports: integers, decimals, unary +/-, binary operators +, -, *, /, %, **.
+    Precedence (lowest to highest): +, -, *, /, %, ** (right-associative), unary +/-, parentheses.
+    """
+    if not expr or not expr.strip():
+        raise ValueError("Empty expression")
+
+    # Tokenize
+    tokens = []
+    i = 0
+    while i < len(expr):
+        ch = expr[i]
+        if ch.isspace():
+            i += 1
+            continue
+        elif ch.isdigit() or ch == '.':
+            # Parse number (handles int, decimal, .5, 2., etc.)
+            start = i
+            has_dot = ch == '.'
+            i += 1
+            while i < len(expr) and (expr[i].isdigit() or (expr[i] == '.' and not has_dot)):
+                if expr[i] == '.':
+                    has_dot = True
+                i += 1
+            token_str = expr[start:i]
+            try:
+                num = float(token_str)
+                tokens.append(('NUMBER', num))
+            except ValueError:
+                raise ValueError(f"Invalid number: {token_str}")
+            continue
+        elif ch == '+' or ch == '-' or ch == '*' or ch == '/' or ch == '%' or ch == '^':
+            # Handle ** as power operator (replace ^ with ** if needed, but spec says **)
+            if ch == '*' and i + 1 < len(expr) and expr[i + 1] == '*':
+                tokens.append(('OP', '**'))
+                i += 2
+                continue
+            elif ch == '^':
+                # Treat ^ as ** for compatibility
+                tokens.append(('OP', '**'))
+                i += 1
+                continue
+            else:
+                tokens.append(('OP', ch))
+                i += 1
+                continue
+        elif ch == '(':
+            tokens.append(('LPAREN', '('))
+            i += 1
+            continue
+        elif ch == ')':
+            tokens.append(('RPAREN', ')'))
+            i += 1
+            continue
+        else:
+            raise ValueError(f"Unknown character: '{ch}'")
+
+    if not tokens:
+        raise ValueError("Empty expression after tokenization")
+
+    # Recursive descent parser with precedence climbing
+    # We'll implement a simple recursive descent parser with proper precedence
+    
+    pos = [0]  # Use list to allow modification in nested functions
+    
+    def peek():
+        if pos[0] < len(tokens):
+            return tokens[pos[0]]
+        return None
+    
+    def consume():
+        token = tokens[pos[0]]
+        pos[0] += 1
+        return token
+    
+    def parse_primary():
+        token = peek()
+        if token is None:
+            raise ValueError("Unexpected end of expression")
+        
+        if token[0] == 'NUMBER':
+            consume()
+            return token[1]
+        elif token[0] == 'LPAREN':
+            consume()
+            result = parse_expression()
+            next_token = peek()
+            if next_token is None or next_token[0] != 'RPAREN':
+                raise ValueError("Unbalanced parentheses")
+            consume()
+            return result
+        elif token[0] == 'OP' and token[1] in ['+', '-']:
+            # Unary + or -
+            op = consume()[1]
+            val = parse_primary()  # Right-associative for unary, so recursive call
+            if op == '-':
+                return -val
+            else:
+                return val
+        else:
+            if token[0] == 'RPAREN':
+                raise ValueError("Unbalanced parentheses (unexpected ')')")
+            elif token[0] == 'OP':
+                raise ValueError(f"Dangling operator '{token[1]}'")
+            else:
+                raise ValueError(f"Unexpected token: {token}")
+
+    # For precedence: define precedence levels
+    # Lowest to highest: +, -, *, /, %, **
+    # ** is right-associative, others left-associative
+    # Unary +/- has highest precedence among operators, but we handle it in parse_primary
+    
+    def parse_expression():
+        # Parse additive expressions (+, -)
+        return parse_additive()
+
+    def parse_additive():
+        left = parse_multiplicative()
+        while True:
+            token = peek()
+            if token is None or token[0] != 'OP' or token[1] not in ['+', '-']:
+                break
+            op = consume()[1]
+            right = parse_multiplicative()
+            if op == '+':
+                left = left + right
+            else:
+                left = left - right
+        return left
+
+    def parse_multiplicative():
+        left = parse_power()
+        while True:
+            token = peek()
+            if token is None or token[0] != 'OP' or token[1] not in ['*', '/', '%']:
+                break
+            op = consume()[1]
+            right = parse_power()
+            if op == '*':
+                left = left * right
+            elif op == '/':
+                if right == 0:
+                    raise ZeroDivisionError("Division by zero")
+                left = left / right
+            else:  # %
+                if right == 0:
+                    raise ZeroDivisionError("Modulo by zero")
+                left = left % right
+        return left
+
+    def parse_power():
+        # ** is right-associative: parse a ** b ** c as a ** (b ** c)
+        left = parse_unary()
+        token = peek()
+        if token is not None and token[0] == 'OP' and token[1] == '**':
+            consume()
+            # Since right-associative, parse the rest recursively
+            right = parse_power()
+            # Handle special cases for negative bases with fractional exponents
+            try:
+                left = left ** right
+            except ValueError:
+                # Complex results not supported; raise error
+                raise ValueError("Invalid operation (complex result)")
+            except ZeroDivisionError:
+                # e.g., 0 ** -1
+                raise ZeroDivisionError("0 cannot be raised to a negative power")
+            return left
+        return left
+
+    def parse_unary():
+        # Handle unary + and - (but note: they should bind tighter than binary operators,
+        # but looser than parentheses; in our grammar, unary is handled in primary)
+        # Actually, per spec: -2**2 == -4 => unary minus has lower precedence than **
+        # So in Python: (-2)**2 == 4, but -2**2 == -(2**2) == -4
+        # Our parse_primary handles unary - as part of the primary expression.
+        # But we need to ensure that -2**2 parses as -(2**2), not (-2)**2.
+        # Since ** has higher precedence than unary -, we need to handle unary minus before power.
+        # Actually, in Python: -2**2 is parsed as -(2**2) because ** has higher precedence than unary -.
+        # But the unary minus here is actually a *binary* minus with zero on left, not a unary operator.
+        # Wait, let me re-read: the spec says "unary + and -", and example: -2**2 == -4.
+        # In Python, the unary minus has *lower* precedence than **.
+        # So -2**2 is parsed as -(2**2), not (-2)**2.
+        # So in our grammar, unary minus should be at the *same* level as binary minus, not higher.
+        # But that contradicts typical grammar where unary minus binds tighter than binary minus.
+        # The spec clarifies: "binding tighter than unary minus on its left" means ** binds tighter than unary minus.
+        # So the unary minus should be parsed *after* the ** operator.
+        # Therefore, we need to adjust our grammar.
+        #
+        # Let's reconsider the precedence levels (from lowest to highest):
+        # 1. +, - (binary)
+        # 2. *, /, %
+        # 3. ** (right-associative)
+        # 4. unary +, -
+        # But that's not quite right either, because unary minus should apply to the *entire* right side of **.
+        # Actually, in Python:
+        # -2**2 -> - (2**2) = -4
+        # 2**-1 -> 2**(-1) = 0.5
+        # So unary +/- binds *tighter* than **, but only on the *right* side of ** (since ** is right-associative).
+        # And for binary operators, unary +/- binds tighter than binary +/-, *but* the unary minus is applied after the ** operation in -2**2.
+        # Let me check actual Python:
+        # >>> -2**2
+        # -4
+        # >>> -(2**2)
+        # -4
+        # >>> (-2)**2
+        # 4
+        # So unary minus has *lower* precedence than **.
+        # But then:
+        # >>> 2**-1
+        # 0.5
+        # So in this case, the unary minus is part of the exponent, meaning ** is parsing its right operand with unary minus included.
+        #
+        # The key is: in Python's grammar, unary operators (including +/-) have *higher* precedence than **, but only when they are directly applied to a factor.
+        # The grammar is:
+        # expr     -> expr op expr | unary_expr
+        # unary_expr -> ['+' | '-'] unary_expr | power
+        # power    -> primary ['**' unary_expr]
+        # So unary +/- applies to the entire right side of **, making it right-associative.
+        #
+        # Let's restructure:
+        # parse_expression (additive) -> parse_multiplicative
+        # parse_multiplicative -> parse_unary
+        # parse_unary -> parse_primary [unary_op parse_unary]?
+        # But ** is between primary and unary.
+        #
+        # Actually, the standard approach for Python's precedence is:
+        # expr       -> term (('+' | '-') term)*
+        # term       -> factor (('*' | '/' | '%') factor)*
+        # factor     -> unary ('**' factor)?  # since ** is right-associative
+        # unary      -> ('+' | '-') unary | primary
+        # primary    -> NUMBER | '(' expr ')'
+        #
+        # Let's verify:
+        # -2**2: 
+        #   factor -> unary -> - (unary -> primary -> 2) then ** factor -> 2
+        #   But wait: unary -> - unary -> - primary -> -2, then factor -> -2 ** factor? No, because factor expects unary then ** factor.
+        #   Actually: factor -> unary ('**' factor)? 
+        #   -2**2: 
+        #     primary -> 2
+        #     unary -> - primary = -2
+        #     factor -> unary ('**' factor)? -> since no ** after -2, factor = -2
+        #   Then we'd get -2, not -4.
+        #
+        # Correction: The unary operator applies to the *entire* right side of **, not to the base.
+        # The correct grammar for Python is:
+        # expr       -> additive_expr
+        # additive   -> multiplicative (('+' | '-') multiplicative)*
+        # multiplicative -> power (('*' | '/' | '%') power)*
+        # power      -> unary ('**' power)?  # right-associative
+        # unary      -> ('+' | '-') unary | primary
+        # primary    -> NUMBER | '(' expr ')'
+        #
+        # Let's try -2**2:
+        #   power -> unary ('**' power)?
+        #   unary -> - unary -> - primary -> -2
+        #   power -> -2 (no ** after)
+        #   So we get -2, not -4.
+        #
+        # The issue is that in Python, the unary minus in -2**2 is actually applied *after* the power operation.
+        # How? Because -2**2 is parsed as -(2**2), not as (-2)**2.
+        # So the unary minus has *lower* precedence than **.
+        # But then how to parse 2**-1? As 2**( -1), where -1 is parsed by unary.
+        #
+        # The key is: unary operators bind to the *right* of the power operation.
+        # The grammar should be:
+        # power      -> primary (** unary power)?  # no, that's not standard
+        #
+        # Actually, the correct Python grammar (simplified) is:
+        # power_expr -> unary_expr ['**' power_expr]
+        # unary_expr -> ['+' | '-'] unary_expr | primary
+        # So -2**2 is parsed as:
+        #   power_expr -> unary_expr ('**' power_expr)?
+        #   unary_expr -> - unary_expr -> - (power_expr)
+        #   power_expr -> primary (no **)
+        #   primary -> 2
+        #   So unary_expr = -2, power_expr = -2 (no ** after)
+        #   Still -2.
+        #
+        # Let me check the actual CPython grammar:
+        # https://github.com/python/cpython/blob/main/Grammar/python.gram
+        # expr         : xor_expr ('|' xor_expr)*
+        # xor_expr     : and_expr ('^' and_expr)*
+        # and_expr     : shift_expr ('&' shift_expr)*
+        # shift_expr   : arith_expr (('<<' | '>>') arith_expr)*
+        # arith_expr   : term (('+' | '-') term)*
+        # term         : factor (('*' | '@' | '/' | '%' | '//') factor)*
+        # factor       : ('+' | '-' | '~') factor | power
+        # power        : ['+'] atom ['**' factor]   # note: ['+'] for unary plus, but unary minus is in factor
+        # So the key is: factor -> ('+' | '-' | '~') factor | power
+        # power -> atom ['**' factor]
+        # So -2**2: 
+        #   factor -> '-' factor -> '-' power -> '-' atom ['**' factor]?
+        #   atom -> 2, so power -> 2 ['**' factor]? -> if there's a **, it would be there, but in -2**2, the ** is part of the power.
+        #   Actually: - (2 ** ...) because factor is parsed as - factor, and factor then parses power, which parses 2 ** ... 
+        #   Let's do -2**2:
+        #     factor -> '-' factor (recursively)
+        #     Now the inner factor parses power:
+        #         power -> atom ['**' factor]
+        #         atom -> 2
+        #         ['**' factor] -> '**' factor (since there's **2)
+        #         factor for the exponent is: 2? No, wait, the exponent is just 2, so power -> 2
+        #     So we get -2, not -4.
+        #
+        # Wait, I'm missing something. Let me re-read:
+        # In Python, -2**2 is indeed -4, meaning the ** is parsed before the unary minus.
+        # The grammar must be:
+        # power_expr -> unary_expr ['**' power_expr]
+        # unary_expr -> ['+' | '-'] unary_expr | primary
+        # But that would make -2**2 parse as -(2**2) only if the unary minus is parsed *after* the **.
+        #
+        # Actually, no: the unary minus should be in the exponent part only for right-associativity.
+        # The correct way is:
+        # expr       -> additive_expr
+        # additive   -> multiplicative (('+' | '-') multiplicative)*
+        # multiplicative -> power (('*' | '/' | '%') power)*
+        # power      -> unary ('**' power)?  # right-associative
+        # unary      -> ('+' | '-') unary | primary
+        #
+        # Try 2**-1:
+        #   power -> unary ('**' power)?
+        #   unary -> - unary -> - primary -> -1
+        #   power -> 2 ** (-1) -> 0.5  -> correct
+        # Try -2**2:
+        #   power -> unary ('**' power)?
+        #   unary -> - unary -> - (power)
+        #   power -> 2 ** (power)  -> but wait, in -2**2, there's no exponent after the 2? No, there is: 2**2
+        #   So the parsing is:
+        #     outer: power -> unary ('**' power)?
+        #     unary: - (power)
+        #     power inside unary: 2 ** (power)
+        #     power for exponent: 2 (primary)
+        #     So the inner power is 2**2 = 4, then unary gives -4 -> correct.
+        #   Yes! So -2**2 is parsed as -(2**2).
+        #
+        # Therefore, the grammar is:
+        # power_expr   -> unary_expr ('**' power_expr)?   [right-associative]
+        # unary_expr   -> ('+' | '-') unary_expr | primary
+        # primary      -> NUMBER | '(' expr ')'
+        #
+        # And then multiplicative and additive are built on top of power_expr.
+        #
+        # So:
+        # expr (additive) -> parse_multiplicative
+        # multiplicative -> parse_power
+        # power -> parse_unary ('**' parse_power)? 
+        # unary -> parse_primary [or handle unary in parse_primary?]
+        #
+        # Let's implement with this structure.
+
+    # Reimplement parse_primary to handle unary +/- *only* at the primary level? No, unary should be in parse_unary.
+    # Let's redo with the correct grammar:
+
+    pos = [0]  # Reset position
+    
+    def peek():
+        if pos[0] < len(tokens):
+            return tokens[pos[0]]
+        return None
+    
+    def consume():
+        token = tokens[pos[0]]
+        pos[0] += 1
+        return token
+
+    def parse_primary():
+        token = peek()
+        if token is None:
+            raise ValueError("Unexpected end of expression")
+        
+        if token[0] == 'NUMBER':
+            consume()
+            return token[1]
+        elif token[0] == 'LPAREN':
+            consume()
+            result = parse_expression()  # Parse full expression inside parentheses
+            next_token = peek()
+            if next_token is None or next_token[0] != 'RPAREN':
+                raise ValueError("Unbalanced parentheses")
+            consume()
+            return result
+        else:
+            raise ValueError(f"Unexpected token: {token}")
+
+    def parse_unary():
+        token = peek()
+        if token is not None and token[0] == 'OP' and token[1] in ['+', '-']:
+            op = consume()[1]
+            val = parse_unary()  # Right-associative: recursive call
+            if op == '-':
+                return -val
+            else:
+                return val
+        return parse_primary()
+
+    def parse_power():
+        left = parse_unary()
+        token = peek()
+        if token is not None and token[0] == 'OP' and token[1] == '**':
+            consume()
+            # Since right-associative, parse the right side as a power (which can include unary)
+            right = parse_power()
+            try:
+                result = left ** right
+                if isinstance(result, complex):
+                    raise ValueError("Complex result not supported")
+                return result
+            except ZeroDivisionError:
+                if right < 0:
+                    raise ZeroDivisionError("0 cannot be raised to a negative power")
+                raise
+            except ValueError as e:
+                if "domain" in str(e) or "negative" in str(e):
+                    raise ValueError("Invalid operation (domain error)")
+                raise
+        return left
+
+    def parse_multiplicative():
+        left = parse_power()
+        while True:
+            token = peek()
+            if token is None or token[0] != 'OP' or token[1] not in ['*', '/', '%']:
+                break
+            op = consume()[1]
+            right = parse_power()
+            if op == '*':
+                left = left * right
+            elif op == '/':
+                if right == 0:
+                    raise ZeroDivisionError("Division by zero")
+                left = left / right
+            else:  # %
+                if right == 0:
+                    raise ZeroDivisionError("Modulo by zero")
+                left = left % right
+        return left
+
+    def parse_expression():
+        left = parse_multiplicative()
+        while True:
+            token = peek()
+            if token is None or token[0] != 'OP' or token[1] not in ['+', '-']:
+                break
+            op = consume()[1]
+            right = parse_multiplicative()
+            if op == '+':
+                left = left + right
+            else:
+                left = left - right
+        return left
+
+    # Start parsing from the top
+    result = parse_expression()
+    
+    # Check for leftover tokens (should not be any)
+    if pos[0] < len(tokens):
+        next_token = tokens[pos[0]]
+        raise ValueError(f"Unexpected token: {next_token}")
+
+    return result

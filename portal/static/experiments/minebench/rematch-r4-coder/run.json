@@ -1,0 +1,33 @@
+{
+ "n": 29,
+ "title": "Rematch round 4, Skippy Core's coder: lost to Haiku's round 4 train (Haiku 4-0)",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8) as a vanilla agent (Claude Code with purple's system prompt, an empty setup, effort high, a 131K window) plus purple's generic help: eyes (Core's vision model describes the pictures it opens) and the stop gate's work check (MineBench's runtime as the checker, the renderer as the viewer, an 80K output-token budget)",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 20492,
+ "minutes": 31,
+ "size": "121 x 39 x 121",
+ "verdict": "Lost to Haiku's head-to-head round 4 train (blind judge, high confidence), which ends the rematch at 4-0. 31 minutes, 81 turns, shown its picture three times and nudged once on the budget. The judge: a black steam locomotive with a big white smoke plume, a brown cab and tender and one long red-and-yellow coach with a grey roof, on grass with trees; bold colours and it reads as a train, but the top view shows it lying east-west across a north-south track, at right angles to its rails, and there is only one car. Haiku's: a locomotive, tender and green coaches on their track by a station and a river.",
+ "stats": {
+  "started": "2026-11-02T01:54:52.159Z",
+  "minutes": 31,
+  "tokens": {
+   "input": 112755,
+   "cache_read": 3383888,
+   "output": 89406,
+   "total": 3586049
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 112755,
+     "cache_read": 3383888,
+     "output": 89406
+    }
+   }
+  ]
+ },
+ "series": "rematch",
+ "request": "experiments/minebench/rematch-r4-coder/request.txt"
+}

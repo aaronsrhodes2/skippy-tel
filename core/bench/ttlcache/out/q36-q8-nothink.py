@@ -1,0 +1,109 @@
+import time
+from collections import OrderedDict
+
+
+class TTLCache:
+    """An in-memory cache with a size limit and time-to-live (TTL) expiry."""
+
+    def __init__(self, capacity: int, ttl: float, clock=time.monotonic):
+        if capacity < 1:
+            raise ValueError("capacity must be >= 1")
+        if ttl <= 0:
+            raise ValueError("ttl must be > 0")
+        self._capacity = capacity
+        self._ttl = ttl
+        self._clock = clock
+        # OrderedDict to maintain insertion order for LRU eviction
+        # Stores key -> (value, stored_at_timestamp)
+        self._cache = OrderedDict()
+
+    def _is_expired(self, key):
+        """Check if a key is expired. Assumes key exists in _cache."""
+        _, stored_at = self._cache[key]
+        return self._clock() - stored_at >= self._ttl
+
+    def _remove_expired(self):
+        """Remove all expired entries. Returns the number of entries removed."""
+        current_time = self._clock()
+        expired_keys = []
+        for key, (value, stored_at) in self._cache.items():
+            if current_time - stored_at >= self._ttl:
+                expired_keys.append(key)
+            else:
+                # Since OrderedDict maintains insertion order, and we want to be efficient,
+                # we can't break early because expired entries might be interspersed.
+                # However, for O(1) amortized, we only sweep when necessary.
+                pass
+        for key in expired_keys:
+            del self._cache[key]
+        return len(expired_keys)
+
+    def put(self, key, value):
+        """Store or replace the value for key, restarting its expiry."""
+        current_time = self._clock()
+        
+        # If key already exists, update it and move to end (most recent)
+        if key in self._cache:
+            self._cache[key] = (value, current_time)
+            self._cache.move_to_end(key)
+            return
+        
+        # New key: first drop every expired entry
+        self._remove_expired()
+        
+        # If still at capacity, evict LRU (first item in OrderedDict)
+        if len(self._cache) >= self._capacity:
+            self._cache.popitem(last=False)
+        
+        # Insert new entry
+        self._cache[key] = (value, current_time)
+
+    def get(self, key, default=None):
+        """Get the value for key if present and not expired, else default.
+        Successful get marks key as most recently used. Expired entry is removed."""
+        if key not in self._cache:
+            return default
+        
+        # Check if expired
+        if self._is_expired(key):
+            del self._cache[key]
+            return default
+        
+        # Move to end (most recently used)
+        self._cache.move_to_end(key)
+        value, _ = self._cache[key]
+        return value
+
+    def __len__(self):
+        """Number of entries that have not expired."""
+        current_time = self._clock()
+        # We need to remove expired entries to get accurate count
+        # This is the one operation that isn't O(1) amortized
+        expired_keys = []
+        for key, (value, stored_at) in self._cache.items():
+            if current_time - stored_at >= self._ttl:
+                expired_keys.append(key)
+        for key in expired_keys:
+            del self._cache[key]
+        return len(self._cache)
+
+    def __contains__(self, key):
+        """True for a live entry, without changing recency."""
+        if key not in self._cache:
+            return False
+        if self._is_expired(key):
+            del self._cache[key]
+            return False
+        return True
+
+    def pop(self, key, default=None):
+        """Remove and return a live entry's value, else default."""
+        if key not in self._cache:
+            return default
+        
+        if self._is_expired(key):
+            del self._cache[key]
+            return default
+        
+        value, _ = self._cache.pop(key)
+        return value

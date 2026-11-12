@@ -1,0 +1,167 @@
+{
+  "_doc": "SkippyCore's model slots. Each slot has a small STAND-IN (the simulator and CI run it) and the FULL model the Bosgame runs. Same slot, same aliases, same API: switching is CORE_FULL=<slots> in /etc/skippy-core/core.env, never a code change. Paths are relative to MODELS_ROOT and follow tools/models_archive.py's layout (huggingface/<Org>__<Repo>/<file>), so the D:\\models archive copies over as-is. sha256 null = not pinned yet: core/llm/models.py fetch prints the hash to pin. Sizes are bytes as Hugging Face lists them (2026-10-16; Qwen3.6 2026-10-23). Since 2026-10-23 chat and coder both run Qwen3.6-35B-A3B (the Strix Halo community's pick, won core/bench): chat as Unsloth's UD-Q4_K_XL with thinking OFF by default (a request turns it on with chat_template_kwargs enable_thinking true), coder as Unsloth's MTP Q8_0 with multi-token prediction (--spec-type draft-mtp: ~1.4x the tokens/s, but llama.cpp allows it only with --parallel 1) and thinking on. The models they replaced stay on disk as candidates. parallel (per variant, default 4) is llama-server's --parallel; max_parallel caps it: stock Vulkan loses about a third of its throughput past 8. The chat stand-in runs with thinking off (enable_thinking false: Qwen3-0.6B otherwise spends its answer thinking) and a 16K context: Skippy's persona prompt alone is about 3.5K tokens. core/README.md.",
+  "memory_budget_gb": 110,
+  "max_parallel": 8,
+  "slots": {
+    "chat": {
+      "role": "Skippy's default tier, summaries, Mentat's phrasings: always loaded. qwen3:8b and qwen2.5:7b are OLD names for this slot, kept as aliases for callers that still use them: it is Qwen3.6-35B-A3B, not an 8B. Use skippy-chat.",
+      "resident": true,
+      "aliases": ["qwen3:8b", "qwen2.5:7b", "skippy-chat"],
+      "standin": {
+        "repo": "Qwen/Qwen3-0.6B-GGUF",
+        "files": [{"path": "Qwen3-0.6B-Q8_0.gguf", "size": 639446688, "sha256": null}],
+        "ctx": 16384,
+        "args": ["--jinja", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
+      },
+      "full": {
+        "repo": "unsloth/Qwen3.6-35B-A3B-GGUF",
+        "files": [{"path": "Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf", "size": 22360456160, "sha256": "707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450"},
+                  {"path": "mmproj-F16.gguf", "size": 899283680, "sha256": null}],
+        "ctx": 65536,
+        "args": ["--jinja", "--temp", "0.7", "--top-p", "0.8", "--top-k", "20", "--min-p", "0", "--presence-penalty", "1.5",
+                 "--chat-template-kwargs", "{\"enable_thinking\": false}",
+                 "--mmproj", "/models/huggingface/unsloth__Qwen3.6-35B-A3B-GGUF/mmproj-F16.gguf"]
+      }
+    },
+    "router": {
+      "role": "Mentat's trained router (v3.1: Qwen3-4B + LoRA, plan format v3). It reads a physics or maths question and writes a JSON plan naming the Mentat tool and its arguments, constrained by a grammar. Always loaded (2 GB). It is NOT a chat model: it only answers in its own plan format. Trained 2026-10-13/14 on skippy-pc; the files are archived in D:/models/finetunes/mentat-router-v31-4b",
+      "resident": true,
+      "aliases": ["mentat-router", "mentat-router-v31-4b"],
+      "standin": {
+        "repo": "Qwen/Qwen3-0.6B-GGUF",
+        "files": [{"path": "Qwen3-0.6B-Q8_0.gguf", "size": 639446688, "sha256": null}],
+        "ctx": 16384,
+        "args": ["--jinja", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
+      },
+      "full": {
+        "repo": "aaronsrhodes2/mentat-router-v31-4b",
+        "files": [{"path": "mentat-router-v31-4b-Q4_K_M.gguf", "size": 2497280832, "sha256": "c929e636f2b1c937de10122b52872a7226f3c839aa29182ce5e21e3d4ece2507"}],
+        "ctx": 16384,
+        "parallel": 2,
+        "args": ["--jinja", "--temp", "0", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
+      }
+    },
+    "router-stock": {
+      "role": "The second opinion for Mentat's router (2026-10-30, the Captain): stock Qwen3-8B, no fine-tune, asked only when the trained router misses (mentat/router_stage.py, MENTAT_ROUTER_FALLBACK_MODEL). It reads the tool index in its prompt (about 17k tokens), so it knows tools added after the router was trained. Alone it scored 141/150 physics but 224/329 maths against the trained router's 317, so it never goes first. Always loaded (5 GB), one request at a time. The file is D:/models/huggingface/Qwen__Qwen3-8B-GGUF, copied to /srv/models",
+      "resident": true,
+      "aliases": ["qwen3-8b-stock"],
+      "standin": {
+        "repo": "Qwen/Qwen3-0.6B-GGUF",
+        "files": [{"path": "Qwen3-0.6B-Q8_0.gguf", "size": 639446688, "sha256": null}],
+        "ctx": 32768,
+        "args": ["--jinja", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
+      },
+      "full": {
+        "repo": "Qwen/Qwen3-8B-GGUF",
+        "files": [{"path": "Qwen3-8B-Q4_K_M.gguf", "size": 5027783488, "sha256": "d98cdcbd03e17ce47681435b5150e34c1417f50b5c0019dd560e4882c5745785"}],
+        "ctx": 32768,
+        "parallel": 1,
+        "args": ["--jinja", "--temp", "0", "--chat-template-kwargs", "{\"enable_thinking\": false}"]
+      }
+    },
+    "vision": {
+      "role": "eyes for the text-only slots: describes images and screenshots (the coder's reference pictures, its own page). Always loaded, so it never swaps out the coder",
+      "resident": true,
+      "aliases": ["qwen3-vl", "skippy-vision"],
+      "standin": {
+        "repo": "Qwen/Qwen3-VL-2B-Instruct-GGUF",
+        "files": [{"path": "Qwen3VL-2B-Instruct-Q4_K_M.gguf", "size": 1107409952, "sha256": null},
+                  {"path": "mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf", "size": 445053216, "sha256": null}],
+        "ctx": 8192,
+        "parallel": 2,
+        "args": ["--jinja", "--mmproj", "/models/huggingface/Qwen__Qwen3-VL-2B-Instruct-GGUF/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf"]
+      },
+      "full": {
+        "repo": "Qwen/Qwen3-VL-8B-Instruct-GGUF",
+        "files": [{"path": "Qwen3VL-8B-Instruct-Q8_0.gguf", "size": 8709519456, "sha256": null},
+                  {"path": "mmproj-Qwen3VL-8B-Instruct-F16.gguf", "size": 1159029824, "sha256": null}],
+        "ctx": 16384,
+        "parallel": 2,
+        "args": ["--jinja", "--mmproj", "/models/huggingface/Qwen__Qwen3-VL-8B-Instruct-GGUF/mmproj-Qwen3VL-8B-Instruct-F16.gguf"]
+      }
+    },
+    "general": {
+      "role": "the big general tier: tools, long answers. Loaded on demand; swaps with coder",
+      "resident": false,
+      "aliases": ["gpt-oss:120b", "skippy-general"],
+      "standin": {
+        "repo": "Qwen/Qwen2.5-0.5B-Instruct-GGUF",
+        "files": [{"path": "qwen2.5-0.5b-instruct-q4_k_m.gguf", "size": 491400032, "sha256": null}],
+        "ctx": 4096,
+        "args": ["--jinja"]
+      },
+      "full": {
+        "repo": "ggml-org/gpt-oss-120b-GGUF",
+        "files": [{"path": "gpt-oss-120b-MXFP4.gguf", "size": 63387346208, "sha256": null}],
+        "ctx": 32768,
+        "args": ["--jinja"]
+      }
+    },
+    "coder": {
+      "role": "the coding agent (Claude Code via ANTHROPIC_BASE_URL: the Workshop's Core brain). RESIDENT (2026-10-24, the Captain's call): an agent turn never waits for a 38 GB load, and its prompt cache (--cache-ram, in host RAM) survives between turns. One request at a time (MTP); Claude Code's background calls go to chat. With it resident, general's full model (gpt-oss-120b) doesn't fit beside it: the planner refuses it",
+      "resident": true,
+      "aliases": ["qwen3-coder-next", "skippy-coder"],
+      "standin": {
+        "repo": "Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF",
+        "files": [{"path": "qwen2.5-coder-0.5b-instruct-q4_k_m.gguf", "size": 491400064, "sha256": null}],
+        "ctx": 8192,
+        "args": ["--jinja"]
+      },
+      "full": {
+        "repo": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+        "files": [{"path": "Qwen3.6-35B-A3B-Q8_0.gguf", "size": 37801097504, "sha256": "c1283d8b80c3e38b2735ddbc9766d3b3126f44d6c484be419d4e101d09a76131"}],
+        "ctx": 131072,
+        "parallel": 1,
+        "args": ["--jinja", "--temp", "0.6", "--top-p", "0.95", "--top-k", "20", "--min-p", "0", "--spec-type", "draft-mtp", "--spec-draft-n-max", "2", "--cache-ram", "16384"]
+      }
+    }
+  },
+  "home": {
+    "_doc": "skippy-pc's own models: what runs on the PC's NVIDIA card, not in skippy-core's llama-swap slots above. Read this before looking for a model anywhere (Ollama, pip, the disk): if the job is listed here, use the service named and never install another. Only `slots` drive skippy-core (core/llm/models.py reads nothing else); this block is a directory for agents and people.",
+    "voice": {
+      "job": "text to speech: Skippy chat's spoken replies",
+      "service": "tts-studio (services/tts-studio), reached only through voice-gate (services/voice-gate) on tts-net; the portal's pass says which voice",
+      "voices": {
+        "skippy": "F5-TTS v1 Base at 16 flow steps, zero-shot from the Captain's ElevenLabs Skippy print: the Captain in Private mode (his default). Resident.",
+        "stock": "Kokoro-82M, bm_george: everyone else who may chat (Public). Resident."
+      },
+      "how_a_chat_speaks": "the page does it: with the chat's speaker key (or Hands-off) on, skippy-voice.js sends each finished reply to voice-gate /tts. No model and no tool call is involved; an agent never renders speech itself.",
+      "health": "voice-gate /health inside skippytel-voice-gate (port 8080): voices.skippy, voices.stock",
+      "weights": ["huggingface/SWivid__F5-TTS", "huggingface/hexgrad__Kokoro-82M"],
+      "docs": "services/tts-studio/README.md, docs/voice-bakeoff.md"
+    },
+    "hearing": {
+      "job": "speech to text: the chats' mic",
+      "service": "whisper (faster-whisper, WHISPER_MODEL, default medium, CUDA) behind voice-gate /stt"
+    },
+    "music": {
+      "job": "songs for the chat's make_music tool",
+      "service": "music-studio (ACE-Step 1.5), driven by the home reporter, one GPU job at a time",
+      "weights": ["huggingface/ACE-Step__Ace-Step1.5"]
+    }
+  },
+  "candidates": {
+    "_doc": "Models on trial for a slot, or retired from one (\"for\"), served beside the slots under their own names with models.py --bench <name> (or BENCH=<name>): on demand, in the coder's swap group. A winner moves into its slot's full; the loser stays here, with its files on disk. Results: core/bench/README.md.",
+    "qwen3.6-q8": {
+      "for": ["chat", "coder"],
+      "repo": "unsloth/Qwen3.6-35B-A3B-GGUF",
+      "files": [{"path": "Qwen3.6-35B-A3B-Q8_0.gguf", "size": 36903140320, "sha256": "d1a395809f65a43a13ad119eb4e7acdef1ac6d68120f39902c8ab96e72794a59"}],
+      "ctx": 131072,
+      "args": ["--jinja", "--temp", "0.6", "--top-p", "0.95", "--top-k", "20", "--min-p", "0"]
+    },
+    "qwen3-30b-a3b": {
+      "for": ["chat"],
+      "repo": "Qwen/Qwen3-30B-A3B-GGUF",
+      "files": [{"path": "Qwen3-30B-A3B-Q4_K_M.gguf", "size": 18556685824, "sha256": null}],
+      "ctx": 32768,
+      "args": ["--jinja"]
+    },
+    "qwen3-coder-next-q4": {
+      "for": ["coder"],
+      "repo": "unsloth/Qwen3-Coder-Next-GGUF",
+      "files": [{"path": "Qwen3-Coder-Next-UD-Q4_K_XL.gguf", "size": 49608478720, "sha256": null}],
+      "ctx": 65536,
+      "args": ["--jinja"]
+    }
+  }
+}

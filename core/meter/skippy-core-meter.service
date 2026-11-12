@@ -1,0 +1,12 @@
+[Unit]
+Description=SkippyCore token meter: counts local-model tokens and power for tools/token_savings.py (core/meter/meter.py)
+After=docker.service network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/skippy-core/meter/meter.py
+Restart=always
+RestartSec=10
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

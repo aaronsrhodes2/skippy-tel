@@ -1,0 +1,8 @@
+RAISED '2**3**2': ValueError("Unexpected token: Token(STAR, '*')")
+RAISED '-2**2': ValueError("Unexpected token: Token(STAR, '*')")
+RAISED '2**-1': ValueError("Unexpected token: Token(STAR, '*')")
+RAISED '2 ** 3 * 2': ValueError("Unexpected token: Token(STAR, '*')")
+RAISED '2*3**2': ValueError("Unexpected token: Token(STAR, '*')")
+RAISED '-3**-2': ValueError("Unexpected token: Token(STAR, '*')")
+RAISED '(2+3)**2%7': ValueError("Unexpected token: Token(STAR, '*')")
+33/40

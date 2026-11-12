@@ -1,0 +1,194 @@
+/* Bilby's Audio Service on the bridge (portal/templates/music.html, static/bilby-app.js). The bridge's own pieces (static/bridge.css:
+   keys, units, lamps, sheets, the keybar) do most of the drawing; this file is only what a player adds: a list shown a screen at a time,
+   a row, a cover, the strip along the bottom. Black base, no gradients, glyphs for everything that has one, colours from the portal's
+   tokens (templates/base.html), the music app's accent is Bilby's pink. */
+
+
+/* ── one tap the browser wants, and a word when something is wrong ─────────────────────────────────────────────── */
+.tapbar { flex: none; margin: 4px 0 6px; }
+.tapbar .tap-go { width: 100%; height: 50px; display: flex; align-items: center; justify-content: center; gap: 12px; color: var(--accent); background: var(--panel);
+                  border: 2px solid var(--accent); font: 700 1rem var(--mono); animation: breathe 1.6s ease-in-out infinite;
+                  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px); }
+.tapbar .tap-go .g { width: 24px; height: 24px; }
+
+
+/* ── the stage: home's deck, or a list, or a sheet over either ─────────────────────────────────────────────────── */
+
+
+/* ── rows ──────────────────────────────────────────────────────────────────────────────────────────────────────── */
+.vrow .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 1px; text-align: left; }
+.vrow .l1 { display: flex; align-items: center; gap: 6px; color: var(--white); font-size: .96rem; line-height: 1.25; }
+.vrow .l1 > span:not(.eq) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vrow .l2 { color: var(--muted); font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vrow .auto { color: var(--violet); }
+.tr-main, .nv-main, .q-main { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 10px; text-align: left; }
+.tr-main:focus-visible, .nv-main:focus-visible, .q-main:focus-visible, .ib:focus-visible { outline: 2px solid var(--white); outline-offset: -2px; }
+.vrow .num { flex: none; width: 26px; text-align: center; color: var(--muted); font: 600 .8rem var(--mono); }
+.vrow .dur { flex: none; color: var(--muted); font: 600 .78rem var(--mono); }
+.vrow .chev { flex: none; display: flex; color: var(--muted); } .vrow .chev .g { width: 18px; height: 18px; }
+.bp .ib { flex: none; width: 40px; height: 100%; max-height: 52px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.bp .ib .g { width: 20px; height: 20px; }
+.bp .ib:hover, .bp .ib:active { color: var(--accent); }
+.tr.cur { border-left: 3px solid var(--accent); padding-left: 4px; }
+.tr.cur .l1 { color: var(--accent); }
+.vdisc { gap: 8px; padding: 0 4px; color: var(--muted); font: 600 .85rem var(--mono); }
+.vdisc .g { width: 18px; height: 18px; }
+
+/* the equaliser: three bars that dance while the music plays */
+.eq { display: none; align-items: flex-end; justify-content: center; gap: 2px; width: 1.2em; height: 1em; }
+.cur .eq { display: inline-flex; }
+.eq span { display: block; width: 3px; height: 100%; background: var(--accent); transform-origin: bottom; animation: eq 900ms ease-in-out infinite; }
+.eq span:nth-child(2) { animation-delay: -300ms; animation-duration: 700ms; }
+.eq span:nth-child(3) { animation-delay: -600ms; animation-duration: 1100ms; }
+.bp[data-playing="0"] .eq span { animation-play-state: paused; transform: scaleY(.35); }
+@keyframes eq { 0%, 100% { transform: scaleY(.25); } 50% { transform: scaleY(1); } }
+
+/* cover art: a cut-cornered square with a note behind it; the picture fades in once it has loaded */
+.cover { position: relative; flex: none; overflow: hidden; background: var(--panel); border: 1px solid var(--dim-green-hi); display: grid; place-items: center; color: var(--dim-green-hi);
+         clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+.cover.round { clip-path: circle(50%); }
+.cover > svg, .cover > .g { width: 45%; height: 45%; }
+.cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .25s ease; }
+.cover img.ok { opacity: 1; }
+.tr .cover, .qr .cover { width: 40px; height: 40px; } .nv .cover { width: 44px; height: 44px; }
+
+/* the heading of an album, an artist, a genre */
+.hero { gap: 12px; padding: 4px; align-items: stretch; border-bottom: 2px solid var(--accent); }
+.hero .cover { width: 104px; height: 104px; align-self: center; }
+.hero .txt { gap: 3px; }
+.hero .kind { display: flex; color: var(--accent); } .hero .kind .g { width: 18px; height: 18px; }
+.hero h2 { margin: 0; color: var(--white); font-size: 1.1rem; line-height: 1.2; text-transform: none; letter-spacing: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hero .who button { color: var(--accent); font-size: .85rem; text-align: left; }
+.hero .meta { color: var(--muted); font: 600 .72rem var(--mono); }
+.hero .acts { display: flex; gap: 6px; margin-top: 3px; }
+.hero .acts .key { width: 40px; height: 34px; }
+
+/* the house stereo as a source: the library and Spotify in one list, a transition glyph where one is mixed into the last */
+.sctl { align-items: center; }
+.sctl .txt { flex: 1; min-width: 0; }
+.sctl .acts { flex: none; display: grid; grid-template-columns: repeat(2, 40px); margin-top: 0; }
+.sctl .acts .key[hidden] { display: none; }
+.sctl h2 { -webkit-line-clamp: 1; }
+.sctl .kind { align-items: center; gap: 6px; color: var(--accent); } .sctl .kind b { font: 700 .72rem var(--mono); color: var(--muted); }
+.sctl.paused h2 { color: var(--muted); }
+.sctl .spot { margin-left: 8px; align-self: center; }
+.stv .src { display: flex; align-items: center; justify-content: center; color: var(--dim-green-hi); }
+.stv .src .g { width: 18px; height: 18px; }
+.stv.spotify .src { color: var(--green); }
+.stv .trans { display: flex; color: var(--cyan); } .stv .trans .g { width: 18px; height: 18px; }
+.stv.book .src { color: var(--violet); }              /* an audiobook in the stream: its own glyph, never mixed with anything */
+.sctl .chap { margin-right: 8px; color: var(--violet); font-weight: 700; }
+
+/* the house stereo's speakers: a hexagon toggle each (bridge.css draws lit and dark; a speaker that is on but not there keeps its glyph breathing, no lamp),
+   its name under it, a floor's speakers together with a line between floors. One list row per line of them (bilby-app.js, BilbyCore.outsLines): a toggle is 70 px
+   and a 6 px gap (SO_W 76 there), a floor's gap 17 px (GAP_W: 2 + 1 + 2 and the gaps either side) */
+.vrow.souts { align-items: flex-start; gap: 0 6px; padding: 4px 4px 0; }
+.souts .so { flex: none; width: 70px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.souts .so .key { width: 48px; height: 40px; }
+.souts .so .nm { max-width: 100%; overflow: hidden; text-align: center; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+                 color: var(--muted); font: 600 .68rem var(--mono); line-height: 1.15; }          /* a name like "Living Room box" wraps onto a second line rather than being cut */
+.souts .so[data-on="1"] .nm { color: var(--white); }
+.souts .so[data-away="1"] .nm { color: var(--amber); }
+.souts .gap { flex: none; align-self: stretch; margin: 4px 2px 8px; border-left: 1px solid var(--dim-green-hi); }
+/* the stream is paused because no speaker is listening (it carries on by itself when one is switched on) */
+.vrow.sheld { border-left: 3px solid var(--amber); padding-left: 8px; }
+.sheld .gl { flex: none; display: flex; color: var(--amber); }
+.sheld .l1 { color: var(--amber); }
+.vrow.sheld .l1 > span { white-space: normal; line-height: 1.25; }       /* a narrow phone wraps the sentence onto a second line rather than cutting it */
+.sheld .l2[hidden] { display: none; }
+
+/* ── the strip along the bottom ────────────────────────────────────────────────────────────────────────────────── */
+.bp-bar { flex: none; position: relative; display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 7px 0 4px; border-top: 1px solid var(--dim-green-hi); }
+.b-line { position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--dim-green); }
+.b-line i { display: block; height: 100%; width: 0; background: var(--accent); }
+.b-now { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; text-align: left; }
+.b-now .cover { width: 44px; height: 44px; }
+.b-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.b-title { color: var(--white); font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.spot { color: var(--green); border: 1px solid currentColor; border-radius: 3px; font: 700 .6rem var(--mono); padding: 0 4px; letter-spacing: .04em; width: max-content; }
+.spot[hidden] { display: none; }
+.b-sub { color: var(--muted); font-size: .74rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-bar > .lamp { flex: none; width: 11px; height: 11px; }
+.b-tp { flex: none; display: flex; gap: 4px; }
+.b-tp .key { width: 42px; height: 44px; }
+.b-tp .key.big { width: 54px; height: 48px; }
+.b-tp .key.big .g { width: 26px; height: 26px; }
+.bp .key[data-busy="1"] .g { animation: breathe .9s ease-in-out infinite; }
+.keybar .key .cnt { position: absolute; top: 2px; right: 4px; z-index: 2; font: 700 10px var(--mono); color: var(--amber); pointer-events: none; }
+.keybar .key[aria-pressed="true"] .cnt { color: var(--black); }
+.keybar .key { flex: 0 1 48px; }
+
+/* ── sheets: Now Playing, the Queue, a menu, the alphabet ──────────────────────────────────────────────────────── */
+.bp-side { gap: 6px; }
+.s-head { flex: none; display: flex; align-items: center; gap: 6px; }
+.s-tabs { display: flex; gap: 6px; }
+.s-head .key { width: 44px; height: 40px; }
+.panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.np-cover { flex: 1 1 0; min-height: 60px; align-self: center; aspect-ratio: 1; max-width: 100%; }
+.np-info { flex: none; text-align: center; }
+.np-info h2 { margin: 0; color: var(--white); font-size: 1.15rem; line-height: 1.2; text-transform: none; letter-spacing: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.np-info .by { margin-top: 2px; font-size: .9rem; color: var(--muted); }
+.np-info .by button { color: var(--accent); } .np-info .by button:hover { color: var(--white); }
+.np-lyric { flex: none; margin: 0; color: var(--muted); font-size: .78rem; font-style: italic; text-align: center; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.np-tags { flex: none; margin: 0; text-align: center; color: var(--muted); font: 600 .72rem var(--mono); }
+.np-transport { flex: none; display: flex; flex-direction: column; gap: 4px; }
+.sk { display: flex; align-items: center; gap: 8px; }
+.sk .t { flex: none; min-width: 3.2em; font: 600 .75rem var(--mono); color: var(--muted); }
+.sk .t:last-child { text-align: right; }
+.sk .rg { flex: 1; min-width: 0; height: 30px; margin: 0; }
+.np-extra { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.np-extra .key { width: 44px; height: 40px; }
+.np-extra .volbox { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; }
+.np-extra .volbox .rg { flex: 1; min-width: 0; height: 30px; margin: 0; }
+.bp[data-novol="1"] .volbox .rg { display: none; }
+.np-extra .key sup { position: absolute; top: 2px; right: 4px; z-index: 2; font: 700 10px var(--mono); color: var(--amber); }
+.np-up { flex: none; }
+.np-up ol { margin: 0; padding: 0; list-style: none; }
+.np-up li { display: flex; align-items: baseline; gap: 8px; padding: 3px 4px; border-bottom: 1px solid var(--line); font-size: .8rem; }
+.np-up li .l1 { color: var(--ink); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-up li .l2 { color: var(--muted); max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-up li .auto { color: var(--violet); font: 700 .66rem var(--mono); }
+.np-up li:nth-child(n+3) { display: none; }
+@media (max-height: 700px) { .np-up, .np-lyric { display: none; } }
+.np-empty { flex: 1; display: flex; align-items: center; justify-content: center; margin: 0; color: var(--dim-green-hi); }
+.np-empty .g { width: 72px; height: 72px; stroke-width: 1.2; }
+.q-top { flex: none; display: flex; align-items: center; gap: 8px; color: var(--muted); font: 600 .78rem var(--mono); }
+.q-top .key { width: 44px; height: 36px; }
+.qr { padding-right: 0; }
+.qr.played { opacity: .5; }
+.qr.cur { border-left: 3px solid var(--accent); padding-left: 4px; }
+.qr .q-btn { width: 34px; }
+.qr .q-btn .g { width: 18px; height: 18px; }
+.qh { gap: 8px; padding: 0 4px; color: var(--accent); font: 700 .85rem var(--mono); border: 0; }
+.qh .g { width: 18px; height: 18px; }
+.qh .grow { flex: 1; }
+.qh .pill-btn { color: var(--muted); } .qh .pill-btn .g { width: 20px; height: 20px; }
+
+.menu h4 { flex: none; margin: 0; color: var(--accent); font: 700 .95rem var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu .mgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
+.menu .mkey { position: relative; height: 72px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--ink); background: var(--panel);
+              border: 1px solid var(--dim-green-hi);
+              clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+.menu .mkey .g { width: 28px; height: 28px; }
+.menu .mkey .tag { font: 700 .85rem var(--mono); }
+.menu .mkey:active { background: var(--accent); color: var(--black); }
+.menu .mkey[aria-checked="true"] { border-color: var(--accent); color: var(--accent); }
+.menu .mkey .lamp { position: absolute; top: 6px; left: 8px; width: 8px; height: 8px; }
+.menu .none { color: var(--muted); font-size: .85rem; line-height: 1.4; }
+.menu .dev { padding: 8px; border: 1px solid var(--dim-green-hi); background: var(--panel); }
+.menu .dev .who b { color: var(--white); }
+.menu .dev .what { color: var(--muted); font-size: .8rem; margin: 2px 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu .dev .what.need { color: var(--amber); white-space: normal; }
+.menu .dev .what .g { width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; }
+.menu .dev .acts { display: flex; gap: 8px; }
+.menu .dev .acts .key { width: 52px; height: 40px; }
+.menu .dev .acts .key.wide { width: auto; padding: 0 12px; font-size: .85rem; }
+
+
+
+
+.menu .mgrid:empty { display: none; }
+.l2 .g.mini { width: 12px; height: 12px; margin: 0 8px 0 3px; vertical-align: -2px; }
+.menu .s-head { margin-bottom: 4px; }
+
+@media (max-height: 640px) { dialog.keys .why { display: none; } }

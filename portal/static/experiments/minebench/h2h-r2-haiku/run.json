@@ -1,0 +1,33 @@
+{
+ "n": 20,
+ "title": "Round 2, Haiku 5.5: won",
+ "model": "Claude Haiku 5.5 (Anthropic's API) as a vanilla agent: Claude Code with purple's system prompt and an empty setup (no skills, no memory, no checker), effort high, a 131K window; only MineBench's tool-mode prompt in the folder",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 136004,
+ "minutes": 6,
+ "size": "225 x 55 x 113",
+ "verdict": "Won round 2 (blind judge, high confidence). A black locomotive with a yellow stripe, white boiler bands, a smokestack, a gold dome and a red cab, trailing smoke, then a black coal tender and three coaches (blue, olive, blue) with window rows, all on rails over wooden sleepers, in terraced grass with trees and a small station. The judge: a train at a glance, with proportions right; one flaw: in places the rails stand on posts above the ground. 6 minutes, 26 turns, $0.11.",
+ "stats": {
+  "started": "2026-11-01T07:18:48.110Z",
+  "minutes": 6,
+  "tokens": {
+   "input": 107923,
+   "cache_read": 1810343,
+   "output": 70452,
+   "total": 1988718
+  },
+  "models": [
+   {
+    "name": "Claude Haiku 5.5",
+    "tokens": {
+     "input": 107923,
+     "cache_read": 1810343,
+     "output": 70452
+    }
+   }
+  ]
+ },
+ "series": "h2h",
+ "request": "experiments/minebench/h2h-r2-haiku/request.txt"
+}

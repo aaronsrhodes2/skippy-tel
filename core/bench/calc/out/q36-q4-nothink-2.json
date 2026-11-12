@@ -1,0 +1,16 @@
+{
+  "model": "qwen3.6-q4",
+  "base": "https://skippy-core.tailab2cc7.ts.net",
+  "images": "send",
+  "describe_seconds": 0.0,
+  "seconds": 26.9,
+  "stop_reason": "end_turn",
+  "input_tokens": 191,
+  "output_tokens": 1571,
+  "tokens_per_second": 58.4,
+  "thinking_chars": 0,
+  "answer_found": true,
+  "answer_bytes": 6122,
+  "grade": "38/40",
+  "timings": null
+}

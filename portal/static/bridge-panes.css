@@ -1,0 +1,160 @@
+/* Admin on the bridge (templates/admin.html). The bridge's own sheet (static/bridge.css) draws the shell, the keys, the deck and its units,
+   the pager; this file is only what the panes add. Admin is the one place where the sentences stay: the settings, the friends and the
+   recovery buttons are explained here. Portal tokens only; black base, no gradients. */
+.adm { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+.adm .stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.adm [hidden] { display: none !important; }
+.adm .deck { padding: 6px 0; }
+.apane { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.ahead { flex: none; display: flex; align-items: center; gap: 10px; }
+.ahead h2, .ahead .title { flex: 1; min-width: 0; margin: 0; font-size: 1.05rem; text-transform: none; letter-spacing: 0; color: var(--accent); font-family: var(--mono); font-weight: 700; }
+.ahead .mark { width: 26px; height: 26px; color: var(--accent); flex: none; }
+.apane .pg { background: var(--panel); border: 1px solid var(--dim-green-hi); }
+.apane #recovery > h2 { display: none; }
+
+/* the pane's content flows into pages as wide as the pane: margins instead of padding (a page is exactly its width) */
+.pg-flow > *, .pg-flow form > .card { margin-left: 10px; margin-right: 10px; }
+.pg-flow > .card, .pg-flow #recovery > .card, .pg-flow form > .card { break-inside: avoid-column; }
+.pg-flow > p, .pg-flow > h3, .pg-flow > form:not(:has(.card)) { margin-top: 10px; margin-bottom: 4px; }
+.pg-flow #recovery { margin: 0; }
+.pg-flow #recovery > .card { margin: 10px 10px 0; }
+.apane .card { background: var(--black); border: 1px solid var(--dim-green-hi); border-radius: 0; padding: 10px; margin-bottom: 10px;
+               clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.apane .card h3 { margin: 0 0 6px; color: var(--accent); font: 700 .95rem var(--mono); }
+.apane input[type=text], .apane input[type=password], .apane select, .apane textarea { width: 100%; font-size: 16px; }
+.apane label.field { margin-top: 8px; }
+.apane button, .apane a.btn, .apane a.button { display: inline-block; padding: 9px 14px; margin: 4px 4px 4px 0; background: transparent; color: var(--accent); border: 1px solid var(--accent);
+  border-radius: 0; font: 600 .85rem var(--mono); text-decoration: none; cursor: pointer;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+.apane button:hover, .apane a.btn:hover, .apane a.button:hover { background: var(--accent); color: var(--black); }
+.apane button.danger { color: var(--red); border-color: var(--red); }
+.apane button.danger:hover { background: var(--red); color: var(--black); }
+.apane button:disabled { opacity: .35; cursor: default; background: transparent; color: var(--muted); }
+.apane .key { padding: 0; margin: 0; width: 40px; height: 40px; border: 0; clip-path: none; font: inherit; }
+.apane .key:hover { background: transparent; color: var(--accent); }
+/* the Graveyard's keys: a module's glyph and a power mark, lit when it is on the launcher */
+.modkey { display: inline-flex; gap: 8px; align-items: center; padding: 10px 14px; }
+.modkey.retired { opacity: .45; color: var(--muted); border-color: var(--muted); }
+.apane code.code { overflow-wrap: anywhere; }
+.apane .row { margin-top: 10px; }
+.apane .help { font-size: .78rem; }
+.apane a { overflow-wrap: anywhere; }
+pre.log { margin: 0 10px 10px; white-space: pre-wrap; word-break: break-word; font: 11px var(--mono); color: var(--ink); background: var(--black); border: 1px solid var(--dim-green-hi); padding: 8px; }
+.pg-flow > form:has(> .card) { margin-left: 0; margin-right: 0; }
+.apane input[type=text], .apane input[type=password], .apane select, .apane textarea { border-radius: 0; background: var(--panel); border: 1px solid var(--dim-green-hi); color: var(--ink); }
+.apane input:focus, .apane select:focus { outline: none; border-color: var(--accent); }
+.apane input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; vertical-align: -3px; }
+
+/* ── the Dashboard's widgets: a card each, as pages in their pane ──────────────────────────────────────────────────── */
+.apane .w { background: var(--black); border: 1px solid var(--dim-green-hi); padding: 12px; margin: 10px 10px 0; break-inside: avoid-column;
+            clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.apane .w h3 { margin: 0 0 8px; color: var(--accent); font: 700 .9rem var(--mono); text-transform: uppercase; letter-spacing: .04em; }
+.apane .w table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+.apane .w td { padding: 3px 0; border-bottom: 1px solid var(--line); }
+.apane .w td:last-child { text-align: right; }
+.apane .big { font-size: 1.5rem; font-weight: 700; color: var(--white); }
+.apane .muted { color: var(--muted); font-size: .8rem; }
+.apane .bar { height: 8px; background: var(--dim-green); overflow: hidden; margin: 2px 0 8px; }
+.apane .bar > div { height: 100%; background: var(--green); }
+.apane .bar > div.hot { background: var(--amber); }
+.apane .msg { font-size: .83rem; margin: 5px 0; }
+.apane .msg b { color: var(--green); }
+.apane details > summary { cursor: pointer; padding: 4px 0; }
+.apane .tools-empty { margin: 10px; padding: 12px; border: 1px dashed var(--dim-green-hi); color: var(--muted); font-size: .85rem; }
+/* a pane that lays itself out (the private Skippy chat): no card, no pager of its own, it fills the pane */
+.apane[data-flat] .w.me-chat { border: 0; padding: 0; margin: 0; background: none; clip-path: none; flex: 1; min-height: 0; break-inside: auto; }
+.apane[data-flat] .w.me-chat h3 { text-transform: none; }
+.me-chat .pill { display: inline-block; padding: 2px 10px; border: 1px solid var(--accent); color: var(--accent); font: 600 .72rem var(--mono); }
+.me-chat select { width: 100%; }
+
+/* ── /me: deep gonzo purple on black, white text; and the Captain's front page ONLY in agent (coding backend) mode: the public chat stays green ───────────────────────────────────────────────────────────────────
+   The page is data-app="me". The portal's tokens are redefined for it, so every key, lamp, border, card and the private Skippy's
+   chat take the purple with no per-widget rules. Black stays black (it is the base) and the words are white. The canvas.alive behind
+   the pane is Skippy's living background in the same purples (templates/me.html). */
+[data-app="me"], html.agent body.captain {
+  --accent: #b05cff;
+  --green: #b05cff; --cyan: #cf8dff; --violet: #9a55ff; --pink: #e070ff; --orange: #c46bff;
+  --dim-green: #1d0640; --dim-green-hi: #6a28c9; --line: #3a1a73; --panel: #0a0014;
+  --ink: #ffffff; --muted: #d6c2ff;
+}
+[data-app="me"] body, body[data-app="me"], html.agent body.captain { background: #000; color: #fff; }
+:is(body[data-app="me"], html.agent body.captain) :is(select, input[type=text], input[type=search], input[type=password], textarea, .lang-opt, .verb, .mem-row) { background: #07000f; border-color: var(--dim-green-hi); color: #fff; }
+:is(body[data-app="me"], html.agent body.captain) .me-chat .turn.user { background: #0b0b0b; border: 1px solid #8a63d2; color: #fff; }
+:is(body[data-app="me"], html.agent body.captain) .me-chat .turn.assistant { background: #1d0640; border: 1px solid var(--dim-green-hi); color: #fff; }
+:is(body[data-app="me"], html.agent body.captain) .me-chat .turn.assistant p { color: #fff; }
+:is(body[data-app="me"], html.agent body.captain, html.auto body.captain) .me-chat .turn.heard { background: #000; border: 1px dashed var(--cyan); color: #fff; }
+:is(body[data-app="me"], html.agent body.captain, html.auto body.captain) .me-chat .turn.heard .who { font-size: .72rem; color: var(--cyan); margin-bottom: 2px; }
+:is(body[data-app="me"], html.agent body.captain) .me-chat textarea::placeholder { color: #b9a2f2; }
+:is(body[data-app="me"], html.agent body.captain) a { color: #d6b3ff; }
+body[data-app="me"] .adm { z-index: 1; }
+/* Auto mode (the Captain's fallback: the agent thinking with Claude): Claude orange on black, the same layout as the purple. */
+html.auto body.captain {
+  --accent: #d97757;
+  --green: #d97757; --cyan: #f0a383; --violet: #c2603f; --pink: #f4b59b; --orange: #d97757;
+  --dim-green: #2a1208; --dim-green-hi: #a4512f; --line: #4a2414; --panel: #120804;
+  --ink: #ffffff; --muted: #f2cdbd;
+  background: #000; color: #fff;
+}
+html.auto body.captain :is(select, input[type=text], input[type=search], input[type=password], textarea, .lang-opt, .verb, .mem-row) { background: #0f0603; border-color: var(--dim-green-hi); color: #fff; }
+html.auto body.captain .me-chat .turn.user { background: #0b0b0b; border: 1px solid #c2603f; color: #fff; }
+html.auto body.captain .me-chat .turn.assistant { background: #2a1208; border: 1px solid var(--dim-green-hi); color: #fff; }
+html.auto body.captain .me-chat .turn.assistant p { color: #fff; }
+html.auto body.captain .me-chat textarea::placeholder { color: #f0a383; }
+html.auto body.captain a { color: #f4b59b; }
+
+/* the front page: which Skippy (the Captain's mode keys), and the chat filling the screen */
+.modebar { flex: none; display: flex; gap: 6px; justify-content: center; margin: 2px 0 4px; }
+.modebar .key { width: 40px; height: 34px; }
+.chat-page > .mode { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.chat-page > .mode[hidden] { display: none; }
+.chat-page > .mode > .w.me-chat { flex: 1; min-height: 0; }
+
+/* Skippy in the corner (templates/_skippy3d.html, static/skippy-3d.js): the pods' face on a transparent canvas, the still picture until
+   it is live. Pointer events pass through except on his two small keys. */
+.skippy3d { position: fixed; right: 10px; bottom: 150px; width: 150px; height: 190px; z-index: 5; pointer-events: none; }
+.skippy3d .s3-stage { position: absolute; inset: 0; }
+.skippy3d .s3-canvas, .skippy3d .s3-still { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.skippy3d .s3-canvas { display: none; }
+.skippy3d.is-live .s3-canvas { display: block; }
+.skippy3d.is-live .s3-still { display: none; }
+.skippy3d:not(.is-live) .s3-still { animation: s3-bob 3.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .skippy3d .s3-still { animation: none !important; } }
+@keyframes s3-bob { 50% { transform: translateY(-4px) rotate(1.5deg); } }
+.skippy3d .s3-x, .skippy3d .s3-face { pointer-events: auto; position: absolute; border: 0; background: transparent; padding: 0; cursor: pointer; }
+.skippy3d .s3-x { top: -4px; right: -2px; width: 24px; height: 24px; border-radius: 50%; color: #fff; background: #000a; font-size: 1.1rem; line-height: 1; opacity: 0; transition: opacity .15s; }
+.skippy3d:hover .s3-x, .skippy3d .s3-x:focus-visible { opacity: 1; }
+.skippy3d .s3-face { display: none; right: 0; bottom: 0; width: 40px; height: 40px; border-radius: 50%; background: #0a0c18; border: 1px solid var(--dim-green, #006644); }
+.skippy3d .s3-face img { width: 100%; height: 100%; border-radius: 50%; }
+.skippy3d.is-hidden { width: 40px; height: 40px; }
+.skippy3d.is-hidden .s3-stage, .skippy3d.is-hidden .s3-x { display: none; }
+.skippy3d.is-hidden .s3-face { display: block; }
+@media (max-width: 640px) { .skippy3d { width: 96px; height: 122px; bottom: 160px; right: 4px; } }
+@media (max-height: 520px) { .skippy3d:not(.is-hidden) { display: none; } }
+
+.turn > img.g.face, .note > img.g.face { border-radius: 50%; object-fit: cover; background: #0a0c18; }
+
+/* Admin > Friends: compact cards, side by side when the screen is wide; each grant is a chip you tick */
+.apane .card.fr { display: inline-block; vertical-align: top; box-sizing: border-box; width: calc(100% - 20px); padding: 8px; margin-bottom: 8px; overflow-wrap: anywhere; }
+@media (min-width: 900px)  { .apane .card.fr { width: calc(50% - 26px); } }
+@media (min-width: 1500px) { .apane .card.fr { width: calc(33.33% - 25px); } }
+.apane .card.fr > p:first-of-type { margin: 0 0 6px; font-size: .85rem; }
+.apane .card.fr .help { font-size: .75rem; }
+.apane label.chip { display: inline-flex; align-items: center; gap: 4px; margin: 0 4px 4px 0; padding: 2px 8px 2px 4px; border: 1px solid var(--dim-green-hi);
+                    font-size: .78rem; color: var(--muted); cursor: pointer; user-select: none; }
+.apane label.chip input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.apane label.chip:has(input:checked) { border-color: var(--accent); color: var(--ink); }
+.apane .fr-acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 0; }
+.apane .card.fr button, .apane .card.fr a.btn { padding: 5px 10px; margin: 0; font-size: .78rem; }
+.apane .card.fr input[type=text] { font-size: 16px; padding: 6px 8px; }
+
+/* Recovery: one button, one checklist (templates/_recovery.html, recovery_web.py, doctor.py) */
+.recovery-one .repair-all { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 14px; font-size: 1.05rem;
+                            color: #000; background: var(--accent); border: 1px solid var(--accent); cursor: pointer; }
+.recovery-one .repair-all .g { width: 20px; height: 20px; }
+.recovery-one .checklist { list-style: none; margin: 10px 0; padding: 0; }
+.recovery-one .checklist li { display: grid; grid-template-columns: 12px auto 1fr; align-items: center; gap: 8px; padding: 5px 0;
+                              border-bottom: 1px solid var(--dim-green); font-size: .88rem; }
+.recovery-one .checklist .lamp { width: 9px; height: 9px; }
+.recovery-one .checklist .why { color: var(--muted); font-size: .8rem; text-align: right; overflow-wrap: anywhere; }
+.recovery-one .checklist li[data-ok="no"] .why { color: var(--amber); }
+.recovery-one .doctor-log { margin: 4px 0; padding-left: 18px; font-size: .8rem; color: var(--muted); }

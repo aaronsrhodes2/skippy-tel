@@ -1,0 +1,11 @@
+[Unit]
+Description=SkippyCore pull deployer: fetch main, deploy when its core check is green, roll back on a red smoke test
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+Environment=CORE_ENV=/etc/skippy-core/core.env
+ExecStart=/usr/bin/python3 /opt/skippy-core/repo/core/deployer/deployer.py run
+# A deploy builds images and can load a 60 GB model: give it time, but never forever.
+TimeoutStartSec=2h

@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}Mentat playground — Experiments{% endblock %}
+{% block app %}experiments{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}atom{% endblock %}
+{% block hud_back %}{{ url_for('experiments.index') }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='experiments.css') }}">{% endblock %}
+{% block content %}
+{# The Mentat playground on the bridge: the tools are rows shown a screen at a time (swipe, PageUp/PageDown, the bar under them), a search,
+   a key that steps through the domains, and a panel for one tool (what it is, its form, its answer with the formula and the source).
+   Every answer still comes back with where its numbers come from. #}
+<section class="mp bp" id="mp">
+  <div class="bp-top" id="top">
+    <div class="search">
+      <svg class="g" aria-hidden="true"><use href="#g-search"/></svg>
+      <input type="search" id="search" placeholder="Search" aria-label="Search about 220 tools (for example orbit, lens, pH)" autocomplete="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <button type="button" class="key" id="domain-key" aria-label="Domain: All" title="Domain: All" data-tel="mentat:domain-key"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
+    <button type="button" class="key" id="about-key" aria-label="About" title="About" data-tel="mentat:about-key"><svg class="g" aria-hidden="true"><use href="#g-info"/></svg></button>
+  </div>
+  <div class="bp-stage" id="stage">
+    <div class="bp-list" id="listwrap">
+      <div class="bp-page" id="scroll" tabindex="-1"><div class="vl-host" id="host" role="list"></div></div>
+      <div class="scrub" id="scrub" role="slider" aria-label="Page" aria-valuemin="1" aria-valuemax="1" aria-valuenow="1" tabindex="0">
+        <div class="pips" id="pips"><i></i></div><span class="pgno" id="pgno"></span>
+      </div>
+    </div>
+
+    <div class="sheet" id="about" role="dialog" aria-modal="true" aria-labelledby="about-h" hidden>
+      <div class="s-head"><h2 id="about-h" class="grow">Mentat</h2>
+        <button type="button" class="key" id="about-close" aria-label="Close" title="Close" data-tel="mentat:about-close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
+      <div class="pg" id="about-pg"><div class="pg-flow">
+        <p>Every tool in Aaron's physics engine, live. Each answer comes back with the formula used and where its
+          numbers come from, which is the point: no unsourced numbers.
+          {% if not available %}<span class="error">Mentat isn't deployed yet; check back shortly.</span>{% endif %}</p>
+        <p id="status" class="help"></p>
+      </div></div>
+      <div class="pips" id="about-pips" hidden><i></i></div>
+    </div>
+
+    <div class="sheet" id="toolsheet" role="dialog" aria-modal="true" aria-labelledby="tool-h" hidden>
+      <div class="s-head"><h2 id="tool-h" class="grow"></h2>
+        <button type="button" class="key" id="tool-close" aria-label="Close" title="Close" data-tel="mentat:tool-close"><svg class="g" aria-hidden="true"><use href="#g-x"/></svg></button></div>
+      <div class="pg" id="tool-pg"><div class="pg-flow" id="tool"></div></div>
+      <div class="pips" id="tool-pips" hidden><i></i></div>
+    </div>
+  </div>
+  <span class="sr" id="count" aria-live="polite"></span>
+</section>
+<script>
+(function () {
+  const API = "{{ url_for('experiments.mentat_tools') }}";
+  const CALL = "{{ url_for('experiments.mentat_call', name='__NAME__') }}";
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, props = {}, text) => { const e = Object.assign(document.createElement(tag), props);
+                                          if (text !== undefined) e.textContent = text; return e; };
+  const svg = (g) => `<svg class="g" aria-hidden="true"><use href="#g-${g}"/></svg>`;
+  const EXAMPLES = [
+    {label: "the Sun as a black hole", tool: "schwarzschild_radius", args: {mass_kg: 1.989e30}},
+    {label: "88 mph in m/s", tool: "convert_units", args: {value: 88, from_units: "mile/hour", to_units: "m/s"}},
+    {label: "solve a cubic", tool: "solve_equation", args: {equation: "x**3 - 6*x**2 + 11*x - 6", variable: "x"}},
+    {label: "Earth's escape velocity", tool: "escape_velocity", args: {mass_kg: 5.972e24, radius_m: 6.371e6}},
+  ];
+  let tools = [], domains = ["All"], domain = "All", byName = {};
+
+  const list = new Bridge.PList($("scroll"), $("host"), {}, {pips: $("pips"), pgno: $("pgno"), scrub: $("scrub")});
+  list.makers.title = {
+    make() { const e = el("div", {className: "vrow vtitle"}); e._g = el("span", {className: "gl"}); e._t = el("span", {className: "name"}); e._c = el("span", {className: "count"}); e.append(e._g, e._t, e._c); return e; },
+    bind(e, r) { e._g.innerHTML = svg("tools"); e._t.textContent = r.text; e._c.textContent = r.count; },
+  };
+  list.makers.msg = {
+    make() { const e = el("div", {className: "vrow vmsg"}); e._g = el("span", {className: "gl"}); e._t = el("span"); e.append(e._g, e._t); return e; },
+    bind(e, r) { e._g.innerHTML = svg("info"); e._t.textContent = r.text; },
+  };
+  list.makers.tool = {                             // a tool: its name, what it does in a line, and the domain it belongs to
+    make() {
+      const b = el("button", {type: "button", className: "vrow xrow trow"}), t = el("span", {className: "txt"});
+      b._n = el("span", {className: "l1 mono"}); b._d = el("span", {className: "l2"}); t.append(b._n, b._d); b.append(t, el("span", {className: "gl chev"}));
+      b.lastChild.innerHTML = svg("chev");
+      return b;
+    },
+    bind(b, r) { b._n.textContent = r.t.name; b._d.textContent = r.t.description.split(/\n|\. /)[0].slice(0, 140); b.title = r.t.description.slice(0, 200); b.dataset.name = r.t.name; b.dataset.try = ""; },
+  };
+  list.makers.try = {                              // an example: tapping it opens the tool already filled in and runs it
+    make() {
+      const b = el("button", {type: "button", className: "vrow xrow trow tryrow"}), t = el("span", {className: "txt"});
+      b._n = el("span", {className: "l1"}); b._d = el("span", {className: "l2 mono"}); t.append(b._n, b._d); b.append(el("span", {className: "lamp"}), t);
+      b.firstChild.dataset.s = "on";
+      return b;
+    },
+    bind(b, r) { b._n.textContent = r.ex.label; b._d.textContent = r.ex.tool; b.dataset.name = r.ex.tool; b.dataset.try = JSON.stringify(r.ex.args); },
+  };
+  $("host").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-name]");
+    if (b) pick(b.dataset.name, b.dataset.try ? JSON.parse(b.dataset.try) : undefined);
+  });
+
+  function render(keep) {
+    const q = $("search").value.toLowerCase().trim();
+    const shown = tools.filter(t => (domain === "All" || t.domain === domain) &&
+      (!q || (t.name + " " + t.description).toLowerCase().includes(q)));
+    $("count").textContent = `${shown.length} of ${tools.length} tools`;
+    const rows = [{type: "title", h: 52, text: domain === "All" ? "" : domain.replace(/_/g, " "), count: `${shown.length}`, glue: true}];
+    if (!q && domain === "All") EXAMPLES.forEach(ex => rows.push({type: "try", h: 58, ex}));
+    if (!shown.length) rows.push({type: "msg", h: 80, text: tools.length ? "No tool matches that." : "Mentat is unavailable right now."});
+    shown.forEach(t => rows.push({type: "tool", h: 58, t}));
+    list.setRows(rows, keep ? list.page : 0);
+  }
+
+  function inputFor(name, spec, value) {
+    const type = spec.type || (spec.anyOf || []).map(a => a.type).find(x => x && x !== "null") || "string";
+    let input;
+    if (type === "boolean") { input = el("input", {type: "checkbox", checked: !!value}); input.dataset.kind = "bool"; }
+    else if (type === "number" || type === "integer") {
+      input = el("input", {type: "text", value: value ?? "", placeholder: type}); input.dataset.kind = "num"; }
+    else if (type === "object" || type === "array") {
+      input = el("textarea", {rows: 3, value: value === undefined ? "" : JSON.stringify(value)}); input.dataset.kind = "json"; }
+    else { input = el("input", {type: "text", value: value ?? ""}); input.dataset.kind = "str"; }
+    input.name = name;
+    return input;
+  }
+
+  const toolPager = () => { const pg = $("tool-pg"); return pg._pager || Bridge.pager(pg, {pips: $("tool-pips")}); };
+  function pick(name, preset) {
+    const t = byName[name]; if (!t) return;
+    const props = (t.input_schema && t.input_schema.properties) || {};
+    const required = new Set((t.input_schema && t.input_schema.required) || []);
+    const form = el("form");
+    for (const [key, spec] of Object.entries(props)) {
+      const f = el("div", {className: "field"});
+      const lab = el("label", {}, key.replace(/_/g, " "));
+      if (required.has(key)) lab.appendChild(el("span", {className: "req"}, " *"));
+      f.append(lab, inputFor(key, spec, preset && key in preset ? preset[key] : spec.default));
+      form.appendChild(f);
+    }
+    const go = el("button", {type: "submit", className: "key act on"}); go.innerHTML = svg("play"); go.setAttribute("aria-label", "Run"); go.title = "Run";
+    form.appendChild(el("p", {})).appendChild(go);
+    const out = el("div", {id: "out"});
+    form.onsubmit = async (e) => { e.preventDefault(); await run(name, form, out); };
+    $("tool-h").textContent = name;
+    $("tool").replaceChildren(el("div", {id: "desc"}, t.description), form, out);
+    $("toolsheet").hidden = false;
+    toolPager().refresh(); toolPager().go(0);
+    if (preset) form.requestSubmit();
+  }
+
+  function collect(form) {
+    const args = {};
+    for (const i of form.querySelectorAll("input, textarea")) {
+      const k = i.dataset.kind;
+      if (k === "bool") { args[i.name] = i.checked; continue; }
+      if (i.value.trim() === "") continue;
+      if (k === "num") args[i.name] = Number(i.value);
+      else if (k === "json") args[i.name] = JSON.parse(i.value);
+      else args[i.name] = i.value;
+    }
+    return args;
+  }
+
+  async function run(name, form, out) {
+    let args;
+    try { args = collect(form); } catch (e) { out.replaceChildren(el("p", {className: "error"}, "Bad JSON: " + e.message)); toolPager().refresh(); return; }
+    out.replaceChildren(el("p", {className: "help"}, "Computing…"));
+    const res = await fetch(CALL.replace("__NAME__", encodeURIComponent(name)), {
+      method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(args)});
+    const data = await res.json().catch(() => ({error: res.statusText}));
+    if (!res.ok) { out.replaceChildren(el("p", {className: "error"}, data.error || "Failed")); toolPager().refresh(); return; }
+    const r = data.result || {};
+    const parts = [];
+    if (r.value !== undefined && r.value !== null) {
+      const v = el("div", {className: "value"},
+                   typeof r.value === "object" ? JSON.stringify(r.value) : String(r.value));
+      if (r.units) v.appendChild(el("span", {className: "unit"}, r.units));
+      parts.push(v);
+    }
+    for (const [k, label] of [["formula", "Formula"], ["source", "Source"], ["provenance_tag", "Provenance"],
+                              ["uncertainty", "Uncertainty"], ["notes", "Notes"]]) {
+      if (r[k]) { const m = el("div", {className: "meta"}); m.append(el("b", {}, label + ": "), String(r[k])); parts.push(m); }
+    }
+    const raw = el("details"); raw.append(el("summary", {}, "Full result"), el("pre", {className: "raw"}, JSON.stringify(r, null, 2)));
+    parts.push(raw);
+    out.replaceChildren(...parts);
+    toolPager().refresh();
+  }
+
+  const aboutPager = () => { const pg = $("about-pg"); return pg._pager || Bridge.pager(pg, {pips: $("about-pips")}); };
+  $("about-key").onclick = () => { $("about").hidden = !$("about").hidden; if (!$("about").hidden) aboutPager().refresh(); };
+  $("about-close").onclick = () => { $("about").hidden = true; };
+  $("tool-close").onclick = () => { $("toolsheet").hidden = true; };
+  document.addEventListener("keydown", (e) => {
+    const typing = e.target.matches && e.target.matches("input, textarea");
+    if (e.key === "Escape") { if (!$("toolsheet").hidden) $("toolsheet").hidden = true; else if (!$("about").hidden) $("about").hidden = true; }
+    else if (!typing && (e.key === "PageDown" || e.key === "PageUp") && $("toolsheet").hidden && $("about").hidden) { e.preventDefault(); list.go(list.page + (e.key === "PageDown" ? 1 : -1)); }
+    else if (!typing && e.key === "/") { e.preventDefault(); $("search").focus(); }
+  });
+  $("search").oninput = () => render(false);
+  $("domain-key").onclick = () => {
+    domain = domains[(domains.indexOf(domain) + 1) % domains.length];
+    const label = domain === "All" ? "All" : domain.replace(/_/g, " ");
+    $("domain-key").setAttribute("aria-label", "Domain: " + label); $("domain-key").title = "Domain: " + label;
+    render(false);
+  };
+  if (window.ResizeObserver) new ResizeObserver(() => list.resize()).observe($("stage"));
+  render(false);
+  fetch(API).then(r => r.json()).then(data => {
+    if (!Array.isArray(data)) { $("status").textContent = data.error || "Mentat is unavailable."; render(false); return; }
+    tools = data; byName = Object.fromEntries(tools.map(t => [t.name, t]));
+    domains = ["All", ...[...new Set(tools.map(t => t.domain))].sort()];
+    $("search").placeholder = "Search " + tools.length;
+    render(false);
+    const want = new URLSearchParams(location.search).get("tool");
+    if (want) pick(want);
+  }).catch(() => { $("status").textContent = "Mentat is unavailable right now."; render(false); });
+})();
+</script>
+{% endblock %}

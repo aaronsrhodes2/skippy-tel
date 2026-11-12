@@ -1,0 +1,10 @@
+[Unit]
+Description=SkippyCore reports itself to the portal's Status map (core/reporter/reporter.py)
+Wants=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/skippy-core/reporter/reporter.py
+Nice=10
+TimeoutStartSec=2min

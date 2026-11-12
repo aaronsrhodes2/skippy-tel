@@ -1,0 +1,37 @@
+# vision-popups: the vision and AR-development pop-ups on skippy-pc's GPU (services/vision-popups/app.py; docs/vision-popups.md).
+# Each model loads on request and unloads after IDLE_UNLOAD_S idle seconds, like image-studio. The weights are the models
+# archive's pinned copies (D:/models/huggingface, read-only), copied once into the vision-popups-weights volume on C:, because
+# Docker reads D: at ~8 MB/s. No published port and no route out it needs: only the home reporter calls it.
+# Its own Compose project on skippy-pc's network (docs/popups.md), so the home reporter reaches it by name and no shared file changes:
+#   docker compose -f services/vision-popups/compose.yml build && docker compose -f services/vision-popups/compose.yml up -d
+name: skippy-popups-vision
+services:
+  vision-popups:
+    build: .
+    container_name: skippy-popup-vision
+    restart: unless-stopped
+    networks: [skippytel]
+    expose:
+      - "8004"
+    environment:
+      IDLE_UNLOAD_S: "300"
+    volumes:
+      - ${MODELS_ROOT:-D:/models}/huggingface:/archive:ro
+      - vision-popups-weights:/weights
+    shm_size: "2gb"
+    mem_limit: 3g                  # weights go straight to the card (models.py); Docker's VM is 8 GB and shared: a runaway is this container's kill
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
+
+volumes:
+  vision-popups-weights:
+networks:
+  skippytel:
+    name: skippytel_default
+    external: true

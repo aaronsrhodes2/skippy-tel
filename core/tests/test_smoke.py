@@ -1,0 +1,123 @@
+"""The smoke test itself: it passes against a stack that answers right, and names the check that breaks."""
+import json
+import threading
+
+import pytest
+from flask import Flask, jsonify
+from werkzeug.serving import make_server
+
+from core_testlib import load
+from fake_llm import FakeLLM
+
+shim_mod = load("ollama-shim/shim.py", "core_ollama_shim")
+smoke = load("smoke.py", "core_smoke")
+
+NAMES = {"models": [
+    {"name": "chat", "slot": "chat", "variant": "standin", "repo": "a/b", "size": 1, "resident": True},
+    {"name": "qwen3:8b", "slot": "chat", "variant": "standin", "repo": "a/b", "size": 1, "resident": True},
+    {"name": "general", "slot": "general", "variant": "standin", "repo": "a/c", "size": 1, "resident": False},
+    {"name": "coder", "slot": "coder", "variant": "standin", "repo": "a/d", "size": 1, "resident": False},
+]}
+
+
+def _serve(app):
+    server = make_server("127.0.0.1", 0, app, threaded=True)
+    threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_port}"
+
+
+@pytest.fixture
+def stack(tmp_path, monkeypatch):
+    llm = FakeLLM()
+    llm.reply = '{"ok": true}'
+    llm.running = [{"model": "chat", "state": "ready"}, {"model": "coder", "state": "ready"}]
+    names = tmp_path / "shim.json"
+    names.write_text(json.dumps(NAMES))
+    monkeypatch.setenv("LLM_URL", llm.url)
+    monkeypatch.setenv("SHIM_NAMES", str(names))
+    shim_server, shim_url = _serve(shim_mod.create_app())
+    monkeypatch.setattr(smoke, "SHIM", shim_url)
+    monkeypatch.setattr(smoke, "LLM", llm.url)
+    monkeypatch.setenv("SMOKE_NAMES", str(names))
+    yield llm
+    shim_server.shutdown()
+    llm.close()
+
+
+def test_a_healthy_stack_passes(stack, capsys):
+    assert smoke.main(["--wait", "5"]) == 0
+    out = capsys.readouterr().out
+    for name, _ in smoke.CHECKS:
+        assert f"ok   {name}" in out
+
+
+def test_each_failure_is_named(stack):
+    llm = stack
+    llm.running.append({"model": "general", "state": "ready"})        # the swap didn't happen
+    llm.reply = "not json at all"
+    failed = {r["check"] for r in smoke.run() if not r["ok"]}
+    assert failed == {"json", "slots"}
+
+
+def test_a_dead_stack_fails_the_wait(monkeypatch):
+    monkeypatch.setattr(smoke, "SHIM", "http://127.0.0.1:1")
+    results = smoke.run(wait=0.1)
+    assert results[0]["check"] == "ready" and not results[0]["ok"] and len(results) == 1
+
+
+def test_a_keyed_llm_port_is_used_with_the_key_and_must_refuse_without_it(stack, monkeypatch):
+    llm = stack
+    llm.key = "sekrit"
+    monkeypatch.setenv("LLM_API_KEY", "sekrit")
+    assert all(r["ok"] for r in smoke.run()), "every llm call carries the key; the auth check sees the 401"
+    llm.key = None                                     # the port forgot its key: the Funnel would be open to anyone
+    failed = {r["check"] for r in smoke.run() if not r["ok"]}
+    assert failed == {"auth"}
+
+
+def test_the_matter_controller_is_checked_only_where_it_runs(stack, monkeypatch):
+    matter = Flask("fake_matter")
+    info = {"fabric_id": 1, "sdk_version": "2025.7", "wifi_credentials_set": False, "bluetooth_enabled": True}
+
+    @matter.get("/info")
+    def matter_info():
+        return jsonify(info)
+    server, url = _serve(matter)
+    monkeypatch.setattr(smoke, "MATTER", url)
+    try:
+        monkeypatch.delenv("CORE_MATTER", raising=False)
+        assert "matter" not in {r["check"] for r in smoke.run()}                 # the simulator and CI: no Matter
+        monkeypatch.setenv("CORE_MATTER", "1")
+        (r,) = [r for r in smoke.run() if r["check"] == "matter"]
+        assert r["ok"] and "bluetooth on" in r["detail"]
+        info["fabric_id"] = 0                                                    # a controller without its fabric: red
+        assert not [r for r in smoke.run() if r["check"] == "matter"][0]["ok"]
+    finally:
+        server.shutdown()
+
+
+def test_a_door_that_is_up_but_not_ready_is_said_not_failed(monkeypatch):
+    """car-fleet and the road door answer 503 with the readiness contract while they wait (no key yet, the first map import):
+    the deploy goes on. A door that doesn't answer at all, or answers 500, is red."""
+    from flask import Flask, jsonify
+    door = Flask("door")
+    answer = {"code": 503, "body": {"ready": False, "detail": "waiting on valhalla (building California's road tiles)"}}
+
+    @door.get("/health")
+    def health():
+        return jsonify(answer["body"]), answer["code"]
+    server, url = _serve(door)
+    try:
+        assert smoke.check_door(wait=1, url=url) == "up, not ready: waiting on valhalla (building California's road tiles)"
+        answer.update(code=200, body={"ready": True})
+        assert smoke.check_door(wait=1, url=url) == "ready"
+        answer.update(code=500, body={"error": "boom"})
+        with pytest.raises(smoke.Fail):
+            smoke.check_door(wait=0, url=url)
+        monkeypatch.setenv("CORE_ROUTES", "1")
+        monkeypatch.setattr(smoke, "ROUTES", url)
+        answer.update(code=503, body={"ready": False, "detail": "importing"})
+        (r,) = [r for r in smoke.run(only=["routes"])]
+        assert r["ok"] and r["detail"] == "up, not ready: importing"
+    finally:
+        server.shutdown()

@@ -1,0 +1,10 @@
+[Unit]
+Description=Tell the portal how skippy-core is, every 30 seconds
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

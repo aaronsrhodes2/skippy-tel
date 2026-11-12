@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Game Servers — Maker Portal{% endblock %}
+{% block app %}games{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}console{% endblock %}
+{% block content %}
+{# The Game Servers app on the bridge: a control per game, glyph and name (a name is a label people look up), a lamp for its state
+   (lit = up, amber ring = coming up, ring = asleep, diamond = not the game on the server right now). A control is one big link to
+   that game's page, which has everything. Server-wide: a power key stops it; the Captain can start several at once from a sheet. #}
+<section class="games-bridge">
+  {% if error %}
+    <p class="error"><span class="lamp" data-s="off" style="width:12px;height:12px"></span> Couldn't reach the VM: {{ error }}</p>
+  {% else %}
+    {% set running = status.status == 'RUNNING' %}
+    {% set asleep = status.status == 'TERMINATED' %}
+    {% set up = status.minutes_up() %}
+    <div class="statusbar" data-s="{{ 'on' if running else ('idle' if asleep else 'boot') }}" role="status">
+      <i class="lamp"></i>
+      <span class="names">{% if running %}{% for g in status.games if g in games %}{{ games[g].name }}{{ ' · ' if not loop.last }}{% endfor %}{% endif %}</span>
+      {% if running %}<svg class="g" aria-hidden="true"><use href="#g-clock"/></svg><span title="Sleeps after this many idle minutes">{{ status.idle_minutes }}</span>{% endif %}
+    </div>
+
+    <div class="stage">
+      <div class="deck" style="--rows: {{ (games | length + 1) // 2 }}; --rows-wide: {{ (games | length + 3) // 4 }}; --rows-side: {{ (games | length + 4) // 5 }}">
+        {% for id, game in games.items() %}
+          {% set on = running and id in status.games %}
+          {% set starting = on and up is not none and up < game.ready_minutes %}
+          {% set is_set = is_admin or not status.games or id in status.games %}
+          {# The server runs one game at a time, so the one that's up is lit (data-s="on"). #}
+          {% set lamp = 'boot' if starting else 'on' if on else 'idle' if (asleep and is_set) else 'off' if (not is_set or running) else 'boot' %}
+          <div class="unit named" data-s="{{ lamp }}" data-tel="tile:game:{{ id }}" {% if on %}data-live="{{ url_for('dashboard.game_live', gid=id) }}"{% endif %}
+               {% if game.theme %}style="--accent: {{ game.theme.accent }}; --i: {{ loop.index0 }}"{% else %}style="--i: {{ loop.index0 }}"{% endif %}>
+            <i class="plate"></i>
+            <a class="hit" href="{{ url_for('dashboard.game', gid=id) }}" aria-label="{{ game.name }}" title="{{ game.theme.tagline if game.theme else game.description }}"></a>
+            <i class="claws"><b></b><b></b><b></b></i>
+            <span class="lamp"></span>
+            <svg class="g" aria-hidden="true"><use href="#g-{{ game.glyph }}"/></svg>
+            <span class="name">{{ game.name }}</span>
+          </div>
+        {% endfor %}
+      </div>
+
+      {% if asleep and is_admin %}
+      <div class="sheet" data-sheet="multi" hidden>
+        <form method="post" action="{{ url_for('dashboard.games_start') }}">
+          {% for id, game in games.items() %}
+            <label class="pick"><input type="checkbox" name="games" value="{{ id }}" {{ 'checked' if id in status.games }} data-tel="games:games"> {{ game.name }}</label>
+          {% endfor %}
+          <label class="idle"><svg class="g" style="width:18px;height:18px" aria-hidden="true"><use href="#g-clock"/></svg>
+            <input type="number" name="idle_minutes" value="{{ status.idle_minutes }}" min="0" aria-label="Minutes idle before it sleeps (0 = never)" title="Minutes idle before it sleeps (0 = never)"></label>
+          <p><button type="submit" class="key" aria-label="Start selected" title="Start selected" data-tel="games:start-selected"><svg class="g" aria-hidden="true"><use href="#g-power"/></svg></button></p>
+        </form>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="keybar">
+      <span class="grow"></span>
+      {% if running %}
+        <form class="inline" method="post" action="{{ url_for('dashboard.games_stop') }}">
+          <button type="submit" class="key danger" aria-label="Stop server" title="Stop server" data-tel="games:stop-server"><svg class="g" aria-hidden="true"><use href="#g-power"/></svg></button>
+        </form>
+      {% elif asleep and is_admin %}
+        <button type="button" class="key" data-open="multi" aria-label="Start several games at once" title="Start several games at once" data-tel="games:start-several-games-at"><svg class="g" aria-hidden="true"><use href="#g-tools"/></svg></button>
+      {% elif not asleep %}
+        <span class="lamp" data-s="boot" role="status" aria-label="The server is changing state" style="width:14px;height:14px;margin:0 14px"></span>
+      {% endif %}
+    </div>
+
+    {# >>> readiness: the lamps above are the boot timer's first guess. This page never reads the VM itself (see index()),
+       so a game that's up asks its own /live, the read its page polls, and the lamp follows the game's own log:
+       "starting" ends when the game says it's joinable (portal/readiness.py), not after a fixed time. #}
+    {% if running %}
+    <script>
+      (function () {
+        const tiles = document.querySelectorAll(".unit[data-live]");
+        if (!tiles.length) return;
+        async function refresh(tile) {
+          try {
+            const res = await fetch(tile.dataset.live, {headers: {"Accept": "application/json"}, cache: "no-store"});
+            if (!res.ok) return;
+            const now = await res.json();
+            if (!now.on) return;
+            tile.dataset.s = now.starting ? "boot" : "on";
+          } catch (e) { /* a network blip: the next poll catches up */ }
+        }
+        function poll() { if (!document.hidden) tiles.forEach(refresh); }
+        poll();
+        setInterval(poll, 20000);
+      })();
+    </script>
+    {% endif %}
+    {# <<< readiness #}
+    <script>
+      (function () {
+        const open = document.querySelector("[data-open=multi]"), sheet = document.querySelector("[data-sheet=multi]");
+        if (open && sheet) open.addEventListener("click", () => { sheet.hidden = !sheet.hidden; open.classList.toggle("lit", !sheet.hidden); });
+      })();
+    </script>
+  {% endif %}
+</section>
+{% endblock %}

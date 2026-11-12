@@ -1,0 +1,33 @@
+{
+ "n": 14,
+ "title": "Choo-choo train, Skippy Core's coder in one call (our incomplete harness)",
+ "model": "Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), one call with MineBench's own prompt, the way MineBench runs a model",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 0,
+ "minutes": 2,
+ "size": "none",
+ "verdict": "Harness fault, found 2026-10-31: this call was not MineBench's procedure. Our copy of its prompt lacked the TOOL MODE section (\"you may use ONLY these runtime globals: block, box, line, rng, Math\"), and MineBench sends a failure back for up to 8 attempts where this got one. Later runs in this series give a model MineBench's way. What it did here: The fastest reply of all (94 seconds, 6,595 tokens), and it fails like the chat model, its sibling: MineBench gives the code block(), box(), line(), rng() and Math, but it redefines block() and box() on top of a voxel() function that does not exist, so the code stops at the first block. Both Qwen3.6 models invented the same missing voxel call without the TOOL MODE section.",
+ "stats": {
+  "started": "2026-11-01T00:32:46Z",
+  "minutes": 2,
+  "tokens": {
+   "input": 1631,
+   "cache_read": 0,
+   "output": 6595,
+   "total": 8226
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 1631,
+     "cache_read": 0,
+     "output": 6595
+    }
+   }
+  ]
+ },
+ "failed": "ReferenceError: voxel is not defined",
+ "series": "fresh"
+}

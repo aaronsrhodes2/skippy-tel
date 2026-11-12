@@ -1,0 +1,15 @@
+{
+ "_comment": "What skippy-core publishes besides the portal (core/cd/cd.py publish_all; docs/no-github.md): each entry watches a repo in the trunk and, when its tip (or, for a tarball, the published folder's tree) changes, builds and uploads it as skippy-deployer. It replaces doom-loop's GitHub Actions dev-deploy and the games VM's fetch of sigma-ground from GitHub.",
+ "publish": {
+  "doom-loop": {
+   "repo": "doom-loop", "branch": "main", "kind": "site",
+   "image": "node:24",
+   "steps": ["npm ci", "npm test", "bash scripts/build-web", "node scripts/check-dist.mjs"],
+   "dist": "dist", "bucket": "skippy-tel-doomloop-dev", "prefix": "dev", "last": "version.json"
+  },
+  "gmod-addon": {
+   "repo": "sigma-ground", "branch": "master", "kind": "tarball",
+   "path": "stage/gmod/addon", "bucket": "skippy-tel-game-assets", "prefix": "gmod-addon"
+  }
+ }
+}

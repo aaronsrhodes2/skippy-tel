@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Mentat vs Wolfram Alpha vs Gemini — Experiments{% endblock %}
+{% block app %}experiments{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}gauge{% endblock %}
+{% block hud_back %}{{ url_for('experiments.index') }}{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}"><link rel="stylesheet" href="{{ url_for('static', filename='experiments.css') }}">{% endblock %}
+{% block content %}
+{# The benchmark on the bridge: pages you flip (swipe, PageUp/PageDown, the bar under them), never a scrolled page. Every number is read
+   from the result files, as before. #}
+<section class="adm" id="bench">
+  <header class="ahead" style="padding-top:6px"><svg class="g mark" aria-hidden="true"><use href="#g-gauge"/></svg><h2>Mentat vs Wolfram Alpha vs Gemini</h2></header>
+  <div class="apane" style="flex:1;min-height:0">
+    <div class="pg" id="benchpg"><div class="pg-flow">
+  {% if not bench.main %}
+    <p class="help">The benchmark results aren't bundled in this build.</p>
+  {% else %}
+  <p>150 physics questions across {{ bench.domains|length }} domains, each scored against ground truth.
+    <b>Mentat</b> is Aaron's own physics tool server; here a small local model (Qwen 2.5, 7B parameters,
+    running on a home GPU, free) answers by calling it. Every number below is read straight from the result
+    files committed in sigma-ground; nothing is re-scored or hand-picked.</p>
+  <div class="bars">
+    {% for r in bench.main %}
+      <div class="row"><span>{{ r.label }}</span>
+        <div class="track"><div class="fill {{ r.kind }}" style="width: {{ r.pct }}%"></div></div>
+        <span class="pct">{{ r.pct }}%</span></div>
+    {% endfor %}
+  </div>
+  <p class="help">Correct / total: {% for r in bench.main %}{{ r.label }} {{ r.correct }}/{{ r.total }}{{ '; ' if not loop.last }}{% endfor %}.
+    Wolfram Alpha ran on its free tier; "misses re-run" retried the questions it failed to answer the first time.</p>
+
+  <h3>By domain</h3>
+  <table class="domains">
+    <tr><th>Domain</th>{% for r in bench.main %}<th>{{ r.label }}</th>{% endfor %}</tr>
+    {% for d in bench.domains %}
+      {% set best = bench.main | map(attribute='by_domain') | map(attribute=d) | select | map(attribute='pct') | max %}
+      <tr><td>{{ d | replace('_', ' ') }}</td>
+        {% for r in bench.main %}
+          {% set cell = r.by_domain.get(d) %}
+          <td class="{{ 'best' if cell and cell.pct == best }}">{% if cell %}{{ cell.pct | round | int }}%{% else %}–{% endif %}</td>
+        {% endfor %}</tr>
+    {% endfor %}
+  </table>
+
+  {% if bench.adversarial %}
+    <h3>Adversarial questions</h3>
+    <p>False premises, impossible requests and trick puzzles, where the right answer is often "that can't be
+      answered as asked".
+      {% for r in bench.adversarial %}{{ r.label }}: <b>{{ r.pct }}%</b> ({{ r.correct }}/{{ r.total }}){{ '; ' if not loop.last }}{% endfor %}.</p>
+  {% endif %}
+  <p class="help">Source: <a href="https://github.com/aaronsrhodes2/sigma-ground/tree/master/sigma_ground/mcp/benchmark">sigma_ground/mcp/benchmark</a>
+    ({% for r in bench.main + bench.adversarial %}{{ r.file }}{{ ', ' if not loop.last }}{% endfor %}).</p>
+  {% endif %}
+
+  <h3>Improvement distillation</h3>
+  <p>A branch that runs every day: purple Skippy writes a <b>new</b> set of short science questions of the kind Wolfram Alpha's free tier
+    accepts, with our own oracle answer where we have one. Each goes to Wolfram Alpha once and to Mentat. Mentat is judged against
+    <b>our</b> oracle, and a miss is classified from Mentat's own record (no route, bad arguments, tool error, wrong tool, wrong value).
+    Wolfram's column is the yardstick only: nothing it answers is used to improve Mentat; our own questions, answers and miss reasons are.</p>
+  {% if not distill.days %}
+    <p class="help">No days yet.</p>
+  {% else %}
+  <table class="domains">
+    <tr><th>Day</th><th>Questions</th><th>Mentat right / judged</th><th>Misses by cause</th><th>Unverified</th><th>Wolfram answered / no result</th><th>Wolfram agrees / disagrees with our oracle</th></tr>
+    {% for d in distill.days %}
+      <tr><td>{{ d.day }}</td>
+        {% if d.pending %}
+          <td>{{ d.n }}</td><td colspan="5" class="help">queued: being asked ({% for k, v in d.made.items() %}{{ k }} {{ v }}{{ ', ' if not loop.last }}{% endfor %})</td>
+        {% else %}
+          <td>{{ d.n }}</td><td><b>{{ d.right }}</b> / {{ d.judged }}</td>
+          <td>{% for k, v in d.misses.items() %}{{ k | replace('_', ' ') }} {{ v }}{{ '; ' if not loop.last }}{% else %}none{% endfor %}</td>
+          <td>{{ d.unverified }}</td><td>{{ d.wa_answered }} / {{ d.wa_no_result }}</td><td>{{ d.wa_agrees }} / {{ d.wa_disagrees }}</td>
+        {% endif %}</tr>
+    {% endfor %}
+  </table>
+  {% if distill.causes %}
+    <h4>Open causes, grouped: the fixes to make</h4>
+    <table class="domains">
+      <tr><th>Cause</th><th>Expected tool</th><th>Rows</th><th>Examples</th></tr>
+      {% for c in distill.causes %}
+        <tr><td>{{ c.cause | replace('_', ' ') }}</td><td>{{ c.tool }}</td><td>{{ c.rows }}</td><td class="help">{{ c.examples | join('; ') }}</td></tr>
+      {% endfor %}
+    </table>
+  {% endif %}
+  <p class="help">Source: sigma-ground <a href="https://github.com/aaronsrhodes2/sigma-ground/blob/master/misc/DISTILLATION_BRANCH_PLAN.md">misc/DISTILLATION_BRANCH_PLAN.md</a>,
+    <code>tools/distill_day.py</code>, <code>benchmark/distill_score.py</code>; the day files are committed in <code>results/distill/</code>.</p>
+  {% endif %}
+    </div></div>
+    <div class="pips" hidden><i></i></div>
+  </div>
+</section>
+<script>
+  (function () {
+    var panel = document.getElementById("benchpg"), pager = Bridge.pager(panel, { pips: panel.parentNode.querySelector(".pips") });
+  })();
+</script>
+{% endblock %}

@@ -1,0 +1,11 @@
+# The search image's build context is the repo root (it needs the memory parser); only these go in.
+*
+!memory/__init__.py
+!memory/schema.py
+!memory/store.py
+!memory/parsers/
+!services/search-popups/app.py
+!services/search-popups/corpus.py
+!services/search-popups/index.py
+!services/search-popups/models.py
+**/__pycache__

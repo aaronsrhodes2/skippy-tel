@@ -1,0 +1,424 @@
+"""The doctor's brain (the Captain's recovery design, 2026-10-23): keep everything at its known good baseline by itself, and put it all
+back with ONE operation when asked.
+
+The portal is the brain because it is the one part that can't go down (Cloud Run, Google's side). It sees:
+  * skippy-pc's tests, in every home report (services/home-reporter/doctor_checks.py): does each service do its job, in time?
+  * the starter on the Windows host (starter.py, tools/skippy_starter.py): is Docker up, how many containers, is the bridge there?
+  * Skippy Core, which it tests itself over the Funnel (a real five-token reply, every five minutes: core_test below)
+  * skippy-pc's silence: no report for minutes while the starter still answers means the reporter itself is stuck
+
+and it acts through the starter, which runs on Windows itself and so works when Docker is down:
+  heal <name>   one thing back to good: a compose service recreated (stop, rm, up --build), the bridge restarted, Docker restarted
+                clean, or Skippy Core repaired over SSH. Sent by itself when a test has failed for HEAL_AFTER_S in a row, at most
+                MAX_TRIES times an hour per thing; after that it keeps trying quietly, once an hour's allowance at a time.
+  repair        the button: everything back to baseline at once (repair() below says what that is)
+
+It never heals while the Captain has stopped the stack on purpose (the starter's "back on at" time is set), and the starter itself
+refuses to heal a service that someone is building at that moment (a session's own rebuild). Code is never reverted here: undoing a
+change is the private Skippy's job, from a chat that works.
+
+What it tells the Captain (2026-11-02: eighteen "still failing after 3 tries" DMs in one evening, from the same two things): ONE DM when
+it gives up on something, a reminder only every REMIND_S while that is still true (a day for the desktop apps he may have closed on
+purpose), and ONE "working again" when it has been fine for BACK_AFTER_S. The memory of who was told what is kept in the bucket
+(STATE_KEY), because this portal is redeployed every few minutes and used to forget, and then told him again.
+
+The direct door (edge.py: https://home.makerportal.live straight to skippy-pc's gates, the Funnel being the fallback) is watched too, but only as a
+row and one DM: it is optional, nothing here can fix a router or an ISP, and the Funnel carries everything while it is down. So a door that has not
+been up once since this portal started is silent, one that was up and has stayed down for EDGE_DOWN_S is told once (reminders and "working again" as
+above), and it is never healed.
+"""
+from __future__ import annotations
+
+import json
+import threading
+import time
+
+HEAL_AFTER_S = 300          # failing this long, test after test, before anything is touched (a rebuild takes a minute or three)
+MAX_TRIES = 3               # heals per thing per hour; then one DM, and it keeps trying quietly
+REMIND_S = 6 * 3600         # a thing still broken is mentioned again no sooner than this...
+REMIND_APP_S = 24 * 3600    # ...a day for a desktop app (Spotify, OpenAudible): closing one is not an outage
+FLAP_S = 3600               # a thing that broke again within this long of the last word about it is not news
+BACK_AFTER_S = 120          # "working again" only after it has been fine this long (a blip is not a recovery)
+FORGET_S = 7 * 86400        # an episode nobody has reported on for this long is dropped without a word
+STATE_KEY = "doctor/state.json"        # in the Tabletop bucket: tries, told, open (what the Captain has already been DMed)
+QUIET_APPS = ("spotify", "openaudible")
+SILENT_HEAL_S = 240         # no home report this long while the starter answers: the reporter itself is stuck
+CORE_EVERY_S = 300          # how often the portal tests Skippy Core
+CORE_TIMEOUT_S = 120        # Core may be busy with a long reply: a test waits its turn this long
+UNREACHABLE_DM_S = 600      # skippy-pc and its starter both silent this long: tell the Captain (nothing here can fix it)
+# No "ollama": since 2026-10-25 it is skippy-core's shim, which skippy-core's own doctor and deployer keep up.
+HEALABLE = ("flask-api", "whisper", "music-studio", "image-studio", "music-gate", "video-gate",
+            "audiobook-gate", "voice-gate", "tts-studio", "home-reporter", "bridge", "docker", "core", "openaudible", "spotify")
+EDGE_CHECK = "direct-door"  # the direct door (edge.py): a row once it has been up, a DM if it stays down
+EDGE_DOWN_S = 600           # it was up since this portal started and has been failing this long: tell the Captain once
+EDGE_GAP_S = 180            # not looked at for this long (the PC was off, the stack stopped on purpose, Docker down): its failing clock starts over
+REPORT_ONLY = ("vbcable", EDGE_CHECK)   # shown as a row, never healed
+LABELS = {"flask-api": "Skippy's API", "direct-door": "Direct door", "ollama": "Ollama (local models)", "whisper": "Whisper (hearing)", "music-studio": "Music studio",
+          "image-studio": "Picture studio", "mentat-home": "Mentat", "music-gate": "Audio service", "video-gate": "Video service", "audiobook-gate": "Audiobooks",
+          "voice-gate": "Voice", "tts-studio": "Local voices", "home-reporter": "Home reporter", "bridge": "Private Skippy's bridge",
+          "docker": "Docker", "openaudible": "OpenAudible (web server)", "spotify": "Spotify (desktop)",
+          "vbcable": "VB-Cable (Spotify's sound path)", "core": "Skippy Core", "portal": "Portal", "starter": "Starter (skippy-pc's own)"}
+
+
+def _span(seconds: float) -> str:
+    """How long, in the words of a phone message: '40 min', '7 h', '3 days'."""
+    minutes = max(1, int(seconds // 60))
+    if minutes < 90:
+        return f"{minutes} min"
+    hours = round(minutes / 60)
+    return f"{hours} h" if hours < 48 else f"{hours // 24} days"
+
+
+class Doctor:
+    def __init__(self, home, starter, notify=None, clock=time.time, store=None, log=None, edge=None):
+        self.home, self.starter, self.notify, self.clock = home, starter, notify or (lambda text: False), clock
+        self.store, self.log = store, log or (lambda line: print(line, flush=True))
+        self.edge = edge                           # the direct door (edge.py), or None: only its alive() and status() are used
+        self._lock = threading.Lock()
+        self.checks: dict[str, dict] = {}          # name -> {ok, why, ms, since, at}
+        self.tries: dict[str, list[float]] = {}    # name -> heal times this hour                          (kept in the bucket)
+        self.told: dict[str, float] = {}           # name -> when the Captain was last DMed about it         (kept in the bucket)
+        self.open: dict[str, float] = {}           # name -> since when, for what he was told is broken and not yet told is fixed (kept)
+        self.fine_since: dict[str, float] = {}     # name -> since when an open one has looked fine (not kept: it restarts with the portal)
+        self.actions: list[dict] = []              # the doctor's own log, newest last: what it did and why
+        self.core_at = 0.0
+        self.core_running = False
+        self.repairing: dict | None = None         # the button's run: {at, by, steps, done, ok}
+        self._dirty = False
+        self._load()
+
+    # ── its memory, in the bucket: a redeploy must not make it forget who it already told ──
+    def _load(self) -> None:
+        if self.store is None:
+            return
+        try:
+            raw = json.loads(self.store.get(STATE_KEY) or b"{}")
+            now = self.clock()
+            for name, times in (raw.get("tries") or {}).items():
+                recent = [float(t) for t in times if now - float(t) < 3600]
+                if recent:
+                    self.tries[str(name)] = recent
+            self.told = {str(k): min(float(v), now) for k, v in (raw.get("told") or {}).items()}
+            self.open = {str(k): min(float(v), now) for k, v in (raw.get("open") or {}).items() if now - float(v) < FORGET_S}
+        except Exception as e:  # noqa: BLE001 — no bucket or a bad file: start from nothing, as before
+            self.log(json.dumps({"event": "doctor_load", "problem": type(e).__name__}))
+
+    def _flush(self) -> None:
+        """Write the memory down if it changed (a heal asked, a DM sent). A failed write is a logged line, never a stopped doctor."""
+        if self.store is None:
+            return
+        with self._lock:
+            if not self._dirty:
+                return
+            self._dirty = False
+            body = json.dumps({"tries": {k: list(v) for k, v in self.tries.items() if v}, "told": dict(self.told),
+                               "open": dict(self.open)}).encode()
+        try:
+            self.store.put(STATE_KEY, body, "application/json")
+        except Exception as e:  # noqa: BLE001
+            self.log(json.dumps({"event": "doctor_save", "problem": type(e).__name__}))
+            with self._lock:
+                self._dirty = True                    # (the next look tries again)
+
+    # ── what it sees ──
+    def _set(self, name: str, ok: bool, why: str = "", ms: int | None = None, down_s: int | None = None) -> None:
+        now = self.clock()
+        old = self.checks.get(name)
+        since = old["since"] if old and old["ok"] == ok else now
+        if not ok and down_s is not None:                  # the starter's own count: right even when this portal has just been redeployed
+            since = min(since, now - down_s)
+        self.checks[name] = {"ok": ok, "why": "" if ok else str(why)[:160], "ms": ms, "since": since, "at": now}
+
+    def observe_home(self, tests) -> None:
+        """A home report's tests (services/home-reporter/doctor_checks.py)."""
+        if not isinstance(tests, dict):
+            return
+        with self._lock:
+            for name, t in list(tests.items())[:40]:
+                if isinstance(name, str) and name in HEALABLE and isinstance(t, dict):
+                    self._set(name, t.get("ok") is True, str(t.get("why") or ""), t.get("ms") if isinstance(t.get("ms"), int) else None,
+                              down_s=t.get("down_s") if isinstance(t.get("down_s"), int) and 0 <= t["down_s"] < 86400 else None)
+
+    def observe_core(self, ok: bool, why: str = "", ms: int | None = None) -> None:
+        with self._lock:
+            self._set("core", ok, why, ms)
+
+    def core_due(self) -> bool:
+        """Time to test Skippy Core again? (The caller runs core_test on a thread and reports with observe_core.)"""
+        with self._lock:
+            if self.core_running or self.clock() - self.core_at < CORE_EVERY_S:
+                return False
+            self.core_at, self.core_running = self.clock(), True
+            return True
+
+    def core_done(self) -> None:
+        with self._lock:
+            self.core_running = False
+
+    # ── what it does by itself ──
+    def _log(self, what: str, why: str, by: str = "doctor") -> None:
+        self.actions = (self.actions + [{"at": self.clock(), "what": what, "why": why[:200], "by": by}])[-30:]
+
+    def _maintenance(self) -> bool:
+        """The Captain stopped the stack on purpose (a heavy task): nothing is healed until it is back."""
+        return bool((self.starter.status or {}).get("resume_at")) if self.starter else False
+
+    def _tell(self, name: str, first: str, again: str = "", since: float | None = None) -> bool:
+        """DM the Captain about `name`: ONE message when it starts, `again` (with <SPAN> turned into how long) only after REMIND_S of it still
+        being broken (a day for QUIET_APPS); a thing that breaks again within FLAP_S of the last word about it is not news. Called with
+        the lock held. Returns whether a DM went out."""
+        now = self.clock()
+        began = self.open.get(name)
+        every = (REMIND_APP_S if name in QUIET_APPS else REMIND_S) if began is not None else FLAP_S
+        last = self.told.get(name)
+        if last is not None and now - last < every:
+            return False
+        self.told[name] = now
+        self.open.setdefault(name, since if since is not None else now)
+        self._dirty = True
+        self.notify(again.replace("<SPAN>", _span(now - began)) if began is not None and again else first)
+        return True
+
+    def _fine(self, name: str, status: dict, age) -> bool | None:
+        """Does `name` look fine now? None when nothing is being said about it any more."""
+        if name == "docker":
+            return status.get("docker") is True
+        if name == "home-reporter":
+            return age is not None and age < 60
+        if name == "skippy-pc":
+            return bool(self.starter and self.starter.online())
+        c = self.checks.get(name)
+        return None if c is None else bool(c["ok"])
+
+    def _note_recoveries(self, status: dict, age, now: float) -> None:
+        """Whatever the Captain was told is broken: ONE "working again" once it has been fine for BACK_AFTER_S. Called with the lock held."""
+        for name, began in list(self.open.items()):
+            fine = self._fine(name, status, age)
+            if fine is not True:
+                self.fine_since.pop(name, None)             # still broken, or not reported: the clock starts over
+                if fine is None and now - began > FORGET_S:
+                    self.open.pop(name, None)               # nobody has spoken of it for a week: forgotten without a word
+                    self._dirty = True
+                continue
+            since = self.fine_since.setdefault(name, now)
+            if now - since < BACK_AFTER_S:
+                continue
+            self.open.pop(name, None)
+            self.fine_since.pop(name, None)
+            self.told[name] = now                           # (a break within FLAP_S of this is not news)
+            self._dirty = True
+            self.notify(f"Skippy's doctor: {LABELS.get(name, name)} is working again after {_span(now - began)}.")
+
+    def _try(self, name: str, why: str) -> bool:
+        """Heal `name` if it may be tried now (the hourly allowance); when the allowance is used up, tell the Captain (see _tell)."""
+        now = self.clock()
+        tries = [t for t in self.tries.get(name, []) if now - t < 3600]
+        if len(tries) >= MAX_TRIES:
+            label = LABELS.get(name, name)
+            self._tell(name, f"Skippy's doctor: {label} is failing and {MAX_TRIES} tries this hour didn't fix it ({why}). I'll keep trying, "
+                             "and tell you once when it's back; Admin > Recovery has the details.",
+                       f"Skippy's doctor: {label} is still failing after <SPAN> ({why}). Admin > Recovery has the details.",
+                       since=(self.checks.get(name) or {}).get("since"))
+            return False
+        try:
+            self.starter.request("heal", "doctor", arg=name)
+        except ValueError:
+            return False                                     # already waiting, or the queue is full: next look
+        self.tries[name] = tries + [now]
+        self._dirty = True
+        self._log(f"heal {name}", why)
+        return True
+
+    def tick(self) -> list[str]:
+        """One look (called with every home report and every starter call): heal what has been failing long enough. Returns what it healed."""
+        try:
+            return self._tick()
+        finally:
+            self._flush()
+
+    def _tick(self) -> list[str]:
+        healed = []
+        if self.starter is None or not self.starter.online() or self._maintenance() or self.repairing and not self.repairing.get("done"):
+            self._unreachable()
+            return healed
+        now = self.clock()
+        with self._lock:
+            status = self.starter.status or {}
+            if isinstance(status.get("openaudible"), bool):  # the starter probes it itself: it listens on the host's loopback only
+                self._set("openaudible", status["openaudible"], "" if status["openaudible"] else
+                          ("the app is running but its web server is off" if status.get("openaudible_app") else "the app is not running"),
+                          down_s=(status.get("down_s") or {}).get("openaudible"))
+            for app in ("spotify", "vbcable"):    # the starter reads the host's processes and sound devices itself
+                if isinstance(status.get(app), bool):
+                    self._set(app, status[app], "" if status[app] else ("not installed or disabled" if app == "vbcable" else "the app is not running"),
+                              down_s=(status.get("down_s") or {}).get(app))
+            if status.get("docker") is not False:            # (Docker down is that one problem, handled below: not the direct door's as well)
+                self._look_at_edge(now)
+            age = self.home.age() if self.home else None
+            self._note_recoveries(status, age, now)          # what he was told is broken and now looks fine: one "working again"
+            if status.get("docker") is False:                # Docker itself: the starter restarts it clean
+                if self._try("docker", "Docker isn't answering"):
+                    healed.append("docker")
+                return healed
+            if age is not None and age > SILENT_HEAL_S and status.get("docker"):
+                if self._try("home-reporter", f"no report for {age // 60} min"):
+                    healed.append("home-reporter")
+            for name, c in self.checks.items():
+                if c["ok"] or now - c["since"] < HEAL_AFTER_S:
+                    continue
+                if name in REPORT_ONLY:
+                    continue
+                if name == "bridge" and status.get("busy"):
+                    continue                                 # mid-run: never pulled out from under a task
+                if name == "openaudible" and status.get("openaudible_app"):
+                    # running, web server off: a preference only the Captain sets, and the app may be converting his library.
+                    # Never touched; he is told once (and again only after a day).
+                    self._tell(name, "Skippy's doctor: OpenAudible is running but its web server is not answering. I left the app alone "
+                                     "(it may be converting). Turn it on in OpenAudible > Preferences > Web Server.",
+                               "Skippy's doctor: OpenAudible's web server is still off after <SPAN>. Turn it on in OpenAudible > Preferences > Web Server.",
+                               since=c["since"])
+                    continue
+                if self._try(name, c["why"] or "failing"):
+                    healed.append(name)
+        return healed
+
+    def _look_at_edge(self, now: float) -> None:
+        """The direct door (edge.py), looked at with every tick: a row once it has been up, and ONE DM when it has stayed down EDGE_DOWN_S (the Funnel
+        carries everything meanwhile, so it is news but never urgent). A door that has not been up once since this portal started says nothing at
+        all (it is optional). It is never healed: a router or an ISP is not the starter's to fix. Called with the lock held."""
+        if self.edge is None:
+            return
+        try:
+            self.edge.alive()                         # (starts a fresh probe in the background when the last one is old; never waits for it)
+            door = self.edge.status()
+        except Exception:  # noqa: BLE001 — an optional door never stops the doctor
+            return
+        old = self.checks.get(EDGE_CHECK)
+        if old is not None and now - old["at"] > EDGE_GAP_S:
+            self.checks.pop(EDGE_CHECK)               # nobody looked for a while: how long it has been down is not known, so the clock starts over
+        if not door.get("host") or door.get("ever_alive") is not True:
+            self.checks.pop(EDGE_CHECK, None)
+            return
+        up = door.get("alive") is True
+        self._set(EDGE_CHECK, up, door.get("error") or "no answer")
+        check = self.checks[EDGE_CHECK]
+        down_for = now - check["since"]
+        if up or down_for < EDGE_DOWN_S:
+            return
+        self._tell(EDGE_CHECK,
+                   f"Skippy's doctor: the direct door ({door['host']}) has been down for {_span(down_for)} ({check['why']}). Nothing is lost: the music, "
+                   "films, books and voice still go through the Funnel, only slower on a poor link. I'll tell you once when it's back.",
+                   f"Skippy's doctor: the direct door ({door['host']}) is still down after <SPAN> ({check['why']}); the Funnel is carrying everything meanwhile.",
+                   since=check["since"])
+
+    def _unreachable(self) -> None:
+        """skippy-pc and its starter both silent: nothing here can reach it (off, asleep, no internet). Tell the Captain once."""
+        if self.starter is None or self.starter.online():
+            return
+        age = self.home.age() if self.home else None
+        if age is not None and age < UNREACHABLE_DM_S:
+            return
+        with self._lock:
+            self._tell("skippy-pc", "Skippy's doctor: skippy-pc and its starter have both been silent for over 10 minutes. The PC is off, asleep, "
+                                    "at the sign-in screen, or without internet: nothing remote can fix that. I'll tell you once when it's back.",
+                       "Skippy's doctor: skippy-pc has been silent for <SPAN> now (off, asleep, at the sign-in screen, or without internet).")
+
+    # ── the button ──
+    def repair(self, by: str, failing_only: bool = False) -> dict:
+        """Everything back to its known good baseline, as one operation (the starter does skippy-pc's part, and Skippy Core's over
+        SSH): Docker answering (restarted clean if hung), main's latest pulled into skippy-pc's checkout when that is a fast-forward
+        (never discarding anything), every container up from it (rebuilt where it changed), whatever is failing recreated, the bridge
+        restarted when it isn't mid-run, Skippy Core repaired. The portal's own part (a redeploy when it is behind main or its last
+        deploy failed, stuck agent records cleared) is done by the caller (recovery_web.py)."""
+        failing = sorted(n for n, c in self.checks.items() if not c["ok"] and n not in ("docker", "core", "bridge", "openaudible", "spotify", *REPORT_ONLY))
+        cid = self.starter.request("repair", by, arg=",".join(failing))
+        with self._lock:
+            self.repairing = {"at": self.clock(), "by": by, "id": cid, "done": False, "ok": None, "summary": ""}
+            self.tries.clear()                               # a fresh start: the hourly allowances begin again
+            self._dirty = True
+            self._log("repair", "the Captain pressed Put everything back" if by != "doctor" else "", by)
+        self._flush()
+        return self.repairing
+
+    def repair_result(self) -> dict | None:
+        r = self.repairing
+        if r and not r["done"] and self.starter:
+            got = self.starter.result(r["id"])
+            if got is not None:
+                r.update(done=True, ok=got["ok"], summary=got["summary"])
+        return r
+
+    # ── what the card shows ──
+    def view(self) -> dict:
+        now = self.clock()
+        rows = []
+        starter_ok = bool(self.starter and self.starter.online())
+        rows.append({"name": "starter", "label": LABELS["starter"], "ok": starter_ok,
+                     "why": "" if starter_ok else "not answering: the PC is off, asleep, at sign-in, or the starter isn't installed"})
+        if self.starter and starter_ok:
+            docker = (self.starter.status or {}).get("docker")
+            rows.append({"name": "docker", "label": LABELS["docker"], "ok": bool(docker), "why": "" if docker else "not answering"})
+        age = self.home.age() if self.home else None
+        home_ok = age is not None and age < 60
+        rows.append({"name": "home-reporter", "label": LABELS["home-reporter"], "ok": home_ok,
+                     "why": "" if home_ok else ("never heard from" if age is None else f"silent for {age // 60} min")})
+        with self._lock:
+            for name, c in sorted(self.checks.items(), key=lambda kv: LABELS.get(kv[0], kv[0])):
+                rows.append({"name": name, "label": LABELS.get(name, name), "ok": c["ok"], "why": c["why"],
+                             "for_s": int(now - c["since"]), "ms": c["ms"], "stale": now - c["at"] > 180})
+            actions = [{**a, "ago_s": int(now - a["at"])} for a in reversed(self.actions[-8:])]
+        return {"rows": rows, "ok": all(r["ok"] for r in rows), "actions": actions, "maintenance": self._maintenance(),
+                "repair": self.repair_result()}
+
+
+RESIDENT = ("chat", "coder", "vision")      # Skippy Core's always-loaded models (core/models.json "resident")
+
+
+def core_loaded(base_url: str, key: str, get=None) -> bool:
+    """Is llama-swap up with every resident model loaded and ready? Its /running answers in milliseconds without touching the GPU, so a
+    box that is merely slow (a video or 3D pop-up rendering on the same GPU) says yes here while its replies crawl."""
+    import json
+    import urllib.request
+
+    def _get(url, headers, timeout):
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as r:
+            return json.loads(r.read(200_000) or b"{}")
+    try:
+        got = (get or _get)(base_url.rstrip("/") + "/running", {"x-api-key": key, "Authorization": "Bearer " + key}, 15)
+    except Exception:  # noqa: BLE001 — no answer at all: it really is down
+        return False
+    ready = {m.get("model") for m in (got.get("running") or []) if isinstance(m, dict) and m.get("state") == "ready"}
+    return all(name in ready for name in RESIDENT)
+
+
+def core_test(base_url: str, key: str, model: str = "chat", post=None, get=None) -> tuple[bool, str, int]:
+    """Skippy Core writes a few tokens, within CORE_TIMEOUT_S: (ok, why, ms). Straight to its Messages API (llama-swap behind the
+    Funnel), capped at 8 tokens, so a model that loads, thinks or loops forever is a failed test, not a hung portal."""
+    import json
+    import urllib.request
+    if not (base_url and key):
+        return False, "Skippy Core isn't configured", 0
+    t0 = time.monotonic()
+
+    def _post(url, body, headers, timeout):
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST", headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read(100_000) or b"{}")
+    try:
+        status, got = (post or _post)(base_url.rstrip("/") + "/v1/messages",
+                                      {"model": model, "max_tokens": 8, "messages": [{"role": "user", "content": "Say OK. /no_think"}]},
+                                      {"x-api-key": key, "Authorization": "Bearer " + key, "anthropic-version": "2023-06-01",
+                                       "Content-Type": "application/json"}, CORE_TIMEOUT_S)
+        ms = int((time.monotonic() - t0) * 1000)
+        if status != 200:
+            return False, f"HTTP {status}", ms
+        wrote = any(isinstance(b, dict) and (b.get("text") or b.get("thinking")) for b in got.get("content") or [])
+        return wrote, "" if wrote else "it answered with nothing", ms
+    except Exception as exc:  # noqa: BLE001 — every way of not answering is a failed test...
+        why = "no answer in time" if "timed out" in str(exc).lower() else f"no answer ({type(exc).__name__})"
+        ms = int((time.monotonic() - t0) * 1000)
+        # ...unless it is only slow: every model loaded and ready means a long job is sharing the GPU (a video pop-up), and healing it
+        # would reload every model while the job carries on (2026-10-24: twice). Busy is healthy; the next test looks again.
+        if core_loaded(base_url, key, get):
+            return True, "busy: slow to reply while the GPU works, every model loaded", ms
+        return False, why, ms

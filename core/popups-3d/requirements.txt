@@ -1,0 +1,22 @@
+# Hunyuan3D-2's own list (its requirements.txt, demo-only parts left out), pinned to what ran on skippy-core 2026-10-24.
+# transformers stays on 4.x: 5.x renamed DINOv2's attention weights and the shape model's image encoder no longer loads.
+ninja==1.13.2
+pybind11==3.1.0
+transformers==4.57.1
+diffusers==0.35.2
+accelerate==1.15.0
+einops==0.8.2
+omegaconf==2.4.0
+opencv-python-headless==5.0.0.93
+numpy==2.4.3
+pillow==12.2.0
+scipy==1.18.1
+tqdm==4.70.1
+trimesh==5.2.0
+pymeshlab==2025.7.post1
+pygltflib==1.16.5
+xatlas==0.0.11
+rembg==2.0.86
+onnxruntime==1.31.0
+huggingface_hub==0.36.2
+flask==3.1.3

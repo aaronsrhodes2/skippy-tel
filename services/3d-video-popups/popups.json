@@ -1,0 +1,79 @@
+{
+  "_doc": "The 3D and video pop-ups (docs/popups.md, docs/3d-video-popups.md): one service on skippy-core, core/popups-3d, port 7348. Quality tier: slow, patient jobs that load only while they work.",
+  "popups": [
+    {
+      "name": "image_to_3d",
+      "family": "3d-video",
+      "box": "core",
+      "tier": "quality",
+      "url_env": "POPUPS3D_URL",
+      "url": "http://skippy-core:7348",
+      "endpoint": "/image_to_3d",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "texture": {"type": "boolean", "description": "Paint a texture onto the model (default true). False gives a bare grey shape in a fraction of the time."},
+          "shape": {"type": "string", "enum": ["full", "mini"], "description": "full (default): the better shape model. mini: a smaller, rougher one."},
+          "seed": {"type": "integer", "description": "Fixes the result, to make the same model again."}
+        },
+        "additionalProperties": false
+      },
+      "media_in": ["image/*"],
+      "media_required": true,
+      "outputs": ["model/gltf-binary"],
+      "est_seconds": 180,
+      "mem_gb": 18,
+      "audience": "admin",
+      "description": "Turns ONE attached picture of a single object into a textured 3D model (.glb) for AR, Garry's Mod props or tabletop miniatures. Works best on one object, whole and centered, on a plain background; the background is removed for you. Takes a couple of minutes."
+    },
+    {
+      "name": "text_to_3d",
+      "family": "3d-video",
+      "box": "core",
+      "tier": "quality",
+      "url_env": "POPUPS3D_URL",
+      "url": "http://skippy-core:7348",
+      "endpoint": "/text_to_3d",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "prompt": {"type": "string", "description": "The one object to make, described plainly: what it is, its shape, colours and materials. No scene, no background."},
+          "texture": {"type": "boolean", "description": "Paint a texture onto the model (default true)."},
+          "seed": {"type": "integer", "description": "Fixes the result."}
+        },
+        "required": ["prompt"],
+        "additionalProperties": false
+      },
+      "outputs": ["model/gltf-binary"],
+      "est_seconds": 900,
+      "mem_gb": 30,
+      "audience": "admin",
+      "description": "Makes a textured 3D model (.glb) of one object from a description, for AR, Garry's Mod props or tabletop miniatures: it draws a picture of the object first, then turns that into 3D. Use image_to_3d instead when the user attached a picture. Slow: about ten minutes."
+    },
+    {
+      "name": "make_video",
+      "family": "3d-video",
+      "box": "core",
+      "tier": "quality",
+      "url_env": "POPUPS3D_URL",
+      "url": "http://skippy-core:7348",
+      "endpoint": "/make_video",
+      "inputs": {
+        "type": "object",
+        "properties": {
+          "prompt": {"type": "string", "description": "What happens in the clip: the subject, the motion, the camera, the light. One shot."},
+          "seconds": {"type": "number", "description": "Length, 1 to 4 seconds (default 3; about 10 minutes of work per second of clip)."},
+          "seed": {"type": "integer", "description": "Fixes the result."}
+        },
+        "required": ["prompt"],
+        "additionalProperties": false
+      },
+      "media_in": ["image/*"],
+      "outputs": ["video/mp4"],
+      "est_seconds": 1900,
+      "mem_gb": 22,
+      "audience": "admin",
+      "description": "Makes a short video clip (1 to 4 seconds, mp4, no sound) from a description; an attached picture becomes its first frame and gets animated. Slow: up to an hour."
+    }
+  ]
+}

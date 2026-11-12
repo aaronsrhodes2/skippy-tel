@@ -1,0 +1,335 @@
+# The garage door: a ratgdo32 (an ESP32 board on the opener's wall-button terminals) speaking Security+ 2.0 to the Captain's LiftMaster
+# (yellow learn button). No MyQ, no cloud: the hub (services/satellite/garage.py) is its Home Assistant, over ESPHome's native API.
+#
+#   bash services/satellite/rooms/flash_garage.sh        (first time over USB-C; after that over Wi-Fi)
+#
+# This is ratgdo's own v32board.yaml + base.yaml (github.com/ratgdo/esphome-ratgdo, GPL-2.0), pinned to tag v1635 (commit c11e9347,
+# 2026-10-16) instead of following `main`, with these changes for a house that has no Home Assistant:
+#   * the API is encrypted with GARAGE_ESPHOME_KEY and OTA needs GARAGE_ESPHOME_OTA (flash_garage.sh writes both into secrets.yaml);
+#   * no Home Assistant time source or notification service (nothing would answer them); a failed sync is logged instead;
+#   * no Improv / web installer / dashboard import (we flash it ourselves); the fallback hotspot has a password.
+# The entities the hub reads: the cover "Door" (device_class garage), the light "Light", binary sensors "Motion" and "Obstruction",
+# and the lock "Lock remotes". Everything else is ratgdo's diagnostics, left as upstream has them.
+
+substitutions:
+  id_prefix: ratgdo32
+  friendly_name: "Garage"
+  uart_tx_pin: GPIO17
+  uart_rx_pin: GPIO21
+  input_obst_pin: GPIO4
+  status_door_pin: GPIO26
+  status_obstruction_pin: GPIO25
+  dry_contact_open_pin: GPIO13
+  dry_contact_close_pin: GPIO14
+  dry_contact_light_pin: GPIO27
+
+esphome:
+  name: skippy-garage
+  friendly_name: ${friendly_name}
+  min_version: 2026.4.0
+  project:
+    name: ratgdo.v32board_secplus2
+    version: "32.0"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/ratgdo/esphome-ratgdo
+      ref: c11e9347b980d493421905613da4c7e502f886e2      # tag v1635; to update: a newer tag's commit here, then flash_garage.sh
+    components: [ratgdo]
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "skippy-garage"
+    password: !secret skippy_garage_ota_password
+
+captive_portal:
+
+logger:
+
+api:
+  id: api_server
+  encryption:
+    key: !secret skippy_garage_api_key
+  services:
+    - service: wipe_devices_from_gdo_memory
+      variables:
+        devices_to_wipe: string
+      then:
+        - lambda: !lambda |-
+            id($id_prefix).clear_paired_devices(devices_to_wipe);
+
+ota:
+  - platform: esphome
+    id: ${id_prefix}_ratgdo_ota
+    password: !secret skippy_garage_ota_password
+
+web_server:
+  local: true
+  auth:
+    username: skippy
+    password: !secret skippy_garage_ota_password
+
+safe_mode:
+
+preferences:
+  flash_write_interval: 1min
+
+text_sensor:
+  - platform: version
+    id: ${id_prefix}_firmware_version
+    name: "Firmware Version"
+
+ratgdo:
+  id: ${id_prefix}
+  input_gdo_pin: ${uart_rx_pin}
+  output_gdo_pin: ${uart_tx_pin}
+  input_obst_pin: ${input_obst_pin}
+  on_sync_failed:
+    then:
+      - logger.log:
+          level: ERROR
+          format: "could not talk to the opener at startup: check the red/white wires and that the opener is Security+ 2.0"
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 120s
+  - platform: ratgdo
+    id: ${id_prefix}_openings
+    type: openings
+    entity_category: diagnostic
+    name: "Openings"
+    unit_of_measurement: "openings"
+    icon: mdi:open-in-app
+  - platform: ratgdo
+    id: ${id_prefix}_paired_devices_total
+    type: paired_devices_total
+    entity_category: diagnostic
+    name: "Paired Devices"
+    icon: mdi:remote
+
+lock:
+  - platform: ratgdo
+    id: ${id_prefix}_lock_remotes
+    name: "Lock remotes"
+
+switch:
+  - platform: ratgdo
+    id: ${id_prefix}_led
+    type: led
+    pin:
+      number: GPIO2
+      ignore_strapping_warning: true
+    name: "LED"
+    entity_category: config
+  - platform: gpio
+    id: "${id_prefix}_status_door"
+    internal: true
+    pin:
+      number: ${status_door_pin}
+      mode:
+        output: true
+    name: "Status door"
+    entity_category: diagnostic
+  - platform: gpio
+    id: "${id_prefix}_status_obstruction"
+    internal: true
+    pin:
+      number: ${status_obstruction_pin}
+      mode:
+        output: true
+    name: "Status obstruction"
+    entity_category: diagnostic
+  - platform: ratgdo
+    id: "${id_prefix}_learn"
+    type: learn
+    name: "Learn"
+    icon: mdi:plus-box
+    entity_category: config
+
+binary_sensor:
+  - platform: ratgdo
+    type: motion
+    id: ${id_prefix}_motion
+    name: "Motion"
+    device_class: motion
+  - platform: ratgdo
+    type: obstruction
+    id: ${id_prefix}_obstruction
+    name: "Obstruction"
+    device_class: problem
+    on_press:
+      - switch.turn_on: ${id_prefix}_status_obstruction
+    on_release:
+      - switch.turn_off: ${id_prefix}_status_obstruction
+  - platform: ratgdo
+    type: button
+    id: ${id_prefix}_button
+    name: "Button"
+    entity_category: diagnostic
+  - platform: ratgdo
+    type: motor
+    id: ${id_prefix}_motor
+    name: "Motor"
+    device_class: running
+    entity_category: diagnostic
+  - platform: gpio
+    id: "${id_prefix}_dry_contact_open"
+    pin:
+      number: ${dry_contact_open_pin}
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: "Dry contact open"
+    entity_category: diagnostic
+    filters:
+      - delayed_on_off: 500ms
+    on_press:
+      then:
+        script.execute: "${id_prefix}_dry_contact_door_control"
+  - platform: gpio
+    id: "${id_prefix}_dry_contact_close"
+    pin:
+      number: ${dry_contact_close_pin}
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: "Dry contact close"
+    entity_category: diagnostic
+    filters:
+      - delayed_on_off: 500ms
+    on_press:
+      then:
+        script.execute: "${id_prefix}_dry_contact_door_control"
+  - platform: gpio
+    id: "${id_prefix}_dry_contact_light"
+    pin:
+      number: ${dry_contact_light_pin}
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: "Dry contact light"
+    entity_category: diagnostic
+    filters:
+      - delayed_on_off: 500ms
+    on_press:
+      - light.toggle: ${id_prefix}_light
+
+script:
+  - id: "${id_prefix}_dry_contact_door_control"
+    then:
+      - delay: 0.1s
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_on: ${id_prefix}_dry_contact_close
+              - binary_sensor.is_on: ${id_prefix}_dry_contact_open
+          then:
+            - cover.toggle: ${id_prefix}_garage_door
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_off: ${id_prefix}_dry_contact_close
+              - binary_sensor.is_on: ${id_prefix}_dry_contact_open
+          then:
+            - cover.open: ${id_prefix}_garage_door
+      - if:
+          condition:
+            and:
+              - binary_sensor.is_on: ${id_prefix}_dry_contact_close
+              - binary_sensor.is_off: ${id_prefix}_dry_contact_open
+          then:
+            - cover.close: ${id_prefix}_garage_door
+
+number:
+  - platform: ratgdo
+    id: ${id_prefix}_rolling_code_counter
+    type: rolling_code_counter
+    entity_category: config
+    name: "Rolling code counter"
+    mode: box
+    unit_of_measurement: "codes"
+  - platform: ratgdo
+    id: ${id_prefix}_opening_duration
+    type: opening_duration
+    entity_category: config
+    name: "Opening duration"
+    unit_of_measurement: "s"
+  - platform: ratgdo
+    id: ${id_prefix}_closing_duration
+    type: closing_duration
+    entity_category: config
+    name: "Closing duration"
+    unit_of_measurement: "s"
+  - platform: ratgdo
+    id: ${id_prefix}_client_id
+    type: client_id
+    entity_category: config
+    name: "Client ID"
+    mode: box
+
+cover:
+  - platform: ratgdo
+    id: ${id_prefix}_garage_door
+    device_class: garage
+    name: "Door"
+    on_closed:
+      - switch.turn_off: ${id_prefix}_status_door
+    on_opened:
+      - switch.turn_on: ${id_prefix}_status_door
+
+light:
+  - platform: ratgdo
+    id: ${id_prefix}_light
+    name: "Light"
+
+button:
+  - platform: restart
+    id: ${id_prefix}_restart
+    name: "Restart"
+  - platform: safe_mode
+    id: ${id_prefix}_safe_mode
+    name: "Safe mode boot"
+    entity_category: diagnostic
+  - platform: template
+    id: ${id_prefix}_query_status
+    entity_category: diagnostic
+    name: "Query status"
+    on_press:
+      then:
+        lambda: !lambda |-
+          id($id_prefix).query_status();
+  - platform: template
+    id: ${id_prefix}_query_openings
+    name: "Query openings"
+    entity_category: diagnostic
+    on_press:
+      then:
+        lambda: !lambda |-
+          id($id_prefix).query_openings();
+  - platform: template
+    id: ${id_prefix}_sync
+    name: "Sync"
+    entity_category: diagnostic
+    on_press:
+      then:
+        lambda: !lambda |-
+          id($id_prefix).sync();
+  - platform: template
+    id: ${id_prefix}_toggle_door
+    name: "Toggle door"
+    on_press:
+      then:
+        lambda: !lambda |-
+          id($id_prefix).door_toggle();

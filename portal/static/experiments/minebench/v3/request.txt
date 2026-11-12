@@ -1,0 +1,36 @@
+# Build request v3: the same train, made solid
+
+Everything in BUILD_REQUEST_V2.md still stands: read it again, all of it. v3 changes how you check your work.
+
+## Start from v2, don't start over
+build.json is your v2 build (git history has v1). Its parts are good: the boiler, domes, bell, cab, cowcatcher, smoke, the
+passenger cars with clerestory roofs and windows, the platform, depot and water tower. Keep them; fix what is wrong.
+
+## What v2 got wrong (the runtime proves it)
+`node minebench_runtime.mjs build.json` now reports FLOATING PARTS: pieces of blocks joined face to face that don't reach the
+ground. On v2 it reports 123 floating pieces, 25,705 blocks:
+- the whole locomotive with its smoke (12,846 blocks, x 140-210): it rests on nothing, so the boiler and frame do not touch the
+  wheels, and the wheels do not stand on the rails;
+- both passenger cars (4,596 blocks each, z 23-36 and z 70-83) and their roofs (1,544 each): the cars are not on the track at all
+  (the track is at z 124-132); they float beside the plate;
+- small pieces: railings, posts and trim that don't touch what they belong to.
+The vision model looked at v2 and called it "recognisable", and missed all of this. Describing a picture is not checking it.
+
+## The checks, every pass
+1. Run the runtime. `floating_parts` must be 0 except the smoke plume (one piece, white_wool/gray_wool, above the stack). For each
+   other floating piece it prints the box and materials: find the code that made it and fix the coordinates so it touches what
+   holds it up (wheels on rails, frame on wheels, body on frame, roof on walls, railings on platforms). Run again until clean.
+2. Render: `python D:/Aaron/development/SkippyTel/tools/voxel/render.py build.json shots/v3-passN.png "v3 pass N" --zoom 0.6`.
+3. Look, with pointed questions. Read the picture and check, one by one, against what it describes:
+   - Are both passenger cars ON the track, in line behind the tender, nose to tail, and not beside it?
+   - Are the wheels vertical discs standing on the rails, under the locomotive, tender and cars, and not lying flat or apart?
+   - Is the locomotive's body joined to its frame and wheels: no gap between the boiler and the wheels?
+   - Is the smokestack the tallest part, flared, with the smoke rising from it and drifting back?
+   - Can you see the cab's windows, the domes and the bell, and the cowcatcher at the very front?
+   If the description doesn't answer a question, or answers it wrong, fix that and look again.
+4. At least three passes. Stop only when the runtime is clean (smoke excepted) AND every question above is answered yes.
+
+## When it is done
+Render the final with `--glb shots/v3-final.glb`, commit everything locally (no remote: never push), and show it in the chat on
+their own lines: `SKIPPY_IMAGE: shots/v3-final.png` and `SKIPPY_MODEL: shots/v3-final.glb`, with the block count and the
+runtime's floating_parts count.

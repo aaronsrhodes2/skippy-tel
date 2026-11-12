@@ -1,0 +1,10 @@
+# Real Satisfactory dedicated-server log lines, 2026-09-30: a client used Multiplayer > Join Game (the IP-or-Session-ID screen) instead of the Server Manager.
+# The server accepts the connection, then drops it for lack of the token the Server Manager handshake supplies. The client's address is replaced with x.x.x.x.
+[2026.09.30-07.13.43:994][278]LogNet: NotifyAcceptingConnection accepted from: [::ffff:x.x.x.x]:64307
+[2026.09.30-07.13.44:061][280]LogNet: NotifyAcceptingConnection accepted from: [::ffff:x.x.x.x]:64307
+[2026.09.30-07.19.52:249][297]LogNet: NotifyAcceptingConnection accepted from: [::ffff:x.x.x.x]:59404
+[2026.09.30-07.19.52:316][299]LogNet: Warning: IpConnection_2147482141: No EncryptionToken specified, disconnecting.
+[2026.09.30-07.19.52:316][299]LogNet:  - Result=EncryptionTokenMissing, ErrorContext="EncryptionTokenMissing"
+[2026.09.30-07.19.52:383][301]LogNet: NotifyAcceptingConnection accepted from: [::ffff:x.x.x.x]:59404
+[2026.09.30-07.20.49:855][ 21]LogNet: NotifyAcceptingConnection accepted from: [::ffff:x.x.x.x]:54898
+[2026.09.30-07.20.49:922][ 23]LogNet: NotifyAcceptingConnection accepted from: [::ffff:x.x.x.x]:54898

@@ -1,0 +1,187 @@
+<title>Skippy Voice Bake-off</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column like a bridge console; a reference strip, then one panel per line with blind takes A-E, then the speed log.
+   Single dark look on purpose (the Skippy palette: black is the ground, colour is light). */
+:root {
+  color-scheme: dark;
+  --bg: #000000;
+  --panel: #07110d;
+  --line: #0f3324;
+  --line-hi: #1d6b4a;
+  --fg: #e9f5ef;
+  --dim: #8fb3a3;
+  --green: #00ff88;
+  --cyan: #00ccff;
+  --amber: #ffaa00;
+  --violet: #818cf8;
+  --red: #ff4444;
+  --display: "Chakra Petch", "Segoe UI", system-ui, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+body { background: var(--bg); color: var(--fg); font: 15px/1.55 var(--body); }
+.wrap { max-width: 860px; margin: 0 auto; padding-block: 28px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 28px; }
+h1 { font: 700 clamp(28px, 6vw, 40px)/1.05 var(--display); letter-spacing: .02em; margin: 0; color: var(--green); text-wrap: balance; }
+h2 { font: 700 18px/1.2 var(--display); letter-spacing: .06em; text-transform: uppercase; margin: 0; color: var(--cyan); }
+p { margin: 0; max-width: 65ch; }
+.lede { display: grid; gap: 10px; color: var(--dim); }
+.lede b { color: var(--fg); font-weight: 600; }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--amber); }
+.panel { background: var(--panel); border: 1px solid var(--line); clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px)); padding: 18px; display: grid; gap: 14px; }
+.ref { border-color: var(--line-hi); }
+.quote { font-style: italic; color: var(--dim); }
+.line-head { display: flex; gap: 12px; align-items: baseline; }
+.num { font: 500 13px/1 var(--mono); color: var(--amber); flex: none; font-variant-numeric: tabular-nums; }
+.text { font-weight: 500; min-width: 0; }
+.takes { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.take { border: 1px solid var(--line); padding: 10px; display: grid; gap: 8px; min-width: 0; }
+.take.playing { border-color: var(--green); box-shadow: 0 0 0 1px var(--green) inset; }
+.take-top { display: flex; align-items: center; gap: 10px; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.play { width: 38px; height: 38px; flex: none; border: 1px solid var(--line-hi); background: transparent; color: var(--green); display: grid; place-items: center; }
+.play:hover { background: #00ff8814; }
+.play svg { width: 14px; height: 14px; fill: currentColor; }
+.label { font: 700 22px/1 var(--display); }
+.stars { display: flex; gap: 2px; }
+.star { background: none; border: 0; padding: 2px; color: var(--line-hi); font-size: 19px; line-height: 1; }
+.star.on { color: var(--amber); }
+.guess { display: flex; align-items: center; gap: 6px; font: 400 12px/1.2 var(--mono); color: var(--dim); }
+.guess input { accent-color: var(--violet); }
+.who { font: 500 12px/1.3 var(--mono); color: var(--violet); }
+.who.real { color: var(--cyan); }
+.bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.btn { border: 1px solid var(--green); background: transparent; color: var(--green); padding: 10px 16px; font: 700 14px/1 var(--display); letter-spacing: .08em; text-transform: uppercase; }
+.btn:hover { background: #00ff8814; }
+.btn.alt { border-color: var(--line-hi); color: var(--dim); }
+.status { font: 400 13px/1.3 var(--mono); color: var(--dim); }
+.tablebox { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font: 400 13px/1.4 var(--mono); font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--dim); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; font-size: 11px; }
+td.n { text-align: right; }
+.good { color: var(--green); } .warn { color: var(--amber); } .bad { color: var(--red); }
+.foot { color: var(--dim); font-size: 13px; }
+@media (prefers-reduced-motion: no-preference) { .take { transition: border-color .15s; } }
+</style>
+
+<div class="wrap">
+  <header class="lede">
+    <span class="eyebrow">Blind A/B · skippy-pc speech box trial</span>
+    <h1>Skippy Voice Bake-off</h1>
+    <p>Each line below is spoken six ways: by <b>two ElevenLabs voices</b> (the designed Skippy voice in the vault, and the voice the chat's speaker key actually plays today) and by <b>four local models</b> on skippy-pc's GPU, each cloning zero-shot from the same 11-second clip of the source recording below. Letters are shuffled on every line, and every clip has the same loudness and codec.</p>
+    <p>Play the takes, give each one 1 to 5 stars for how much it sounds like Skippy, and tick the one you think is ElevenLabs. Then press <b>Reveal</b>. Your ratings stay in this browser.</p>
+  </header>
+
+  <section class="panel ref" aria-label="Reference recording">
+    <span class="eyebrow">The reference every local model heard</span>
+    <div class="take-top"><button class="play" id="ref-play" aria-label="Play the reference"><svg viewBox="0 0 10 10"><path d="M1 0l9 5-9 5z"/></svg></button><p class="quote" id="ref-text"></p></div>
+  </section>
+
+  <div id="lines" style="display:grid;gap:16px"></div>
+
+  <div class="bar">
+    <button class="btn" id="reveal">Reveal</button>
+    <button class="btn alt" id="copy">Copy my ratings</button>
+    <button class="btn alt" id="reset">Clear ratings</button>
+    <span class="status" id="status" role="status"></span>
+  </div>
+
+  <section class="panel" id="scores" hidden>
+    <h2>Your scores</h2>
+    <p class="foot">Same speaker: cosine between voice prints from a neutral speaker encoder (Resemblyzer); about 0.8 and up usually means the same person, 0.5 to 0.7 a different one. Word errors: what the home Whisper heard against the script.</p>
+    <div class="tablebox"><table><thead><tr><th>Voice</th><th>Avg stars</th><th>Rated</th><th>Picked as ElevenLabs</th><th>Same speaker as recording</th><th>Same speaker as EL Skippy</th><th>Word errors</th></tr></thead><tbody id="score-body"></tbody></table></div>
+  </section>
+
+  <section class="panel">
+    <h2>Speed on the hardware</h2>
+    <p class="foot">Averages over the 10 lines after one warm-up. RTF is render time divided by audio length: below 1 is faster than real time. First audio is the first streamed chunk where the model streams, otherwise the whole render. VRAM is torch's peak reserved memory, beside the 6 GB qwen3:8b that Ollama keeps on the same card.</p>
+    <div class="tablebox"><table><thead><tr><th>Voice</th><th>Runs on</th><th>First audio</th><th>Per line</th><th>RTF</th><th>VRAM</th><th>Load</th></tr></thead><tbody id="speed-body"></tbody></table></div>
+  </section>
+  <p class="foot">Skippy the Magnificent © Craig Alanson; narration voice R.C. Bray. The cloned voice is for personal use only.</p>
+</div>
+
+<script>
+const D = /*DATA*/null;
+const KEY = "skippy-bakeoff-v1";
+let S = { stars: {}, guess: {}, revealed: false };
+try { S = Object.assign(S, JSON.parse(localStorage.getItem(KEY) || "{}")); } catch (e) {}
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) {} };
+const $ = id => document.getElementById(id);
+const player = new Audio();
+let playingEl = null;
+const PLAY = '<svg viewBox="0 0 10 10"><path d="M1 0l9 5-9 5z"/></svg>', STOP = '<svg viewBox="0 0 10 10"><path d="M1 1h8v8H1z"/></svg>';
+function play(b64, el, btn) {
+  if (playingEl === el && !player.paused) { player.pause(); stopUi(); return; }
+  stopUi();
+  player.src = "data:audio/mpeg;base64," + b64;
+  player.play().catch(() => {});
+  playingEl = el; el && el.classList.add("playing"); btn.innerHTML = STOP; btn._on = true;
+  player.onended = stopUi;
+}
+function stopUi() {
+  document.querySelectorAll(".playing").forEach(e => e.classList.remove("playing"));
+  document.querySelectorAll(".play").forEach(b => { if (b._on) { b.innerHTML = PLAY; b._on = false; } });
+  playingEl = null;
+}
+$("ref-text").textContent = "“" + D.refText + "”";
+$("ref-play").onclick = e => play(D.ref, $("ref-play").closest(".panel"), e.currentTarget);
+
+function render() {
+  const root = $("lines"); root.innerHTML = "";
+  D.lines.forEach((ln, i) => {
+    const p = document.createElement("section"); p.className = "panel";
+    p.innerHTML = `<div class="line-head"><span class="num">${String(i + 1).padStart(2, "0")}</span><p class="text"></p></div><div class="takes"></div>`;
+    p.querySelector(".text").textContent = ln.text;
+    const takes = p.querySelector(".takes");
+    ln.clips.forEach(c => {
+      const id = i + c.label, t = document.createElement("div"); t.className = "take";
+      t.innerHTML = `<div class="take-top"><button class="play" aria-label="Play take ${c.label}">${PLAY}</button><span class="label">${c.label}</span></div>
+        <div class="stars" role="group" aria-label="Stars for take ${c.label}">${[1,2,3,4,5].map(n => `<button class="star${(S.stars[id]||0) >= n ? " on" : ""}" data-n="${n}" aria-label="${n} stars">★</button>`).join("")}</div>
+        <label class="guess"><input type="radio" name="g${i}" id="g${id}" ${S.guess[i] === c.label ? "checked" : ""}> This is ElevenLabs</label>
+        ${S.revealed ? `<span class="who${c.src === "elevenlabs" ? " real" : ""}">${D.names[c.src]}</span>` : ""}`;
+      t.querySelector(".play").onclick = e => play(c.b64, t, e.currentTarget);
+      t.querySelectorAll(".star").forEach(s => s.onclick = () => { const n = +s.dataset.n; S.stars[id] = S.stars[id] === n ? 0 : n; save(); render(); });
+      t.querySelector("input").onchange = () => { S.guess[i] = c.label; save(); };
+      takes.appendChild(t);
+    });
+    root.appendChild(p);
+  });
+  renderScores();
+}
+function tally() {
+  const r = {};
+  Object.keys(D.names).forEach(k => r[k] = { sum: 0, n: 0, picked: 0 });
+  D.lines.forEach((ln, i) => ln.clips.forEach(c => {
+    if (!r[c.src]) return;
+    const s = S.stars[i + c.label]; if (s) { r[c.src].sum += s; r[c.src].n++; }
+    if (S.guess[i] === c.label) r[c.src].picked++;
+  }));
+  return r;
+}
+function renderScores() {
+  $("scores").hidden = !S.revealed; if (!S.revealed) return;
+  const r = tally(), keys = Object.keys(r).filter(k => D.lines[0].clips.some(c => c.src === k));
+  keys.sort((a, b) => (r[b].n ? r[b].sum / r[b].n : 0) - (r[a].n ? r[a].sum / r[a].n : 0));
+  $("score-body").innerHTML = keys.map(k => `<tr><td>${D.names[k]}</td><td class="n">${r[k].n ? (r[k].sum / r[k].n).toFixed(2) : "–"}</td><td class="n">${r[k].n}/${D.lines.length}</td><td class="n">${r[k].picked}</td><td class="n">${D.sim[k] ? D.sim[k].vs_source_recording.toFixed(2) : "–"}</td><td class="n">${D.sim[k] && D.sim[k].vs_elevenlabs_skippy != null ? D.sim[k].vs_elevenlabs_skippy.toFixed(2) : "–"}</td><td class="n">${D.wer[k] != null ? (D.wer[k] * 100).toFixed(0) + " %" : "–"}</td></tr>`).join("");
+}
+function speed() {
+  const f = (v, d = 2, u = "") => v == null ? "–" : v.toFixed(d) + u;
+  $("speed-body").innerHTML = D.speed.map(s => {
+    const rc = s.rtf == null ? "" : s.rtf < 0.5 ? "good" : s.rtf < 1 ? "warn" : "bad";
+    return `<tr><td>${D.names[s.key]}</td><td>${s.where}</td><td class="n">${f(s.ttfa, 2, " s")}${s.streamed ? "" : "*"}</td><td class="n">${f(s.wall, 2, " s")}</td><td class="n ${rc}">${f(s.rtf)}</td><td class="n">${f(s.vram, 1, " GB")}</td><td class="n">${f(s.load, 0, " s")}</td></tr>`;
+  }).join("") + `<tr><td colspan="7" class="foot">* not streamed: the first audio is the whole line. ElevenLabs is timed through flask-api, from the request to the first byte.</td></tr>`;
+}
+$("reveal").onclick = () => { S.revealed = !S.revealed; $("reveal").textContent = S.revealed ? "Hide names" : "Reveal"; save(); render(); };
+$("reveal").textContent = S.revealed ? "Hide names" : "Reveal";
+$("reset").onclick = () => { S = { stars: {}, guess: {}, revealed: false }; save(); $("reveal").textContent = "Reveal"; render(); $("status").textContent = "Ratings cleared"; };
+$("copy").onclick = () => {
+  const r = tally();
+  const txt = "Skippy voice bake-off, my ratings:\n" + Object.keys(r).filter(k => D.lines[0].clips.some(c => c.src === k)).map(k => `${D.names[k]}: ${r[k].n ? (r[k].sum / r[k].n).toFixed(2) : "-"} stars over ${r[k].n} lines; picked as ElevenLabs ${r[k].picked}x`).join("\n");
+  navigator.clipboard.writeText(txt).then(() => $("status").textContent = "Copied. Paste it to Skippy.", () => $("status").textContent = txt);
+};
+render(); speed();
+</script>

@@ -1,0 +1,232 @@
+```python
+def evaluate(expr: str) -> float:
+    """
+    Evaluate an arithmetic expression string without using eval, exec, compile, or ast.
+    
+    Supports: integers, decimals, +, -, *, /, %, **, unary +/-, parentheses.
+    Precedence follows Python's rules.
+    """
+    import re
+    
+    # Token types
+    NUMBER = 'NUMBER'
+    PLUS = 'PLUS'
+    MINUS = 'MINUS'
+    STAR = 'STAR'
+    SLASH = 'SLASH'
+    PERCENT = 'PERCENT'
+    POW = 'POW'
+    LPAREN = 'LPAREN'
+    RPAREN = 'RPAREN'
+    
+    # Tokenize
+    def tokenize(s):
+        tokens = []
+        i = 0
+        while i < len(s):
+            c = s[i]
+            if c.isspace():
+                i += 1
+                continue
+            if c.isdigit() or c == '.':
+                # Parse number
+                start = i
+                has_dot = (c == '.')
+                i += 1
+                while i < len(s) and (s[i].isdigit() or s[i] == '.'):
+                    if s[i] == '.':
+                        if has_dot:
+                            raise ValueError(f"Invalid number format at position {i}")
+                        has_dot = True
+                    i += 1
+                num_str = s[start:i]
+                if num_str == '.':
+                    raise ValueError(f"Invalid number format at position {start}")
+                tokens.append((NUMBER, float(num_str)))
+            elif c == '+':
+                tokens.append((PLUS, '+'))
+                i += 1
+            elif c == '-':
+                tokens.append((MINUS, '-'))
+                i += 1
+            elif c == '*':
+                if i + 1 < len(s) and s[i + 1] == '*':
+                    tokens.append((POW, '**'))
+                    i += 2
+                else:
+                    tokens.append((STAR, '*'))
+                    i += 1
+            elif c == '/':
+                tokens.append((SLASH, '/'))
+                i += 1
+            elif c == '%':
+                tokens.append((PERCENT, '%'))
+                i += 1
+            elif c == '(':
+                tokens.append((LPAREN, '('))
+                i += 1
+            elif c == ')':
+                tokens.append((RPAREN, ')'))
+                i += 1
+            else:
+                raise ValueError(f"Unknown character: {c!r} at position {i}")
+        return tokens
+    
+    tokens = tokenize(expr)
+    
+    if not tokens:
+        raise ValueError("Empty expression")
+    
+    # Check for unbalanced parentheses
+    depth = 0
+    for ttype, tval in tokens:
+        if ttype == LPAREN:
+            depth += 1
+        elif ttype == RPAREN:
+            depth -= 1
+            if depth < 0:
+                raise ValueError("Unbalanced parentheses: extra closing paren")
+    if depth != 0:
+        raise ValueError("Unbalanced parentheses: extra opening paren")
+    
+    # Check for dangling operators and other structural issues
+    # A valid expression should have numbers, parens, and operators in proper positions
+    # Let's check basic structural validity
+    for idx, (ttype, tval) in enumerate(tokens):
+        if ttype == NUMBER:
+            if idx > 0:
+                prev_type = tokens[idx - 1][0]
+                # Number cannot follow another number or a closing paren or an operator that expects an operand on the right
+                if prev_type in (NUMBER, RPAREN):
+                    raise ValueError("Two numbers in a row or number after closing paren")
+        elif ttype == LPAREN:
+            if idx > 0:
+                prev_type = tokens[idx - 1][0]
+                # LPAREN cannot follow a number, RPAREN, or another LPAREN directly (like (2(3)) is invalid)
+                if prev_type in (NUMBER, RPAREN):
+                    raise ValueError("LPAREN after number or closing paren")
+        elif ttype == RPAREN:
+            if idx == 0:
+                raise ValueError("Expression starts with closing paren")
+            prev_type = tokens[idx - 1][0]
+            if prev_type in (PLUS, MINUS, STAR, SLASH, PERCENT, POW, LPAREN):
+                raise ValueError("Closing paren after operator or opening paren")
+        elif ttype in (PLUS, MINUS, STAR, SLASH, PERCENT, POW):
+            if idx == 0:
+                raise ValueError("Expression starts with operator")
+            if idx == len(tokens) - 1:
+                raise ValueError("Expression ends with operator")
+            next_type = tokens[idx + 1][0]
+            if next_type in (PLUS, MINUS, STAR, SLASH, PERCENT, POW, RPAREN):
+                raise ValueError("Operator followed by operator or closing paren")
+    
+    # Now parse using recursive descent or Pratt parsing
+    # Precedence (low to high):
+    # 1: +, - (binary)
+    # 2: *, /, %
+    # 3: ** (right associative)
+    # 4: unary +, -
+    # 5: primary (numbers, parenthesized expressions)
+    
+    pos = [0]  # Use list to allow mutation in nested functions
+    
+    def peek():
+        if pos[0] < len(tokens):
+            return tokens[pos[0]]
+        return None
+    
+    def consume(expected_type=None):
+        if pos[0] >= len(tokens):
+            raise ValueError("Unexpected end of expression")
+        ttype, tval = tokens[pos[0]]
+        if expected_type and ttype != expected_type:
+            raise ValueError(f"Expected {expected_type}, got {ttype}")
+        pos[0] += 1
+        return ttype, tval
+    
+    def parse_primary():
+        ttype, tval = peek()
+        if ttype is None:
+            raise ValueError("Unexpected end of expression in primary")
+        if ttype == NUMBER:
+            consume()
+            return tval
+        elif ttype == LPAREN:
+            consume()  # consume '('
+            result = parse_additive()
+            rparen_type, rparen_val = consume(RPAREN)
+            return result
+        elif ttype in (PLUS, MINUS):
+            # Unary operator
+            op = consume()
+            val = parse_primary()
+            if op[0] == MINUS:
+                return -val
+            else:
+                return val
+        else:
+            raise ValueError(f"Unexpected token in primary: {ttype}")
+    
+    def parse_exponential():
+        """Parse exponential (**), right-associative"""
+        base = parse_primary()
+        ttype, tval = peek()
+        if ttype == POW:
+            consume()
+            # For right associativity, we recursively call parse_exponential on the right side
+            # But we need to handle unary minus on the right side too.
+            # In Python, -2**2 = -(2**2) = -4, so unary minus has lower precedence than **
+            # And 2**-1 = 2**(-1) = 0.5
+            # So the right operand of ** should be parsed as a primary (which handles unary)
+            # But we need to be careful: parse_primary handles unary +/-, so calling parse_primary
+            # on the right side is correct for right-associativity.
+            exp = parse_exponential()  # Right-associative: recurse
+            return base ** exp
+        return base
+    
+    def parse_multiplicative():
+        """Parse *, /, %"""
+        left = parse_exponential()
+        while True:
+            ttype, tval = peek()
+            if ttype in (STAR, SLASH, PERCENT):
+                consume()
+                right = parse_exponential()
+                if ttype == STAR:
+                    left = left * right
+                elif ttype == SLASH:
+                    if right == 0:
+                        raise ZeroDivisionError("Division by zero")
+                    left = left / right
+                elif ttype == PERCENT:
+                    if right == 0:
+                        raise ZeroDivisionError("Modulo by zero")
+                    left = left % right
+            else:
+                break
+        return left
+    
+    def parse_additive():
+        """Parse +, -"""
+        left = parse_multiplicative()
+        while True:
+            ttype, tval = peek()
+            if ttype in (PLUS, MINUS):
+                consume()
+                right = parse_multiplicative()
+                if ttype == PLUS:
+                    left = left + right
+                else:
+                    left = left - right
+            else:
+                break
+        return left
+    
+    result = parse_additive()
+    
+    # Make sure we consumed all tokens
+    if pos[0] < len(tokens):
+        raise ValueError(f"Unexpected token after expression: {tokens[pos[0]]}")
+    
+    return result
+```

@@ -1,0 +1,235 @@
+# SkippyCore
+
+SkippyCore is Skippy's always-on brain box: a Bosgame M5 (Ryzen AI Max+ 395, 128 GB unified memory) running Ubuntu 26.04,
+llama.cpp on Vulkan behind llama-swap, and SkippyTel's core services. The gaming PC keeps development, games and anything
+CUDA- or Windows-bound. The full reasoning is in `docs/local-ai-fallback-plan.md` (on `claude/confident-heisenberg-tcefjd`)
+and `docs/skippycore-handoff.md`.
+
+Everything here runs **today**, before the box arrives: the simulator runs the same deployer, compose file and smoke test
+with tiny stand-in models on CPU. Onlining the real models later is a config line, not new work.
+
+## What's in `core/`
+
+| Piece | File | What it does |
+|---|---|---|
+| Model slots | `models.json`, `llm/models.py` | Four slots: **chat** and **vision** (always loaded), **general** and **coder** (loaded on demand, they swap). Each has a stand-in and the full model. `CORE_FULL` picks which slots run full-size. `models.py` checks the files, checks the memory budget and renders llama-swap's config plus the shim's name table. `--bench a,b` (or `BENCH=`) also serves models.json's **candidates** under their own names, on demand, to try a model before it takes a slot. |
+| LLM server | `compose.core.yml` → `llm` | llama-swap with llama.cpp's Vulkan build (pinned digest). Every model launches with `-fa on --load-mode none` (flash attention, no mmap: both Strix Halo community guides require it; `--load-mode none` is what this llama.cpp build calls `--no-mmap`) and `--parallel` at most 8. |
+| Ollama shim | `ollama-shim/` | Ollama's API on port 11434 in front of llama-swap, so flask-api, Mentat, the reporter, voice-gate and Bilby keep calling `OLLAMA_URL` unchanged. `keep_alive: 0` never unloads the resident chat slot. `/v1/...` passes straight through (OpenAI and Anthropic `/v1/messages`). |
+| Stack | `compose.core.yml`, `compose.gpu.yml` | `llm`, `ollama` (the shim), `mentat`, `image-studio` and `searxng` (flask-api runs on skippy-pc only). Paths come from the deployer's settings, not Windows drives. `compose.gpu.yml` hands `/dev/dri` to `llm` on the box only. |
+| Picture studio | `image-studio/` | The portal chat's QUALITY pictures (`make_image_hq`; the quick tier stays on skippy-pc): Qwen-Image-2512 (Q8_0, Apache 2.0) with its Qwen2.5-VL-7B text encoder, through stable-diffusion.cpp's Vulkan build (pinned release + sha256). One `sd-cli` run per picture with `--mmap` (~30 GB while drawing, nothing held between pictures; without `--mmap` the weights sit in RAM twice and the OOM killer fires). ~20 s a step at 1024 px, 40 steps by default, so ~13 min a picture: quality over speed, by the Captain's call. `/health` gives `gpu_free_gib`, `gpu_free_pct`, `gpu_util_pct` for the portal's patient queue. Host networking on 7347: ufw keeps the LAN out, Tailscale's own rules let the tailnet in, and `ALLOW_FROM` answers only skippy-pc (and the box itself). |
+| 3D and video pop-ups | `popups-3d/` | The quality pop-ups ([docs/popups.md](../docs/popups.md)): `image_to_3d` (Hunyuan3D-2 on ROCm PyTorch, TheRock wheels for gfx1151: a textured `.glb` in ~1-2 min, 16 GB peak), `text_to_3d` (the picture studio, then image_to_3d) and `make_video` (Wan 2.2 TI2V-5B through sd.cpp's Vulkan build: ~10 min per second of clip, 20 GB peak). Each job is its own process, so nothing is held between jobs. Port 7348, host networking and `ALLOW_FROM` like the picture studio; on only when `core.env` says `CORE_POPUPS3D=1`. **MIOpen stays off**: its convolutions starved llama-server into ring resets. Numbers and verdicts: [docs/3d-video-popups.md](../docs/3d-video-popups.md). |
+| Roads and addresses | `routes/`, `compose.routes.yml` | Travel times with no cloud service: **Valhalla** (distance and drive time, no live traffic) and **Nominatim** (an address → a position), both built on first start from OpenStreetMap's California extract (Geofabrik, ~1.3 GB; about an hour; named volumes, not backed up: they rebuild from the map). `routes/routes.py` is the one door, port **7354, tailnet only**: `GET /geocode?q=`, `POST /route`, `/health` with the readiness contract (503, saying which engine it waits on, during the first import). On only when `core.env` says `CORE_ROUTES=1` (`install/routes.sh`). The morning briefing's leave-by time and today's miles use it (docs/routines.md). |
+| Smoke test | `smoke.py` | Tags, chat (stream and not), JSON output, every slot including the general↔coder swap, Anthropic `/v1/messages` on coder, a wrong key refused (when `LLM_API_KEY` is set), and the Matter, car and road stacks where they run. |
+| Pull deployer | `deployer/` | A systemd timer every 2 minutes. It fetches `main`, waits for this box's own CI (`ci/`) to pass the commit, deploys, runs the smoke test and rolls back to the last good commit if anything is red. A red smoke test marks the commit bad; a failed build or pull is retried. Nothing listens for inbound connections. |
+| Simulator | `sim/` | Ubuntu 26.04 with its own Docker inside. It deploys the baseline, rolls back a deliberately broken commit, and refuses a `CORE_FULL` whose files are missing, checking the stack stays healthy throughout. |
+| CI | `ci/` | A systemd timer every minute (`ci/install.sh`). It fetches `main` from the house's git (the data trunk), and runs the unit tests in plain Docker, one container per job, no network. The deployer requires its green result for a commit (`CI_LOCAL`); the simulator scenario is run by hand with `sim/run.sh`. |
+
+## Run the simulator
+
+Any Linux or Windows machine with Docker (on skippy-pc: Git Bash, Docker Desktop):
+
+```
+make core-sim                                    # stand-ins go to state/core-models (~1.6 GB, downloaded once)
+MODELS_ROOT=/d/models make core-sim              # or use the archive the midnight job fills
+```
+
+It prints PASS/FAIL per step and `simulator: ALL PASSED` at the end. The unit tests alone: `python -m pytest core/tests`.
+
+## Online the big models
+
+The deploy key is commit + `CORE_FULL`, so changing `CORE_FULL` in `/etc/skippy-core/core.env` redeploys on the next timer tick:
+
+```
+CORE_FULL=chat              # then general, then coder, one at a time
+CORE_FULL=all
+```
+
+A slot whose files are missing or the wrong size is **refused**: the running stack is left alone, and the deploy goes ahead
+by itself once the files are in place. `python3 core/llm/models.py plan --full all` shows what each slot would run and whether
+it fits the memory budget (full tier: 84 GB peak of 110 GB).
+
+## Day one on the box (runbook)
+
+Inside the return window, do the burn-in from the plan (section 3) before wiping Windows.
+
+1. **BIOS:** set the iGPU memory (UMA frame buffer) to its minimum, 512 MB (2 GB if that is the lowest offered). The GPU
+   gets its memory through GTT instead (next step). Note the BIOS version.
+2. **Ubuntu 26.04 LTS server**, headless (`sudo systemctl set-default multi-user.target`). Use the in-kernel amdgpu driver,
+   not DKMS. Record the kernel, Mesa and `linux-firmware` versions (avoid `linux-firmware-20251125`: it broke ROCm on
+   Strix Halo; Vulkan was unaffected).
+3. **Kernel options** so the GPU can use ~124 GB: in `/etc/default/grub`, add to `GRUB_CMDLINE_LINUX_DEFAULT`
+   `amd_iommu=off amdgpu.gttsize=126976 ttm.pages_limit=32505856`, then `sudo update-grub && sudo reboot`.
+   Check: `cat /sys/class/drm/card*/device/mem_info_gtt_total` shows about 124 GB (133,143,986,176 bytes).
+   (`amd_iommu=off` is worth 5-12% speed but disables the NPU; drop it if the NPU is ever wanted.)
+4. **Docker** (`docker.io docker-compose-v2`), **git**, **python3**, **Tailscale** (`tailscale up`).
+5. **Models:** copy `D:\models` to `/srv/models` (same layout: `huggingface/<Org>__<Repo>/...`), then
+   `sudo MODELS_ROOT=/srv/models python3 core/llm/models.py check --hash --full all`.
+   Anything still missing: `models.py fetch`. Gated repos need the Hugging Face token. It lives in the vault `.env`
+   (the Captain's Google Drive vault folder) as `HF_ID`. Export it for that one command
+   (`HF_ID=... python3 core/llm/models.py fetch ...`), never into a committed file. The midnight job on skippy-pc
+   reads `HF_ID` from the vault by itself. The stand-ins and the three full models are not gated, so CI needs no token.
+6. **Deployer:** `sudo bash core/deployer/install.sh` (dry run), then `--apply`. In `/etc/skippy-core/core.env` set `CI_LOCAL` to
+   core/ci's results folder (`sudo bash core/ci/install.sh --apply` makes it). Copy the vault to `/etc/skippy-core/vault.env`
+   (0600). `core/install/README.md` shows how it goes over SSH without
+   anyone typing them. The first tick deploys `main` with stand-ins.
+7. Online the slots one at a time (`CORE_FULL=chat`, then `chat,general`, then `all`), checking
+   `python3 core/deployer/deployer.py status` after each.
+8. Record the baseline numbers (tokens/s per model, load times, watts, temperatures) for the snapshot note.
+
+## The portal's door (the cloud reaches the LLM)
+
+The cloud portal can't reach the house, so skippy-core puts llama-swap on the internet through **Tailscale Funnel**, locked
+by a key. The portal calls it with the **Anthropic SDK** and another `base_url`:
+
+```python
+client = anthropic.Anthropic(base_url=SKIPPY_CORE_URL, api_key=SKIPPY_CORE_API_KEY)
+client.messages.stream(model="chat", max_tokens=..., tools=[...], messages=[...],
+                       extra_body={"chat_template_kwargs": {"enable_thinking": False}})
+```
+
+- **The key:** `LLM_API_KEY` in `/etc/skippy-core/core.env` (root-only). The deployer hands it to `models.py render`, which
+  writes `apiKeys: ["${env.LLM_API_KEY}"]` into llama-swap's config (the value stays in the container's environment, never
+  in the file), to the shim (it sends it upstream) and to `smoke.py` (which also checks that a wrong key gets 401). With
+  the key, every endpoint except `/health` answers 401 without it, `Authorization: Bearer` or `x-api-key` alike.
+  The vault holds the same value as `SKIPPY_CORE_API_KEY`, and `SKIPPY_CORE_URL` is `https://skippy-core.tailab2cc7.ts.net`.
+- **The Funnel:** `sudo bash core/install/funnel.sh` (dry run), `--apply`, `--check`, `--off`. `--apply` makes the key if
+  there is none, and it opens the Funnel (`:443 -> http://127.0.0.1:8080`) **only if the port already answers 401 to a
+  wrong key**, so an open port never reaches the internet. No firewall change: tailscaled proxies to localhost, and ufw
+  keeps denying everything inbound (`harden.sh --check` stays green).
+- **Check it the portal's way** (from skippy-pc, key and URL from the vault, nothing printed):
+  `python core/llm/door_check.py` (thinking off) and `--think`. It checks: no key gets 401, a plain reply, a streamed
+  reply, and a streamed tool round trip (`ask_mentat`: a `tool_use` block, then a `tool_result`, then the answer).
+
+**Since 2026-10-23 chat and coder run Qwen3.6-35B-A3B** (`core/bench/README.md` has the bench): the chat slot (UD-Q4_K_XL)
+starts with **thinking off by default** (`--chat-template-kwargs {"enable_thinking": false}` on the server), so a reply is
+~0.4-1 s and the portal needs to send nothing; a request that wants thinking sends `enable_thinking: true` and gets it
+(10-20 s). Tool use on Qwen3.6, 2026-10-23: a physics question called the tool 5/5 and other questions 0/5, thinking off
+or on, never as text. The table and notes below were measured on the previous chat model (Qwen3-30B-A3B Q4_K_M, llama-swap v265, 2026-10-19):
+
+| | Thinking off (`enable_thinking: false`) | Thinking on (Qwen3's default) |
+|---|---|---|
+| Plain `/v1/messages` | 0.2 s for a short hello | ~6 s (a thinking block first; leave max_tokens room for it) |
+| Streaming (SSE `text_delta`) | yes | yes |
+| Tool use (`tool_use` -> `tool_result` -> answer, streamed) | yes, 0.8 s round trip | yes, ~7 s |
+
+- Anthropic's own `thinking: {"type": "disabled"}` is **ignored** by llama-server; only `chat_template_kwargs` turns
+  thinking off (or `/no_think` at the end of the user's message). With thinking on, the reply carries `thinking` blocks
+  with an empty signature: send them back unchanged in the assistant turn, or drop them.
+- The portal should use `/v1/messages`; `/v1/chat/completions` is not needed for tools.
+- **How the chat slot uses tools** (5 tries each, one `ask_mentat` tool, 2026-10-19):
+  - A physics question calls the tool **every time** (10/10 with thinking off or on, with or without "use the tool"),
+    always as a real `tool_use` block. It never wrote a tool call as text (unlike Qwen3-Coder on the coder slot).
+  - **A forced tool is not honoured**: `tool_choice: {"type": "any"}` or `{"type": "tool", "name": ...}` on
+    `/v1/messages`, and `"required"` or a named function on `/v1/chat/completions`, still give a plain answer to a
+    non-physics question (at best 2 of 5 with thinking on). The portal must not rely on forcing: when a reply needs
+    Mentat and didn't call it, the portal asks Mentat itself (brains.py already does).
+  - `tool_choice: {"type": "none"}` held with thinking off (0/5 calls) and was ignored with thinking on (5/5 called).
+- **The portal's settings:** `SKIPPY_CORE_URL` (the Funnel URL, no `/v1`) and `SKIPPY_CORE_API_KEY`, which deploy.yml
+  copies into Cloud Run from the repo secrets `PORTAL_SKIPPY_CORE_URL` and `PORTAL_SKIPPY_CORE_API_KEY`;
+  `SKIPPY_CORE_MODEL` picks another slot (default `chat`).
+
+## Matter: the house's controller (2026-10-24)
+
+SkippyCore runs the house's **Matter controller**: python-matter-server (the open-source one Home Assistant uses), pinned by digest in
+`compose.matter.yml`. Matter is local and open: no account, no cloud, no fee. A device is paired once with its setup code, and from
+then on skippy-pc's hub (`services/satellite/matter.py`) controls it over the controller's WebSocket API. The Nest thermostat, the
+Amazon Basics Matter plug and most new smart-home gear speak it. Why here and not on skippy-pc: Matter needs IPv6 link-local and mDNS
+on the home LAN, which Docker on Windows doesn't give a container; SkippyCore is a Linux box on the LAN, with Bluetooth.
+
+- **Switch it on (once):** `sudo bash core/install/matter.sh` (dry run), then `--apply`. It refuses if IPv6 is off (the controller
+  can't start without it), installs **bluez** (a brand-new device gets the Wi-Fi details over Bluetooth), adds the ufw rules (the LAN's
+  mDNS and device traffic in; the API, port **5580, on the tailnet only**: it has no password of its own, so it is never on the LAN or the
+  Funnel), sets `CORE_MATTER=1` and `MATTER_ARGS` in `core.env`, and runs a repair so it starts now. `--check` says whether all of it is
+  live. From then on the deployer runs it with the stack, and `smoke.py` checks its `/info`.
+- **The fabric** lives in `${CORE_STATE}/matter`: its keys and every paired device. Lose it and everything has to be paired again.
+- **On skippy-pc:** `MATTER_URL=ws://skippy-core:5580/ws` in the vault `.env`; then `homectl.py matter-info`, `matter-pair`, `list`,
+  `say`, `prove` (`services/satellite/README.md`).
+
+## The Enclave speakers, by aux cable (2026-11-01)
+
+The Captain's **Enclave Audio** speakers play the house's sound from skippy-core, which now sits upstairs beside them: its **headphone
+jack is cabled to the Enclave's aux in**. The hub on skippy-pc still makes every sound (Skippy's voice, Bilby, the routines) and sends it
+over the tailnet; this box only plays it.
+
+    hub (skippy-pc, services/satellite/router.py NetStream) ──raw PCM, tcp :4953──▶ snapserver ──▶ snapclient ──▶ PipeWire ──aux──▶ Enclave
+
+- **Why a cable:** first it was Bluetooth from downstairs. Across the floor A2DP stalled twice in 15 minutes, and once it stayed
+  "connected" but silent until the speaker's power was pulled: nothing on this side can see or fix that. So skippy-core moved upstairs
+  (wired Ethernet; Wi-Fi as a fallback, `/etc/netplan/60-skippy-wifi.yaml`, metric 600) and the Enclave is unpaired.
+- **Install:** `sudo bash core/install/enclave.sh` (dry run), `--apply`, `--check`. Headless PipeWire + WirePlumber as aaron's user
+  services (linger), aaron in the `audio` group (a headless user gets no seat ACL on the sound card: without it PipeWire saw only
+  Bluetooth), **snapserver** (one source: raw PCM pushed by the hub on 127.0.0.1:4953, a 300 ms buffer; JSON-RPC on 127.0.0.1:1780),
+  both doors on the **tailnet only** through `tailscale serve`.
+- **enclave-keep** (`core/enclave/keep.sh`, aaron's user service, `ENCLAVE_LINK=aux`): runs snapclient (`enclave-snap`) into the analog
+  sink (`alsa_output.pci-0000_c5_00.6.analog-stereo`, headphone port) whenever it is there. `ENCLAVE_LINK=bt` (and `--pair`) is the old
+  Bluetooth way, kept for a speaker without a cable.
+- **One sender:** snapserver takes one stream at a time: the hub, or `services/satellite/sync_outputs.py` while the hub is stopped.
+- **Look:** `journalctl --user -u enclave-keep -u enclave-snap`, `pactl list short sinks`, `amixer -c 1 contents | grep -A2 Jack`.
+
+## The bedroom TV: skippy-pc on the couch (Moonlight, 2026-11-01)
+
+skippy-core sits in the bedroom with the TV on its HDMI. The TV is a console that IS skippy-pc: no SteamOS, no desktop, no login.
+
+    skippy-pc: Sunshine (NVENC, apps "Desktop" + "Steam Big Picture") ──LAN──▶ skippy-core: cage + Moonlight (user couch) ──HDMI──▶ TV
+
+- **Install:** `sudo bash core/install/couch.sh` (dry run), `--apply`, `--pair` (with `SUNSHINE_USER`/`SUNSHINE_PASSWORD` from the
+  vault: Moonlight's PIN goes straight to Sunshine's API with the waiting request's `pairing_id`), `--controller` (hold the pad's pair
+  button; an Xbox pad is trusted before pairing, in one bluetoothctl session), `--check`.
+- **The kiosk:** `couch.service` logs user `couch` (no sudo, no docker) in on tty1 and runs cage with `core/couch/run.sh`: Moonlight
+  streams skippy-pc's `Desktop` (COUCH_APP) at 1080p60 HEVC 4:4:4, decoded in software, and starts again whenever the stream ends. Its log:
+  `/home/couch/moonlight.log`. The login hands down an ambient CAP_WAKE_ALARM that Flatpak's sandbox refuses: run.sh drops it (setpriv).
+- **When it shows nothing** (2026-11-03): `couch.service` "active" is not a picture. A black TV lasted 4.5 hours: memory ran out on skippy-core
+  at 17:37 (swap full, the OOM killer took both users' audio servers), Moonlight's control stream timed out and its teardown hung in "Stopping
+  audio stream", so the loop waited on a process that never ended while skippy-pc kept sending frames into "Video decode unit queue overflow".
+  run.sh's `watch()` now ends a Moonlight whose teardown takes over 20 s or whose decoder queue floods (the log says "couch: ending Moonlight"),
+  and each round starts the audio services first; `couch.sh --check` has a "streaming (not wedged)" line (a render thread, a quiet queue).
+  What the TV shows right now: `sudo -u couch XDG_RUNTIME_DIR=/run/user/1002 WAYLAND_DISPLAY=wayland-0 grim /tmp/tv.png` (grim is installed).
+  Tests: `core/tests/test_couch_run.py` (a fake Moonlight, a fake log).
+- **Bitrate:** 80 Mbit/s (`COUCH_KBPS`), clean on gigabit. The bedroom run first went through a 100 Mbit switch, which dropped frames at
+  80 (the link partner offered only 10/100): bypassed 2026-11-01, the same cable links at 1000. Behind a 100 Mbit hop, use 40000.
+- **Sound:** the TV's HDMI is couch's PipeWire; the analog jack (the Enclave) aaron's. Each WirePlumber disables the other's card
+  (`~/.config/wireplumber/wireplumber.conf.d/60-skippy-cards.conf`).
+- **skippy-pc:** Sunshine from winget (`LizardByte.Sunshine`, a Windows service); its web login `SUNSHINE_USER`/`SUNSHINE_PASSWORD` in
+  the vault; web UI https://localhost:47990.
+- **skippy-pc's own sound** (2026-11-04): the stream plays on the PC too (`--audio-on-host`). With `--no-audio-on-host` Sunshine (2026.914,
+  empty sunshine.conf) mutes the PC by making "Steam Streaming Speakers" Windows' default playback device while a session lives, and puts it
+  straight back whenever anyone picks another ("Resetting sink to [virtual-Stereo...] after default changed" in
+  `C:\Program Files\Sunshine\config\sunshine.log`). The kiosk's session never ends, so games on the PC (EPSON PJ) had no sound. With host
+  audio on Sunshine leaves the default alone and captures whatever it is. The first session decides for all of them: a Moonlight client that
+  mutes the host (its default) and connects while none is up still takes the default for its own session and gives it back at its end.
+  (Sunshine's newer `external_audio` setting, not in 2026.914, is the
+  cleaner switch once Sunshine is updated.) **The PC's volume is also the TV's** (measured 2026-11-04: the same beeps with Windows' volume on
+  the EPSON at 20% reached the TV's sink 24 dB lower; expect mute to silence it): keep Windows' volume up and set the room's level on the
+  projector/receiver; the TV's own level is skippy-core's HDMI sink (40% then). **Heal** a PC that went silent again (a muting client got in
+  first): end that client's session, `sudo systemctl restart couch`, then `audio-default.ps1 get` (`set EPSON` if it is not there). Not tested:
+  the projector switched off and on again (Windows picks another default while its endpoint is gone). **Look:** `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/audio-default.ps1
+  sessions` (which program plays to which device, with its peak), `... watch` (a line for every change of the default: catches who moves it),
+  `... set EPSON` (puts it back).
+- **A hitch every ~12 s** (2026-11-05, the Captain: "a stutter every 10 seconds or so" over Plex, and the same in games on the PC): the starter ran
+  `nvidia-smi` on every poll. Each call took 0.5-0.9 s and stalled the GPU for over 100 ms: Sunshine's NvEnc logged "encode wait timeout" 0.1-0.2 s
+  after 20 of 23 of them (all 7 run by hand while the encoder was up; a call inside a WSL container did not do it), and Sunshine tore its encoder down and
+  built it again: ~1.5 s with no picture, an I-frame after it (Moonlight logs the lost frame N, "Sending RFI request", "(I-frame)"), and a hitch in any game
+  on the PC. 190-320 an hour, day and night, since 11-04 ~10:00 (1-65 before); the kiosk's flaps under load ("decoder queue is flooded", 37 on 11-04)
+  are probably the same bursts. The starter now asks NVML in its own process
+  (`Nvml` in `tools/skippy_starter.py`: opened once, 0.1 ms a query); **nothing on a timer may run `nvidia-smi` on this PC**
+  (`test_the_starter_never_runs_nvidia_smi`). **Look:** the count of `encode wait timeout` lines in Sunshine's log must not grow while the PC
+  is idle (`grep -a -c "encode wait timeout" "C:\Program Files\Sunshine\config\sunshine.log"`, a minute apart); if it does, a watcher that logs every new
+  process (poll `[Diagnostics.Process]::GetProcesses()` every 60 ms) lines up with the log's millisecond stamps to find the caller.
+
+## Status and recovery
+
+- `python3 /opt/skippy-core/repo/core/deployer/deployer.py status`: the last run (`ok`, `waiting-ci`, `refused`,
+  `rolled-back`, `known-bad`, `failed`), with the smoke results. The home reporter will carry it to the portal.
+- A key (commit + `CORE_FULL`) that failed is never retried. Push a fix, or after fixing something outside git run
+  `deployer.py forget`.
+- `journalctl -u skippy-core-deployer` holds each run's log.
+
+## Not yet
+
+- A speech-to-text slot (whisper.cpp on Vulkan, stand-in `ggml-tiny.en`) and a TTS slot behind flask-api `/tts`.
+- The reporter: skip the "unload before a song" call for the box, and carry the deployer's status to the portal.
+- The gaming PC's Claude Code on the coder slot: the key is there now (`ANTHROPIC_BASE_URL` = the Funnel URL,
+  `ANTHROPIC_API_KEY` = `SKIPPY_CORE_API_KEY`, model `coder`), not tried yet.
+- Pinning the stand-ins' and full models' `sha256` in `models.json` (CI's fetch step and `models.py fetch` print them).
+- Qwen3.6's own vision (its `mmproj-F16.gguf` is on the box) could replace the vision slot, but llama.cpp's MTP doesn't
+  run with `--mmproj`, so only the chat slot could carry it. Not tried.

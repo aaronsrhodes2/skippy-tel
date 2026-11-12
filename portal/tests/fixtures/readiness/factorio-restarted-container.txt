@@ -1,0 +1,66 @@
++ LOAD_LATEST_SAVE=false
++ GENERATE_NEW_SAVE=true
++ SAVE_NAME=skippy
++ runuser -u factorio -g factorio -- /opt/factorio/bin/x64/factorio --create /factorio/saves/skippy.zip --map-gen-settings /factorio/config/map-gen-settings.json --map-settings /factorio/config/map-settings.json
+   0.000 2026-09-30 06:51:42; Factorio 2.0.77 (build 84539, linux64, headless, space-age)
+   0.845 Factorio initialised
+Done.
+   1.244 Goodbye
+   0.000 2026-09-30 06:51:43; Factorio 2.0.77 (build 84539, linux64, headless, space-age)
+   1.089 Factorio initialised
+   1.091 Warning FileUtil.cpp:563: skippy not found; using /factorio/saves/skippy.zip
+   1.094 Info ServerSynchronizer.cpp:22: nextHeartbeatSequenceNumber(0) initialized Synchronizer nextTickClosureTick(0).
+   1.095 Info ServerMultiplayerManager.cpp:808: updateTick(18446744073709551615) changing state from(Ready) to(PreparedToHostGame)
+   1.099 Info ServerMultiplayerManager.cpp:808: updateTick(18446744073709551615) changing state from(PreparedToHostGame) to(CreatingGame)
+   1.099 Loading map /factorio/saves/skippy.zip: 535047 bytes.
+   1.270 Info UDPSocket.cpp:38: Opening socket at (IP ADDR:({0.0.0.0:34197}))
+   1.271 Hosting game at IP ADDR:({0.0.0.0:34197})
+   1.500 Info ServerMultiplayerManager.cpp:808: updateTick(0) changing state from(CreatingGame) to(InGame)
+   1.509 Info ServerRouter.cpp:668: Asking pingpong servers (pingpong1.factorio.com:34197, pingpong2.factorio.com:34197, pingpong3.factorio.com:34197, pingpong4.factorio.com:34197) for own address
+   1.510 Error InterruptibleStdioStream.cpp:55: Got EOF on stdin; closing
+   1.510 Info RemoteCommandProcessor.cpp:126: Starting RCON interface at IP ADDR:({0.0.0.0:27015})
+   1.610 Warning ServerRouter.cpp:543: Received own address message reply with conflicting address (got IP ADDR:({203.0.113.7:50991}), expected IP ADDR:({203.0.113.7:54386}))
+   1.610 Warning ServerMultiplayerManager.cpp:654: Determining own address has failed. Best guess: IP ADDR:({203.0.113.7:54386})
+   1.627 Error ServerMultiplayerManager.cpp:743: Matching server connection failed: Error when creating server game: Missing token.
+   1.643 Warning ServerRouter.cpp:543: Received own address message reply with conflicting address (got IP ADDR:({203.0.113.7:54385}), expected IP ADDR:({203.0.113.7:54386}))
+   1.693 Warning ServerRouter.cpp:543: Received own address message reply with conflicting address (got IP ADDR:({203.0.113.7:54384}), expected IP ADDR:({203.0.113.7:54386}))
+
+ 304.741 Received SIGTERM, shutting down
+ 304.741 Quitting: signal.
+ 304.741 Info MainLoop.cpp:437: Saving map as /factorio/saves/skippy.zip
+ 304.773 Info ServerMultiplayerManager.cpp:119: Disconnecting multiplayer connection.
+ 304.773 Info ServerMultiplayerManager.cpp:808: updateTick(0) changing state from(InGame) to(DisconnectingScheduled)
+ 304.807 Info ServerMultiplayerManager.cpp:808: updateTick(0) changing state from(DisconnectingScheduled) to(Disconnecting)
+ 304.840 Info ServerMultiplayerManager.cpp:808: updateTick(0) changing state from(Disconnecting) to(Disconnected)
+ 304.840 Info ServerMultiplayerManager.cpp:146: Quitting multiplayer connection.
+ 304.840 Info ServerMultiplayerManager.cpp:808: updateTick(0) changing state from(Disconnected) to(Closed)
+ 305.086 Goodbye
++ LOAD_LATEST_SAVE=false
++ GENERATE_NEW_SAVE=true
++ SAVE_NAME=skippy
++ echo 'Map /factorio/saves/skippy.zip already exists, skipping map generation'
+Map /factorio/saves/skippy.zip already exists, skipping map generation
+   0.000 2026-09-30 06:56:50; Factorio 2.0.77 (build 84539, linux64, headless, space-age)
+   0.671 Factorio initialised
+   0.671 Warning FileUtil.cpp:563: skippy not found; using /factorio/saves/skippy.zip
+   0.671 Info ServerSynchronizer.cpp:22: nextHeartbeatSequenceNumber(0) initialized Synchronizer nextTickClosureTick(0).
+   0.671 Info ServerMultiplayerManager.cpp:808: updateTick(18446744073709551615) changing state from(Ready) to(PreparedToHostGame)
+   0.671 Info ServerMultiplayerManager.cpp:808: updateTick(18446744073709551615) changing state from(PreparedToHostGame) to(CreatingGame)
+   0.672 Loading map /factorio/saves/skippy.zip: 535050 bytes.
+   0.693 Info UDPSocket.cpp:38: Opening socket at (IP ADDR:({0.0.0.0:34197}))
+   0.693 Hosting game at IP ADDR:({0.0.0.0:34197})
+   0.894 Info ServerMultiplayerManager.cpp:808: updateTick(0) changing state from(CreatingGame) to(InGame)
+   0.894 Error InterruptibleStdioStream.cpp:55: Got EOF on stdin; closing
+   0.894 Info RemoteCommandProcessor.cpp:126: Starting RCON interface at IP ADDR:({0.0.0.0:27015})
+
+ 120.144 Received SIGTERM, shutting down
+ 120.144 Quitting: signal.
+ 120.144 Info MainLoop.cpp:437: Saving map as /factorio/saves/skippy.zip
+ 120.177 Info ServerMultiplayerManager.cpp:119: Disconnecting multiplayer connection.
+ 120.177 Info ServerMultiplayerManager.cpp:808: updateTick(0) changing state from(InGame) to(DisconnectingScheduled)
+ 120.211 Info ServerMultiplayerManager.cpp:808: updateTick(0) changing state from(DisconnectingScheduled) to(Disconnecting)
+ 120.244 Info ServerMultiplayerManager.cpp:808: updateTick(0) changing state from(Disconnecting) to(Disconnected)
+ 120.244 Info ServerMultiplayerManager.cpp:146: Quitting multiplayer connection.
+ 120.244 Info ServerMultiplayerManager.cpp:808: updateTick(0) changing state from(Disconnected) to(Closed)
+ 120.465 Goodbye
+Session terminated, killing shell...

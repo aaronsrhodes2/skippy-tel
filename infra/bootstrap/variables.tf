@@ -1,0 +1,27 @@
+variable "project" {
+  type    = string
+  default = "skippy-tel"
+}
+
+variable "region" {
+  type    = string
+  default = "us-west1"
+}
+
+variable "doomloop_bucket" {
+  description = "GCS bucket holding the newest Doom Loop dev build (portal/doomloop.py reads it; core/cd/deploy.json sets DOOMLOOP_BUCKET to the same name)."
+  type        = string
+  default     = "skippy-tel-doomloop-dev"
+}
+
+variable "mentat_research_bucket" {
+  description = "Private GCS bucket keeping every request to the public Mentat and its whole answer, forever (mentat/research.py; core/cd/deploy.json sets MENTAT_RESEARCH_BUCKET to the same name)."
+  type        = string
+  default     = "skippy-tel-mentat-research"
+}
+
+variable "tabletop_bucket" {
+  description = "Private GCS bucket holding the portal's Tabletop boards and the pictures pinned on them (portal/tabletop.py; deploy.yml sets TABLETOP_BUCKET to the same name)."
+  type        = string
+  default     = "skippy-tel-tabletop"
+}

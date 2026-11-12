@@ -1,0 +1,31 @@
+{
+ "n": 4,
+ "title": "Choo-choo train, Claude Haiku in one call (the benchmark's own way)",
+ "model": "Claude Haiku 5.5 through Anthropic's API: one call with MineBench's prompt, no tools, no second try",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 21048,
+ "minutes": 2,
+ "size": "144 x 40 x 42",
+ "verdict": "Compact and coherent: a black locomotive with a curling smoke plume, a gold bell and a cab, a tender, two red passenger cars with windows and a yellow stripe, a platform with a canopy, trees. Everything sits on the track (3 tiny floating pieces). Fewer blocks than purple Skippy's v1, but the best composition: every part where it belongs.",
+ "stats": {
+  "started": "2026-10-25T06:09:12.799986Z",
+  "minutes": 2,
+  "tokens": {
+   "input": 2424,
+   "cache_read": 0,
+   "output": 22149,
+   "total": 24573
+  },
+  "models": [
+   {
+    "name": "Claude Haiku 5.5",
+    "tokens": {
+     "input": 2424,
+     "cache_read": 0,
+     "output": 22149
+    }
+   }
+  ]
+ }
+}

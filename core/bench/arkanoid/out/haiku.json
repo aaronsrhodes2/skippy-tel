@@ -1,0 +1,11 @@
+{
+  "model": "claude-haiku-5-5",
+  "base": "https://api.anthropic.com",
+  "seconds": 40.2,
+  "stop_reason": "end_turn",
+  "input_tokens": 4799,
+  "output_tokens": 9105,
+  "tokens_per_second": 226.5,
+  "html_found": true,
+  "html_bytes": 8781
+}

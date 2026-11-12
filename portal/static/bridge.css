@@ -1,0 +1,619 @@
+/* The bridge: the portal's one interface (templates/base.html, {% block ui %}bridge{% endblock %}).
+
+   A fixed screen, never a page that scrolls: the body is exactly the viewport and everything is sized to fit it, so on a
+   phone the portal is a panel, not a document. No text where a glyph will do (templates/_glyphs.html); text only for names
+   people look up (a server, a code, a password). The look is a starship's manual controls as a feline predator-race might
+   build them: cut corners, three claw slashes, a lamp that breathes when a control is ready and a light that runs along its
+   edge when it is live. Black base, crisp edges, no gradients (black is see-through on the Viture glasses, and a gradient is
+   a smear there); the glow is a drop shadow of the control's own outline. Colours are the page's tokens from base.html. */
+
+html { height: 100%; background: #000; }
+body.bridge {
+  height: 100vh; height: 100dvh; margin: 0; padding: env(safe-area-inset-top) env(safe-area-inset-right)
+  env(safe-area-inset-bottom) env(safe-area-inset-left);
+  display: flex; flex-direction: column; overflow: hidden; overscroll-behavior: none; touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none;
+}
+.bridge main { flex: 1; min-height: 0; max-width: none; width: 100%; margin: 0; padding: 4px 12px 6px; display: flex; flex-direction: column; }
+.bridge main > section { flex: 1; min-height: 0; margin: 0; display: flex; flex-direction: column; }
+/* Words people read are selectable: code, the boxes, and every chat message (the Skippy chat's .tx, the agent transcript's
+   .me-chat .turn). The Captain couldn't copy a line out of the middle of a reply (2026-10-21, re-run 2026-10-24). */
+.bridge code, .bridge input, .bridge textarea, .bridge .turn .tx, .bridge .me-chat .turn { user-select: text; -webkit-user-select: text; }
+
+/* ── The strip along the top: back, what this is, home ───────────────────────────────────────────────────────────── */
+.hud { flex: none; display: flex; align-items: center; gap: 10px; height: 52px; padding: 6px 12px 2px; }
+.hud .rail { flex: 1; height: 2px; background: var(--dim-green-hi); position: relative; overflow: hidden; }
+.hud .rail::after { content: ""; position: absolute; top: 0; bottom: 0; width: 22%; background: var(--eye, #ffcc00);   /* the yellow of their eyes */
+                    animation: run 4.5s linear infinite; }
+.hud .rail:last-of-type::after { animation-direction: reverse; animation-delay: -2s; }
+.hud .mark { width: 30px; height: 30px; color: var(--accent); }
+.hud .who { width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.hud .who img { width: 26px; height: 26px; border-radius: 0; clip-path: polygon(30% 0, 100% 0, 100% 70%, 70% 100%, 0 100%, 0 30%); }
+@keyframes run { from { transform: translateX(-100%); } to { transform: translateX(460%); } }
+
+/* ── A key: a small control with a cut corner (back, home, sign out, privacy) ──────────────────────────────────── */
+.key { position: relative; flex: none; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+       color: var(--accent); text-decoration: none; background: transparent; border: 0; padding: 0; cursor: pointer; }
+.key::before, .key::after { content: ""; position: absolute; inset: 0; clip-path: polygon(9px 0, 100% 0, 100% calc(100% - 9px), calc(100% - 9px) 100%, 0 100%, 0 9px); }
+.key::before { background: var(--accent); }
+.key::after { inset: 2px; background: #05090b; }
+.key .g { position: relative; z-index: 1; width: 22px; height: 22px; }
+.key:active::after, .key:focus-visible::after { background: var(--accent); }
+.key:active .g, .key:focus-visible .g { color: #000; }
+.key.sm { width: 30px; height: 30px; }
+.key.sm .g { width: 16px; height: 16px; }
+.key.sm::before, .key.sm::after { clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+
+/* ── Glyphs ─────────────────────────────────────────────────────────────────────────────────────────────────────── */
+svg.g { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: square; stroke-linejoin: miter; overflow: visible; }
+
+/* ── The deck: every control on one screen, sized by how many there are ─────────────────────────────────────────── */
+.deck { flex: 1; min-height: 0; display: grid; gap: 10px; padding: 6px 0;
+        grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(var(--rows, 4), minmax(0, 1fr)); }
+.deck > .unit:last-child:nth-child(odd) { grid-column: 1 / -1; }
+@media (min-width: 760px) and (orientation: landscape) {
+  .deck { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(var(--rows-wide, 2), minmax(0, 1fr)); }
+  .deck > .unit:last-child:nth-child(odd) { grid-column: auto; }
+}
+@media (orientation: landscape) and (max-height: 520px) {            /* a phone on its side: one row of four, or two of five */
+  .deck { grid-template-columns: repeat(5, minmax(0, 1fr)); grid-template-rows: repeat(var(--rows-side, 2), minmax(0, 1fr)); }
+  .deck > .unit:last-child:nth-child(odd) { grid-column: auto; }
+}
+
+/* ── A unit: one control. The plate is its outline; the glyph is all it says ────────────────────────────────────── */
+.unit { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; color: var(--accent);
+        transition: filter .2s ease; --cut: 16px; }
+.unit .plate, .unit .plate::before { position: absolute; inset: 0; clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)),
+        calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
+.unit .plate { background: var(--accent); opacity: .55; transition: opacity .2s ease; }
+.unit .plate::before { content: ""; inset: 2px; background: #05090b; transition: background .1s ease; }
+.unit .plate::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 24%; background: #fff; opacity: 0;
+                      animation: scan 6s linear infinite; animation-delay: calc(var(--i, 0) * -1.1s); }
+.unit .g { position: relative; z-index: 1; width: 46%; max-width: 84px; height: auto; aspect-ratio: 1; stroke-width: 1.25; }
+.unit .hit { position: absolute; inset: 0; z-index: 2; }                 /* the whole control is the target */
+.unit .hit:focus-visible { outline: 2px solid #fff; outline-offset: -4px; }
+.unit .claws { position: absolute; top: 9px; right: 11px; width: 20px; height: 15px; z-index: 1; pointer-events: none; opacity: .7; }
+.unit .claws b { position: absolute; top: 0; width: 2px; height: 100%; background: currentColor; transform: skewX(-32deg); }
+.unit .claws b:nth-child(2) { left: 7px; } .unit .claws b:nth-child(3) { left: 14px; }
+.unit .lamp { position: absolute; top: 11px; left: 12px; width: 11px; height: 11px; z-index: 1; pointer-events: none; }
+/* two fangs along the bottom edge (a sabre-toothed race built these): the control's other mark besides the claws */
+.unit::before, .unit::after { content: ""; position: absolute; bottom: 2px; width: 9px; height: 7px; background: var(--accent); opacity: .6;
+                              clip-path: polygon(0 0, 100% 0, 50% 100%); pointer-events: none; z-index: 1; }
+.unit::before { left: calc(50% - 15px); } .unit::after { left: calc(50% + 6px); }
+[data-s="on"]::before, [data-s="on"]::after { opacity: 1; }
+.unit:active .plate::before { background: var(--accent); }
+.unit:active .g { color: #000; }
+
+/* the lamp: what state the thing behind this control is in, by shape as well as colour */
+.lamp { display: inline-block; background: var(--accent); border-radius: 50%; }
+[data-s="on"] .lamp { animation: breathe 2.4s ease-in-out infinite; }
+[data-s="idle"] .lamp { background: transparent; box-shadow: inset 0 0 0 2px var(--accent); }
+[data-s="off"] .lamp { background: var(--red); border-radius: 0; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+[data-s="warn"] .lamp { background: var(--amber); border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+[data-s="off"] .plate { opacity: .28; } [data-s="off"] .g { opacity: .55; }
+[data-s="on"] .plate { opacity: 1; } [data-s="on"] .plate::after { opacity: .85; animation-duration: 2.2s; }
+.unit[data-s="on"] { filter: drop-shadow(0 0 7px color-mix(in srgb, var(--accent) 65%, transparent)); }
+.unit:hover .plate, .unit:focus-within .plate { opacity: 1; }
+@keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.78); } }
+@keyframes scan { 0% { transform: translateX(-100%); opacity: 0; } 8% { opacity: .55; } 92% { opacity: .55; } 100% { transform: translateX(420%); opacity: 0; } }
+
+/* a count on a control (people asking for access) and the names of things that are up (referenced labels: real text) */
+.unit .badge { position: absolute; top: 8px; left: 10px; z-index: 3; min-width: 22px; height: 22px; padding: 0 6px; display: flex; align-items: center;
+               justify-content: center; font: 700 13px var(--mono); color: #000; background: var(--amber); pointer-events: none;
+               clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+.unit .names { position: absolute; left: 10px; right: 10px; bottom: 9px; z-index: 3; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 10px;
+               font: 600 12px var(--mono); }
+.unit .names a { color: var(--accent); text-decoration: none; padding: 6px 2px; }
+.unit .name { position: absolute; left: 10px; right: 10px; bottom: 9px; z-index: 1; text-align: center; font: 600 12px var(--mono); color: var(--ink);
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.unit.named .g { margin-bottom: 14px; }
+
+/* ── The strip along the bottom ─────────────────────────────────────────────────────────────────────────────────── */
+.foot { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 2px 14px 8px; color: var(--muted); font: 11px var(--mono); }
+.foot .build { cursor: default; }
+.foot .key { color: var(--muted); }
+
+/* a word of text where a screen really needs one (an error from the server): kept short, never scrolls the screen */
+.bridge .flash { flex: none; margin: 4px 0; padding: 6px 10px; font-size: .8rem; }
+
+/* controls for a form that lives on the bridge: keys and fields, same cut corners */
+.bridge select, .bridge input[type=text], .bridge textarea { border-radius: 0; background: #05090b; border: 1px solid var(--dim-green-hi); color: var(--ink); }
+.bridge select:focus, .bridge input:focus, .bridge textarea:focus { outline: none; border-color: var(--accent); }
+
+/* ── Everything above the living background (a page with a canvas.alive) ───────────────────────────────────────────── */
+canvas.alive { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+.bridge .hud, .bridge main, .bridge .foot { position: relative; z-index: 1; }
+
+/* ── Pages instead of scrolling: Bridge.pager (static/bridge.js) ────────────────────────────────────────────────── */
+.pg { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: pan-y; }
+.pg-flow { column-fill: auto; column-gap: 0; transition: transform .28s cubic-bezier(.2,.8,.2,1); will-change: transform; }
+.pips { flex: none; height: 3px; margin: 3px 0 0; background: var(--dim-green); position: relative; overflow: hidden; }
+.pips i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--eye, #ffcc00); transition: transform .28s ease, width .28s ease; }
+.pips[hidden] { display: block; visibility: hidden; }              /* keep its height: nothing jumps when a second page appears */
+/* Bridge.pager's bar: ‹ the pips › — the pips are a control too (click or drag to jump), with a hit area taller than the line it draws */
+.pg-bar { flex: none; display: flex; align-items: center; gap: 8px; margin: 3px 0 0; }
+.pg-bar .pips { flex: 1; height: 14px; margin: 0; cursor: pointer; touch-action: none; background: none; }
+.pg-bar .pips::before { content: ""; position: absolute; left: 0; right: 0; top: 5.5px; height: 3px; background: var(--dim-green); }
+.pg-bar .pips i { top: 5px; bottom: 5px; }
+.pg-bar .pips:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.pg-bar .pg-key { color: var(--accent); }
+.pg-bar .pg-key[hidden] { display: flex !important; visibility: hidden; }  /* keep the row's height when there's one page */
+
+/* ── Skippy chat ───────────────────────────────────────────────────────────────────────────────────────────────── */
+.chat-page { flex: 1; min-height: 0; margin: 0; display: flex; flex-direction: column; }
+.chat-bridge { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.chat-bridge .stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+/* the transcript SCROLLS (the Captain's rule, 2026-10-23: long text is the one place a scrollbar belongs) */
+.chat-bridge .log { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; padding-bottom: 10px;
+                    background: rgba(0, 0, 0, .66); scrollbar-width: thin; scrollbar-color: var(--dim-green-hi) transparent; }
+.chat-bridge .log[hidden] { display: none; }
+.chat-bridge .jump { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 6; background: #000; border-color: var(--accent); color: var(--accent); }
+.chat-bridge .jump[hidden] { display: none; }
+.chat-bridge .jump .badge { position: absolute; top: -7px; right: -7px; min-width: 16px; padding: 0 4px; font-size: .68rem; line-height: 16px;
+                            text-align: center; color: #000; background: var(--accent); }
+.chat-bridge .jump .badge:empty { display: none; }
+/* a block, not flex: a reply longer than a page splits across the pager's columns, and Chrome gives a flex item 0 width in
+   every fragment (the letters stack one per line). The glyph floats at the start instead. */
+.turn { display: flow-root; -webkit-box-decoration-break: clone; box-decoration-break: clone;   /* each page's piece of a long turn keeps its own padding: no near-empty last page */
+        margin: 8px 10px 0; padding: 8px 10px; font-size: .95rem; line-height: 1.38; break-inside: avoid-column;
+        background: #05090b; border: 1px solid var(--dim-green-hi); color: var(--ink);
+        clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.turn > .g { float: left; width: 20px; height: 20px; margin: 1px 8px 0 0; }
+.turn .tx { display: block; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.turn.user { border-color: var(--eye, #ffcc00); color: #fff; } .turn.user > .g { color: var(--eye, #ffcc00); }
+.turn.assistant > .g { color: var(--green); } .turn.raw > .g { color: var(--cyan); }
+.turn.failed { border-color: var(--red); color: var(--red); }
+.turn.waiting .tx { color: var(--amber, #FFAA00); font-style: italic; }   /* a prompt kept while Skippy is away: never an error */
+/* heard: someone near you, in another language, as Whisper translated it (Hands-off). Black, a dashed border: it is not a message to Skippy */
+.turn.heard { background: #000; border: 1px dashed var(--cyan); color: #fff; } .turn.heard > .g { color: var(--cyan); }
+.turn.heard .who { font-size: .72rem; color: var(--cyan); letter-spacing: .02em; margin-bottom: 2px; }
+.turn code.code { font-size: .92rem; }
+.rcpt { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 6px; color: var(--muted); }
+.rcpt .g { width: 15px; height: 15px; } .rcpt .g.dim { opacity: .5; } .rcpt .why { font-size: .72rem; color: var(--amber); }
+.turn > div:not(.tx), .turn > details { clear: both; }
+.rcpt .lamp { width: 8px; height: 8px; }
+.clip { margin-top: 6px; }
+.turn.barney > .g { color: var(--amber); }
+.turn .tx.rich { white-space: normal; } .turn .tx.rich .md > :first-child { margin-top: 0; } .turn .tx.rich .md > :last-child { margin-bottom: 0; }
+/* Mentat's answer under a reply (templates/_chat.html mentatCard): collapsed = the result; opened = the proof and Barney Style? */
+.mentat-card { margin-top: 8px; border: 1px solid var(--cyan); background: #02080c; }
+.mentat-card > summary { display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; list-style: none; color: var(--cyan); }
+.mentat-card > summary::-webkit-details-marker { display: none; }
+.mentat-card > summary .g { width: 18px; height: 18px; flex: none; }
+.mentat-card .mc-value { font: 700 1rem var(--mono, monospace); color: #fff; overflow-wrap: anywhere; }
+.mentat-card .mc-tag { margin-left: auto; font-size: .68rem; color: var(--muted); letter-spacing: .06em; }
+.mentat-card .mc-body { padding: 4px 10px 10px; font-size: .86rem; white-space: normal; }
+.mentat-card .mc-body p { margin: 4px 0; } .mentat-card .mc-body b { color: var(--cyan); display: inline-block; width: 1.2em; }
+.mentat-card .mc-steps { margin: 6px 0; padding-left: 1.4em; } .mentat-card .mc-steps li { margin: 2px 0; }
+.mentat-card .mc-src { font-size: .74rem; color: var(--muted); }
+/* Mentat suggesting inputs (it computed nothing): amber, the colour of a thing waiting on you */
+.mentat-card.mc-suggest { border-color: var(--amber); } .mentat-card.mc-suggest > summary, .mentat-card.mc-suggest .mc-body b { color: var(--amber); }
+.mentat-card .mc-barney { margin-top: 6px; display: inline-flex; align-items: center; gap: 6px; color: var(--amber); }
+/* the agent inside the one chat (templates/_chat.html .agent-view, templates/_workshop.html): its transcript fills the stage, its
+   own composer, brain select, conversation list and title are hidden (this chat's composer, brain sheet and chats sheet drive it),
+   and the folder chip, Copy chat and the Discord switch stay as one slim row above the transcript */
+.chat-bridge .agent-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.chat-bridge .agent-view[hidden] { display: none; }
+.chat-bridge .agent-view .me-chat { flex: 1; min-height: 0; }
+.chat-bridge .agent-view #ps-form, .chat-bridge .agent-view #ps-brain, .chat-bridge .agent-view #ps-convs-btn,
+.chat-bridge .agent-view .me-chat > header, .chat-bridge .agent-view #ps-convs { display: none !important; }
+.chat-bridge .agent-view .ps-bar { margin-top: 0; }
+.chat-bridge .agent-view .newfolder { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
+.chat-bridge .agent-view .newfolder[hidden] { display: none; }
+.chat-bridge .agent-view .newfolder input { flex: 1 1 10em; min-width: 0; }
+.chat-bridge .agent-view .newfolder .msg { flex-basis: 100%; color: var(--muted); font-size: .85em; }
+.chat-bridge .agent-view #ps-project { flex: 0 1 auto; max-width: 60%; font-size: .85rem; padding: 4px 8px; }
+.chat-bridge .chats-head { display: flex; align-items: center; gap: 6px; margin: 10px 0 6px; color: var(--accent); }
+.chat-bridge .chats-head .g { width: 16px; height: 16px; }
+.chat-open .g { width: 14px; height: 14px; color: var(--accent); }
+/* the chat's app tray (a sheet on a phone) and the slim row a wide screen keeps under the box */
+.app-tray { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: minmax(84px, 1fr); gap: 8px; }
+.app-tile { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 8px 4px;
+            color: var(--ink); text-decoration: none; text-align: center; font-size: .82rem; background: #05090b; border: 1px solid var(--dim-green-hi);
+            clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.app-tile .g { width: 30px; height: 30px; color: var(--accent); }
+.app-tile .lamp, .app-slim .lamp { position: absolute; top: 7px; right: 8px; width: 8px; height: 8px; }
+.app-tile .badge, .app-slim .badge { position: absolute; top: 4px; left: 6px; font-size: .7rem; color: #000; background: var(--amber); padding: 0 4px; }
+.app-tile:active { background: var(--accent); color: #000; } .app-tile:active .g { color: #000; }
+.chat-bridge .app-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chat-bridge .app-row[hidden] { display: none; }
+.app-slim { position: relative; }
+/* your chats (this browser's) */
+.chats-top { display: flex; gap: 8px; } .chats-top input { flex: 1; min-width: 0; }
+.chat-row { display: flex; align-items: stretch; gap: 6px; margin: 0 0 6px; break-inside: avoid-column; }
+.chat-open { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; text-align: left;
+             color: var(--ink); background: #05090b; border: 1px solid var(--dim-green-hi); cursor: pointer; }
+.chat-row.lit .chat-open { border-color: var(--accent); }
+.chat-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92rem; }
+.chat-when { font-size: .72rem; color: var(--muted); }
+/* artifacts (static/skippy-artifacts.js): one line collapsed; opened in place on a wide screen, as a full-screen sheet on a phone */
+.artifact { clear: both; margin: 8px 0; border: 1px solid var(--accent); background: #02080a; }
+.artifact > summary { display: flex; align-items: center; gap: 8px; padding: 7px 9px; cursor: pointer; list-style: none; color: var(--accent); }
+.artifact > summary::-webkit-details-marker { display: none; }
+.artifact > summary .g { width: 18px; height: 18px; flex: none; }
+.artifact .art-title { color: #fff; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.artifact .art-size { margin-left: auto; flex: none; font-size: .72rem; color: var(--muted); }
+.artifact .art-body { padding: 0 8px 8px; white-space: normal; }
+.art-keys { display: flex; gap: 6px; justify-content: flex-end; margin: 0 0 6px; }
+.art-keys .key.sm { width: 30px; height: 30px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.art-frame { display: block; width: 100%; height: 70vh; min-height: 320px; border: 1px solid var(--dim-green-hi); background: #000; }
+.art-img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; background: #111; }
+.art-media { display: block; width: 100%; max-height: 70vh; }
+.art-model { display: block; width: 100%; height: 60vh; background: #05090b; --poster-color: transparent; }
+.art-code { margin: 0; padding: 8px; font: .8rem/1.4 var(--mono, monospace); color: var(--ink); background: #05090b;
+            border: 1px solid var(--dim-green-hi); white-space: pre-wrap; overflow-wrap: anywhere; }
+.art-sheet { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; gap: 6px; padding: 8px; background: #000; }
+.art-sheet .art-head { display: flex; align-items: center; gap: 8px; color: var(--accent); }
+.art-sheet .art-head .g { width: 20px; height: 20px; } .art-sheet .art-head .art-title { flex: 1; color: #fff; font-weight: 600;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.art-sheet .art-keys { margin: 0; }
+.art-sheet .art-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.art-sheet .art-body > .pg { flex: 1; min-height: 0; }
+.art-sheet .art-frame, .art-sheet .art-model { flex: 1; height: auto; min-height: 0; }
+.art-sheet .art-img, .art-sheet .art-media { max-height: none; flex: 1; min-height: 0; object-fit: contain; }
+/* files with the next message (templates/_chat.html takeFiles): a row of chips over the box, thumbnails for pictures */
+.chat-bridge .files { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+/* What was sent while Skippy works: waiting in line, dashed, one row each (the agent's queue looks the same) */
+.chat-bridge .queue { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.chat-bridge .queue .qrow { display: flex; gap: 6px; align-items: center; border: 1px dashed var(--dim-green-hi); padding: 3px 4px 3px 8px;
+                            font-size: .8rem; color: var(--muted); }
+.chat-bridge .queue .qt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 4px 3px 6px; font-size: .78rem;
+             color: var(--ink); background: #05090b; border: 1px solid var(--dim-green-hi); }
+.file-chip img { width: 28px; height: 28px; object-fit: cover; } .file-chip .g { width: 16px; height: 16px; }
+.file-chip .fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14em; }
+.file-chip .key.sm { width: 22px; height: 22px; padding: 0; }
+.sent-files { clear: both; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.sent-files img { width: auto; height: auto; max-width: 96px; max-height: 96px; border-radius: 0; border: 1px solid var(--dim-green-hi); }
+/* the camera's viewfinder (static/skippy-camera.js): over the transcript, the picture as large as it fits, keys under it */
+.camview { position: absolute; inset: 0; z-index: 7; display: flex; flex-direction: column; gap: 8px; padding: 8px; background: #000; border: 1px solid var(--accent); }
+.camview video { flex: 1; min-height: 0; width: 100%; object-fit: contain; background: #000; cursor: crosshair; }
+.camview video.mirror { transform: scaleX(-1); }
+.camview .cam-note { margin: 0; font-size: .8rem; color: var(--amber); }
+.camview .cam-note[hidden] { display: none; }
+.camview .cam-keys { flex: none; display: flex; justify-content: center; align-items: center; gap: 24px; }
+.camview .cam-snap { width: 64px; height: 64px; } .camview .cam-snap .g { width: 30px; height: 30px; }
+.chat-bridge.dropping .stage { outline: 2px dashed var(--accent); outline-offset: -4px; }
+/* the Captain's brain sheet: one row per model, a lamp for whether it's reachable, $ for paid */
+.brain-list { display: flex; flex-direction: column; gap: 8px; }
+.brain-opt { display: flex; align-items: center; gap: 10px; padding: 12px 10px; font-size: 1rem; color: var(--ink); background: #05090b;
+             border: 1px solid var(--dim-green-hi); cursor: pointer; text-align: left; }
+.brain-opt .g { width: 22px; height: 22px; } .brain-opt .lamp { margin-left: auto; width: 9px; height: 9px; }
+.brain-opt .paid { color: var(--amber); font-weight: 700; }
+.brain-opt[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.brain-opt:disabled { opacity: .45; cursor: not-allowed; }
+.chat-bridge form.ask { flex: none; margin: 0; }
+.chat-bridge textarea { display: block; width: 100%; min-height: 2.6em; height: 2.6em; resize: none; overflow-y: auto; padding: 8px 10px; font-size: 1rem; background: #05090b; }
+.keybar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+.keybar .grow { flex: 1; }
+.keybar .key[hidden] { display: none; }                          /* a key's own display rule must not undo [hidden] (Stop, the apps key) */
+.keybar .key { flex: 0 1 44px; width: auto; min-width: 30px; height: 42px; }
+.keybar .key .g { width: 20px; height: 20px; }
+.keybar .key .g.flip { transform: scaleX(-1); }
+.keybar .key.lit::after { background: var(--accent); } .keybar .key.lit .g { color: #000; }
+.keybar .key .lamp { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; z-index: 2; }
+.keybar .key.send[data-s="on"] .g { animation: breathe 1s ease-in-out infinite; }
+.key:disabled { opacity: .35; }
+.continuing { flex: none; display: flex; align-items: center; gap: 8px; padding: 2px 8px; background: rgba(0,0,0,.66); border-left: 3px solid var(--violet); font-size: .75rem; color: var(--ink); }
+.continuing[hidden] { display: none; }
+.continuing span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* a sheet: a panel that slides over the conversation (language, tools, past conversations, saving) */
+.sheet { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: #000; border: 1px solid var(--accent);
+         animation: rise .18s ease-out; }
+.sheet[hidden] { display: none; }
+@keyframes rise { from { transform: translateY(14px); opacity: 0; } to { transform: none; opacity: 1; } }
+.lang-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); gap: 8px; align-content: stretch; }
+.lang-opt, .verb, .mem-row { color: var(--ink); background: #05090b; border: 1px solid var(--dim-green-hi); border-radius: 0; padding: 8px 6px; font-size: .95rem; cursor: pointer;
+  clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+.lang-opt[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.lang-opt:active, .verb:active, .mem-row:active { background: var(--accent); color: #000; }
+.verb { display: flex; align-items: center; gap: 8px; width: calc(100% - 4px); margin: 4px 2px 4px; font: 600 .95rem var(--mono); break-inside: avoid-column; }
+.verb small { margin-left: auto; font: 400 .78rem var(--sans, system-ui); opacity: .75; text-align: right; }
+.verb .g { width: 18px; height: 18px; color: var(--accent); }
+.mem-row { display: block; width: calc(100% - 4px); margin: 4px 2px 4px; text-align: left; font-size: .82rem; break-inside: avoid-column; overflow-wrap: anywhere; }
+.mem-row[data-s="on"] { border-color: var(--accent); }
+.mem-src { font: 700 .66rem var(--mono); color: var(--cyan); margin-right: 8px; }
+.mem-filter { flex: none; }
+.lamp.wait { display: block; margin: 30px auto; width: 16px; height: 16px; }
+.sheet .save-ok { display: block; padding: 12px; border: 1px solid var(--dim-green-hi); font-size: .9rem; color: var(--ink); }
+.sheet .save-ok input { width: 20px; height: 20px; vertical-align: -4px; margin-right: 8px; accent-color: var(--accent); }
+
+/* a lamp that is coming up (a server booting): a quick-breathing amber ring */
+[data-s="boot"] .lamp { background: transparent; box-shadow: inset 0 0 0 2px var(--amber); animation: breathe .9s ease-in-out infinite; }
+[data-s="boot"] .plate { opacity: .8; } [data-s="boot"] .plate::after { opacity: .85; animation-duration: 1.3s; }
+
+/* ── Game servers ─────────────────────────────────────────────────────────────────────────────────────────────── */
+.statusbar { flex: none; display: flex; align-items: center; gap: 10px; padding: 4px 4px 6px; font: 600 .85rem var(--mono); color: var(--ink); min-height: 28px; }
+.statusbar .lamp { width: 12px; height: 12px; flex: none; }
+.statusbar .names { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.statusbar .g { width: 16px; height: 16px; color: var(--muted); }
+.games-bridge { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.games-bridge .stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.key.danger { color: var(--red); } .key.danger::before { background: var(--red); }
+.key.danger:active::after { background: var(--red); }
+.sheet .pick { display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--dim-green-hi); margin: 0 0 6px; color: var(--ink); }
+.sheet .pick input { width: 20px; height: 20px; accent-color: var(--accent); }
+.sheet .idle { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--muted); }
+.sheet .idle input { width: 5.5em; }
+
+/* a game's own page: panes of one screen each */
+.game-bridge { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.game-bridge .pg { background: rgba(0, 0, 0, .55); }
+.pane { break-before: column; padding: 10px 12px; }
+.pane:first-child { break-before: auto; }
+.pane .gname { display: flex; align-items: center; gap: 10px; margin: 6px 0 10px; font: 700 1.25rem var(--mono); color: var(--accent); }
+.pane .gname .lamp { width: 14px; height: 14px; flex: none; }
+.pane .banner { height: 96px; margin: 0 0 8px; position: relative; overflow: hidden; border: 1px solid var(--accent);
+                clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); }
+.pane .banner img { width: 100%; height: 100%; object-fit: cover; opacity: .6; }
+.pane .meta { display: flex; align-items: center; gap: 8px; margin: 6px 0; color: var(--muted); font: 600 .9rem var(--mono); }
+.pane .meta .g { width: 18px; height: 18px; }
+.pane .meta b { color: var(--ink); }
+.pane .go { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+.pane .go .key { width: 64px; height: 64px; } .pane .go .key .g { width: 30px; height: 30px; }
+.pane .join p { margin: 8px 0; } .pane .join .help, .pane .help { font-size: .78rem; }
+.pane .facts { display: grid; grid-template-columns: 1fr; gap: 6px; }
+.pane .facts div { padding: 8px 10px; border: 1px solid var(--dim-green-hi); background: #05090b; }
+.pane .facts b { display: block; font-size: .68rem; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); }
+.pane .links, .pane .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+.pane .links a { display: inline-flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--accent); text-decoration: none; color: var(--accent); }
+.pane .links .g { width: 16px; height: 16px; }
+.pane .card { margin: 8px 0; padding: 10px; background: #05090b; border: 1px solid var(--dim-green-hi); border-radius: 0; }
+.pane h3, .pane h4 { margin: 8px 0 4px; }
+.pane .discord-feed .msg { margin: 0 0 8px; break-inside: avoid-column; }
+.pane .discord-feed .who { font-weight: 700; color: var(--accent); margin-right: 6px; }
+.pane .discord-feed .who.bot { color: var(--amber); }
+.pane .discord-feed .when { font-size: .7rem; opacity: .6; }
+.pane .discord-feed .body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.pane .discord-feed .extra { font-size: .8rem; opacity: .8; }
+.pane form.card label.field { margin-top: 8px; }
+.pane button, .pane .btn { border-radius: 0; background: transparent; border-color: var(--accent); }
+.pane button.danger { border-color: var(--red); }
+body.game-art::before { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: var(--art) center / cover no-repeat; }
+body.game-art::after { content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none; background: rgba(0, 0, 0, .8); }   /* a flat dim over the art: no gradient */
+
+/* ── An app page on the bridge that lists things and plays them (Bilby's Audio Service, Nagatha's Video Service) ───────────────────
+   `.bp` is the page's root: the reset of the portal's old button look, the keys that light when pressed, a top row (back, search,
+   sort, letters), a stage that holds a deck or a list shown a screen at a time (Bridge.PList: static/bridge.js) with a bar under it
+   that shows and scrubs where you are, sheets over the stage, a short-lived toast, the keyboard-help dialog. */
+.bp { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; color: var(--ink); }
+.bp [hidden] { display: none !important; }
+.bp .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.bp .grow { flex: 1; }
+/* the portal's generic button look (green, rounded) is for the old pages: here a button is whatever its class draws */
+:where(.bp) button { background: none; border: 0; border-radius: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.bp button:hover { background: none; color: inherit; }
+.bp button:disabled { opacity: .35; cursor: default; }
+.bp .key, .bp .key:hover { color: var(--accent); }
+.bp .key.danger { color: var(--red); }
+.bp .key[aria-pressed="true"]::after, .bp .key[aria-selected="true"]::after { background: var(--accent); }
+.bp .key[aria-pressed="true"] .g, .bp .key[aria-selected="true"] .g { color: var(--black); }
+.bp .key.on::after { background: var(--accent); } .bp .key.on .g { color: var(--black); }
+.bp svg.g { stroke-width: 1.7; }
+.bp [data-i] { display: contents; }
+
+.notice { flex: none; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 6px; padding: 6px 10px; font-size: .8rem; background: var(--panel); border-left: 3px solid var(--accent); }
+.notice.warn { border-color: var(--amber); } .notice.bad { border-color: var(--red); }
+.notice .grow { flex: 1; min-width: 10em; }
+.notice progress { width: 100%; height: 4px; accent-color: var(--accent); }
+.notice .pill-btn { padding: 4px 12px; border: 1px solid var(--accent); color: var(--accent); font-size: .8rem; }
+
+/* ── the top row: back, search, sort, jump to a letter ─────────────────────────────────────────────────────────── */
+.bp-top { flex: none; display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; }
+.bp-top .key { height: 40px; }
+.bp-top .search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 6px 0 10px; background: var(--panel); border: 1px solid var(--dim-green-hi); }
+.bp-top .search:focus-within { border-color: var(--accent); }
+.bp-top .search > .g { flex: none; width: 18px; height: 18px; color: var(--muted); }
+.bp-top .search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: var(--white); font-size: 16px; outline: none; }
+.bp-top .search input::-webkit-search-cancel-button { display: none; }
+.bp-top .search .clear { flex: none; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.bp-top .search .clear .g { width: 16px; height: 16px; }
+
+.bp-stage { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.bp-stage > .deck { padding-top: 0; }
+.deck .unit .hit { background: none; border: 0; border-radius: 0; padding: 0; }
+.deck .unit .name { font-size: 13px; color: var(--accent); }
+.deck .unit.lit .plate { opacity: 1; }
+.bp-list { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.bp-page { flex: 1; min-height: 0; position: relative; overflow: hidden; touch-action: pan-y; outline: none; }
+.vl-host { position: relative; }
+.vl-host.flip-n { animation: pg-next .16s ease-out; }
+.vl-host.flip-p { animation: pg-prev .16s ease-out; }
+@keyframes pg-next { from { transform: translateX(28px); opacity: .3; } to { transform: none; opacity: 1; } }
+@keyframes pg-prev { from { transform: translateX(-28px); opacity: .3; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .vl-host.flip-n, .vl-host.flip-p { animation: none !important; } }
+
+/* the bar under a list: where you are in the whole of it; drag along it to go anywhere */
+.scrub { flex: none; position: relative; height: 32px; display: flex; align-items: center; gap: 8px; touch-action: none; cursor: pointer; outline: none; }
+.scrub:focus-visible { outline: 2px solid var(--white); outline-offset: -2px; }
+.scrub .pips { flex: 1; height: 4px; margin: 0; }
+.scrub .pips i { right: auto; transition: none; background: var(--amber); }
+.scrub .pips[hidden] { display: block !important; visibility: hidden; }
+.scrub .pgno { flex: none; min-width: 5.2em; text-align: right; font: 600 11px var(--mono); color: var(--muted); }
+.rail-bubble { position: absolute; right: 12px; bottom: 40px; z-index: 6; min-width: 64px; padding: 6px 14px; text-align: center; font: 700 2rem var(--mono);
+               color: var(--accent); background: var(--black); border: 2px solid var(--accent); pointer-events: none; }
+
+#letters { grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: minmax(0, 1fr); }
+#letters .lang-opt { font: 700 1.1rem var(--mono); padding: 0; }
+#letters .lang-opt:disabled { opacity: .25; }
+
+.toasts { position: absolute; left: 8px; right: 8px; bottom: 6px; z-index: 80; display: flex; flex-direction: column; align-items: center; gap: 6px; pointer-events: none; }
+.toast { pointer-events: auto; display: flex; gap: 12px; align-items: center; max-width: 100%; padding: 8px 14px; background: var(--panel); border: 1px solid var(--accent); font-size: .85rem; color: var(--white);
+         clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+.toast button { padding: 2px 10px; border: 1px solid var(--accent); color: var(--accent); font-weight: 700; }
+
+dialog.keys { width: min(92vw, 520px); max-height: 86vh; overflow: hidden; padding: 16px 18px; border: 1px solid var(--accent); background: var(--black); color: var(--white); }
+dialog.keys::backdrop { background: color-mix(in srgb, var(--black) 80%, transparent); }
+dialog.keys h2 { margin: 0 0 10px; font-size: 1.05rem; }
+dialog.keys dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; margin: 0 0 12px; font-size: .9rem; }
+dialog.keys dt { white-space: nowrap; }
+dialog.keys dd { margin: 0; color: var(--muted); }
+dialog.keys kbd { display: inline-block; min-width: 1.7em; padding: 1px 7px; border: 1px solid var(--dim-green-hi); background: var(--panel); font-family: var(--mono); font-size: .85em; text-align: center; }
+dialog.keys .why { color: var(--muted); font-size: .82rem; line-height: 1.4; }
+dialog.keys .key { margin: 0 0 0 auto; }
+
+/* a wide screen: the column stays a comfortable width (the deck widens by itself) */
+@media (min-width: 900px) { .bp-top, .bp-list, .bp-bar, .keybar, .chat-bridge .app-row { width: min(100%, 820px); margin-left: auto; margin-right: auto; } }
+
+/* a lamp that carries its own state (a bare .lamp[data-s]): lit and breathing, a triangle for a warning, a diamond for out of reach, a ring for coming up */
+.lamp[data-s="warn"] { background: var(--amber); border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.lamp[data-s="off"] { background: var(--red); border-radius: 0; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.lamp[data-s="on"] { animation: breathe 2.4s ease-in-out infinite; }
+.lamp[data-s="boot"] { background: transparent; box-shadow: inset 0 0 0 2px var(--amber); animation: breathe .9s ease-in-out infinite; }
+
+/* a row of a list (PList): a heading row with a glyph and a count, a message row */
+.vrow { display: flex; align-items: center; gap: 10px; box-sizing: border-box; overflow: hidden; border-bottom: 1px solid var(--line); }
+.vtitle { gap: 10px; padding: 0 4px; color: var(--accent); font: 700 1.05rem var(--mono); border-bottom: 2px solid var(--accent); }
+.vtitle .g { width: 26px; height: 26px; }
+.vhead { gap: 8px; padding: 0 4px; color: var(--accent); font: 700 .9rem var(--mono); }
+.vhead .g { width: 20px; height: 20px; }
+.vmsg { gap: 10px; padding: 8px 6px; color: var(--muted); font-size: .85rem; line-height: 1.35; border: 0; }
+.vmsg .g { flex: none; width: 24px; height: 24px; }
+
+/* the voice keys (static/skippy-voice.js): the key's data-s says what it is doing; the lamp in it follows */
+.key.mic .lamp, .key.spk .lamp, .key.ear .lamp { position: absolute; top: 5px; right: 6px; width: 7px; height: 7px; z-index: 2; background: transparent; }
+.key.mic[data-s="on"] .lamp, .key.spk[data-s="on"] .lamp { background: var(--accent); animation: breathe 1s ease-in-out infinite; }
+.key.mic[data-s="boot"] .lamp { box-shadow: inset 0 0 0 2px var(--amber); animation: breathe .9s ease-in-out infinite; }
+.key.mic[data-s="warn"] .lamp { background: var(--amber); border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.key.spk[aria-pressed="true"] .lamp { background: var(--accent); }
+.key.spk[data-s="on"] .lamp { background: var(--accent); }
+/* the chat has eleven keys (voice added two): let them shrink so the row stays one line on a phone */
+.chat-bridge .keybar { flex-wrap: wrap; gap: 4px; }                  /* a phone: two rows of finger-sized keys, never one off-screen */
+.chat-bridge .keybar .key { min-width: 40px; flex: 1 0 40px; max-width: 52px; }
+.chat-bridge .keybar .grow { flex: 0 0 0; }
+.chat-bridge .keybar .key .g { width: 18px; height: 18px; }
+
+/* the hands-free voice status (static/skippy-voice.js): a level bar that moves as you speak, what it is doing, and a cross to cancel */
+.vstat { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; padding: 4px 8px; border: 1px solid var(--accent); font: 600 .78rem var(--mono); color: var(--ink); }
+.vstat[hidden] { display: none; }
+.vstat .lvbar { flex: none; width: 90px; height: 8px; background: var(--dim-green); border: 1px solid var(--dim-green-hi); overflow: hidden; }
+.vstat .lvbar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .06s linear; }
+.vstat .vtxt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Skippy's voice failed: a feather pen writes (skippy-voice.js penned), the reply is text only */
+.vstat .vpen { width: 16px; height: 16px; margin-right: 6px; vertical-align: -3px; fill: none; stroke: var(--accent); stroke-width: 1.6;
+  stroke-linecap: round; stroke-linejoin: round; animation: vpen-write .9s ease-in-out infinite; }
+@keyframes vpen-write { 0%, 100% { transform: translate(0, 0) rotate(0); } 25% { transform: translate(3px, 1px) rotate(-8deg); }
+  50% { transform: translate(6px, 0) rotate(0); } 75% { transform: translate(3px, -1px) rotate(8deg); } }
+@media (prefers-reduced-motion: reduce) { .vstat .vpen { animation: none; } }
+.vstat .vx { flex: none; padding: 0 8px; min-width: 0; margin: 0; background: transparent; color: var(--ink); border: 1px solid var(--dim-green-hi); font: inherit; }
+
+/* the full-screen key's iPhone tip: one sentence under the top strip */
+.fs-tip { flex: none; margin: 0 14px 4px; padding: 6px 10px; border: 1px solid var(--accent); font: 600 .78rem var(--mono); color: var(--ink); }
+.fs-tip[hidden] { display: none; }
+.key.ear[data-s="on"] .lamp { background: var(--accent); animation: breathe 2.4s ease-in-out infinite; }
+.key.ear[aria-pressed="true"] { color: var(--accent); }
+
+/* each turn's keys (copy; and on the last exchange Edit, Retry and the versions ‹ n/m ›): quiet until you point at the turn */
+.turn > .acts { clear: both; display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin: 4px -4px -4px 0; min-height: 26px; }
+.turn > .acts .key.sm { width: 26px; height: 26px; opacity: .45; border-color: transparent; background: transparent; }
+.turn:hover > .acts .key.sm, .turn:focus-within > .acts .key.sm, .turn > .acts .key.sm:focus-visible { opacity: 1; }
+@media (hover: none) { .turn > .acts .key.sm { opacity: .8; } }
+.turn > .acts .key.sm[data-s="on"] { color: #000; background: var(--accent); opacity: 1; }
+.turn > .acts .alts { display: inline-flex; align-items: center; gap: 2px; font-size: .75rem; color: var(--muted); }
+.turn > .acts .flip .g { transform: scaleX(-1); }
+.turn pre.codeblock { position: relative; }
+/* editing your last message: a strip above the box says so; Esc or the cross leaves it */
+.chat-bridge .editing { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: .78rem; color: var(--eye, #ffcc00); }
+.chat-bridge .editing[hidden] { display: none; }
+.chat-bridge .editing span { flex: 1; }
+.file-chip.pasted { border-style: dashed; }
+/* Reply to a part (static/skippy-reply.js): the key by a selection, the quotes waiting over the box, and the quotes in a sent bubble */
+.reply-key { position: fixed; z-index: 60; width: 36px; height: 36px; color: var(--accent); background: #000; }
+.reply-key[hidden] { display: none; }
+.chat-bridge .quotes { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }   /* each quote is clamped to three lines; at most six */
+.chat-bridge .quotes[hidden] { display: none; }
+.quote-chip { display: flex; align-items: flex-start; gap: 6px; padding: 3px 4px 3px 6px; background: #000; border: 1px solid var(--dim-green-hi); }
+.quote-chip > .g { flex: none; width: 16px; height: 16px; margin-top: 3px; color: var(--accent); }
+.quote-chip blockquote.quote { flex: 1; min-width: 0; margin: 0; max-height: 4.2em; overflow: hidden; font-size: .8rem; }
+.quote-chip .key.sm { flex: none; width: 22px; height: 22px; padding: 0; }
+blockquote.quote { margin: 0 0 6px; padding: 1px 0 1px 8px; border-left: 3px solid var(--accent); color: var(--muted);
+                   white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Your chats: the filter row (the Captain), day headings, and each row's star, rename and bin */
+.chat-bridge .chats-kinds { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.chat-bridge .chats-kinds button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; font-size: .8rem; color: var(--muted);
+                                   background: #05090b; border: 1px solid var(--dim-green-hi); cursor: pointer; }
+.chat-bridge .chats-kinds button[aria-pressed="true"] { color: #000; background: var(--accent); border-color: var(--accent); }
+.chat-bridge .chats-kinds .g { width: 14px; height: 14px; }
+.chat-bridge .chats-head { font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; break-after: avoid-column; }
+.chat-row > .key.sm { align-self: center; flex: none; }
+.chat-row .key.star .g { opacity: .55; } .chat-row .key.star.on .g { opacity: 1; fill: currentColor; color: var(--eye, #ffcc00); }
+.chat-open:has(> .g) { display: grid; grid-template-columns: auto 1fr; column-gap: 8px; align-items: center; }
+.chat-open > .g { width: 15px; height: 15px; color: var(--muted); grid-row: span 2; }
+.chat-rename { width: 100%; font-size: .92rem; padding: 2px 4px; background: #000; color: #fff; border: 1px solid var(--accent); }
+/* a picture Skippy is still drawing (skippy-core takes its time, for quality): the card fills in by itself */
+.picture-wait { clear: both; display: flex; align-items: center; gap: 8px; margin: 8px 0; padding: 8px 10px; font-size: .85rem;
+                color: var(--muted); border: 1px dashed var(--accent); background: #02080a; }
+.picture-wait .g { width: 18px; height: 18px; color: var(--accent); }
+.picture-wait .lamp { width: 8px; height: 8px; margin-left: auto; }
+
+/* The permanent Home chat (static/skippy-home.js, templates/_chat.html .home-view): the house conversation in the one chat's stage, the Captain only. */
+.chat-bridge .home-view { flex: 1; min-height: 0; display: flex; flex-direction: column; background: rgba(0, 0, 0, .66); }
+.chat-bridge .home-view[hidden] { display: none; }
+.home-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--dim-green-hi); }
+.home-bar .home-title { display: flex; align-items: center; gap: 6px; color: var(--accent); font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; margin-right: auto; }
+.home-bar .home-title .g { width: 18px; height: 18px; }
+.home-bar .key[aria-pressed="false"] { opacity: .55; }
+.home-bar .key[aria-pressed="true"]::after { background: var(--accent); } .home-bar .key[aria-pressed="true"] .g { color: var(--black, #000); }
+.home-bar select { flex: 0 1 auto; width: auto; max-width: 40%; background: #000; color: var(--ink); border: 1px solid var(--dim-green-hi); padding: 4px 6px; font-size: .8rem; }
+.home-state { margin: 6px 10px 0; padding: 4px 8px; font-size: .8rem; color: var(--amber, #ffaa00); border: 1px dashed var(--amber, #ffaa00); }
+.home-state[hidden] { display: none; }
+.chat-bridge .home-flow { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-bottom: 10px; scrollbar-width: thin; scrollbar-color: var(--dim-green-hi) transparent; }
+.home-turn .who { font-size: .72rem; color: var(--muted, #8aa); margin-bottom: 2px; }
+.home-turn.announce { border-style: dashed; } .home-turn.typed.user { border-style: dotted; } .home-turn.silent { opacity: .75; }
+.home-line { display: flex; align-items: center; gap: 6px; margin: 4px 14px 0; font-size: .76rem; color: var(--muted, #8aa); }
+.home-line .g { width: 14px; height: 14px; flex: none; } .home-line.note { color: var(--amber, #ffaa00); }
+.chat-bridge .chat-home { margin: 0 0 8px; }
+
+/* ── Toggles and clickers (the Captain, 2026-11-02: "toggles and clickers are different shapes") ──────────────────────
+   A TOGGLE is a key with aria-pressed: a hexagon with exactly two looks, lit (filled, glyph black) when on and dark when off,
+   whatever else it is doing. A CLICKER (a one-shot action) keeps the cut corner; while its job runs it carries data-busy
+   (static/keys.js, SkippyKeys.busy) and its glyph breathes. A toggle that is working (the voice key thinking) breathes the same way.
+   Lamps inside toggles are gone: the fill says on or off, the breath says working, nothing else. */
+.key[aria-pressed]::before, .key[aria-pressed]::after { clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%); }
+.key[aria-pressed="true"]::after, .keybar .key[aria-pressed="true"]::after { background: var(--accent); }
+.key[aria-pressed="true"] .g, .keybar .key[aria-pressed="true"] .g { color: #000; }
+.keybar .key[aria-pressed="false"].lit::after, .key[aria-pressed="false"]::after { background: #05090b; }
+.keybar .key[aria-pressed="false"].lit .g, .key[aria-pressed="false"] .g { color: var(--accent); }
+.key[aria-pressed] .lamp, .keybar .key[aria-pressed] .lamp { display: none; }
+.key[aria-pressed][data-s="boot"] .g, .key[aria-pressed="false"][data-s="on"] .g,
+.key[data-busy] .g, .unit[data-busy] .g { animation: breathe .9s ease-in-out infinite; }
+/* the generic page look (button:hover goes green with a black glyph) never reaches a key: on a touch screen hover sticks, and a
+   key left black after Hands-off was that (2026-11-02) */
+.key:hover, button.key:hover { background: transparent; color: var(--accent); }
+
+/* A unit's lamp is shown only when it says something: no state, no lamp (Drive's Book, Shuffle and Play had a filled dot that
+   meant nothing). What each look means is in its tooltip (keys.js) and docs/portal/README.md → The lamps. */
+.unit:not([data-s]):not([data-busy]) > .lamp { visibility: hidden; }
+.unit[data-busy] > .lamp { visibility: visible; background: transparent; box-shadow: inset 0 0 0 2px var(--amber); animation: breathe .9s ease-in-out infinite; }
+
+/* ── Each control's own theme (portal/themes.py; picked on the control: keys.js) ─────────────────────────────────────────────
+   A colour is that palette colour on black; the fancy ones (gradients) are in static/themes-fancy.css, loaded only where a control wears one
+   (base.html) or for the Captain's picker: the bridge itself draws no gradients (black is see-through on the glasses). data-theme sits on the unit or key.
+   :not(#_) adds an id's weight, so a pick beats a page's own colours (Drive's #k-book ...). */
+[data-theme="red"]:not(#_) { --accent: #FF4444 !important; }     [data-theme="orange"]:not(#_) { --accent: #FF9900 !important; }
+[data-theme="yellow"]:not(#_) { --accent: #FFE600 !important; }  [data-theme="green"]:not(#_) { --accent: #00FF88 !important; }
+[data-theme="blue"]:not(#_) { --accent: #2E8BFF !important; }    [data-theme="violet"]:not(#_) { --accent: #818CF8 !important; }
+[data-theme="purple"]:not(#_) { --accent: #B040FF !important; }  [data-theme="pink"]:not(#_) { --accent: #FF4FD8 !important; }
+[data-theme="white"]:not(#_) { --accent: #FFFFFF !important; }
+
+/* the picker's door: a black, invisible button in a tile's cut-off corner (the Captain's design), and the picker itself */
+.theme-corner { position: absolute; right: 0; bottom: 0; width: calc(var(--cut, 14px) * 1.9); height: calc(var(--cut, 14px) * 1.9); z-index: 4;
+                background: #000 !important; border: 0; padding: 0; margin: 0; cursor: pointer; opacity: 0;
+                clip-path: polygon(100% 0, 100% 100%, 0 100%); }
+.theme-pick { position: fixed; z-index: 90; display: grid; grid-template-columns: repeat(5, 34px); gap: 6px; padding: 10px;
+              background: #000; border: 1px solid var(--line, #1c2a2a); box-shadow: 0 8px 28px rgba(0,0,0,.8); }
+.theme-pick button { width: 34px; height: 34px; padding: 0; border: 1px solid #333; background: #000; cursor: pointer; border-radius: 0; color: #fff;
+                     clip-path: polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px); }
+.theme-pick button i { display: block; width: 100%; height: 100%; }
+.theme-pick button[aria-pressed="true"] { outline: 2px solid #fff; outline-offset: -4px; }
+.theme-pick .mini { display: flex; width: 100%; height: 100%; } .theme-pick .mini b { flex: 1; }
+
+/* Moments in Your chats (portal/vision.py): a row of the pictures of one flash under its time and what was said or read */
+.chat-row.moment .chat-open { cursor: default; }
+.moment-strip { display: flex; gap: 4px; margin-top: 4px; max-width: 100%; overflow: hidden; }
+.moment-strip a { flex: none; display: block; border: 1px solid var(--line); }
+.moment-strip img { display: block; width: 64px; height: 40px; object-fit: cover; background: #000; }
+.moment-strip .moment-clip { display: grid; place-items: center; width: 40px; height: 40px; color: var(--accent); }
+.moment-strip .moment-clip .g { width: 18px; height: 18px; }
+.chat-row.moment-gone .chat-open { color: var(--muted); }

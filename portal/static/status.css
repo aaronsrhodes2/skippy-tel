@@ -1,0 +1,77 @@
+/* The Status page (templates/status.html). Portal colour variables only; no scrolling page: the map pans and zooms, the sheet pages itself. */
+.stat { position: relative; height: calc(100dvh - 64px); display: flex; flex-direction: column; overflow: hidden; }
+.stat .bar { display: flex; align-items: center; gap: 10px; padding: 6px 4px; }
+.stat .grow { flex: 1; }
+.stat .age { color: var(--muted); font-size: .8rem; }
+.stat .key, .stat .chip { display: inline-flex; align-items: center; gap: 6px; min-width: 44px; height: 44px; justify-content: center; border: 1px solid var(--dim-green-hi);
+  background: transparent; color: var(--ink); clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); cursor: pointer; }
+.stat .key.close { border-color: var(--red); color: var(--red); clip-path: none; border-radius: 50%; }   /* unlike Back: round and red, a cross */
+.stat .chip b { font-weight: 600; }
+.stat .chip.warn { border-color: var(--amber); color: var(--amber); }
+.stat .chip.bad { border-color: var(--red); color: var(--red); }
+.stat .g { width: 22px; height: 22px; fill: none; stroke: currentColor; }
+.map { flex: 1; width: 100%; touch-action: none; cursor: grab; user-select: none; }
+.map.drag { cursor: grabbing; }
+.map text { fill: var(--ink); font-family: var(--font); font-size: 16px; pointer-events: none; }
+.map .sub { fill: var(--muted); font-size: 12px; }
+.map .node { cursor: pointer; }
+.map .node polygon { fill: var(--panel); stroke: var(--dim-green-hi); stroke-width: 2; }
+.map .node:hover polygon, .map .node.on polygon { stroke: var(--accent); }
+.map .edge { stroke-width: 2.5; fill: none; }
+.map .edge.trunk { stroke-dasharray: 2 7; stroke-linecap: round; }
+.map .edge.ok, .map .lamp.ok { stroke: #2bd96b; fill: #2bd96b; }
+.map .edge.degraded, .map .lamp.degraded, .map .lamp.warn { stroke: #ffd60a; fill: #ffd60a; }
+.map .lamp.call { stroke: #4da3ff; fill: #4da3ff; }
+.map .edge.down, .map .lamp.down, .map .lamp.hung { stroke: #ff3b3b; fill: #ff3b3b; }
+.map .lamp.hung { animation: breathe 0.8s ease-in-out infinite; }
+.map .edge.stale, .map .edge.off, .map .lamp.stale, .map .lamp.off { stroke: var(--muted); fill: var(--muted); }
+.map .edge.ok { animation: flow 2.4s linear infinite; stroke-dasharray: 10 8; }
+.map .edge.trunk.ok { stroke-dasharray: 2 7; }
+.map .lamp { stroke: none; }
+.map .lamp.ok { animation: breathe 3.2s ease-in-out infinite; }
+.map .kid circle { stroke: none; }
+.map .kid { cursor: pointer; }
+.map .node polygon.busy { fill: none; stroke: var(--cyan); stroke-width: 1.5; stroke-dasharray: 3 5; }   /* drawn over its node: no fill, or it hides the words */
+@keyframes flow { to { stroke-dashoffset: -36; } }
+@keyframes breathe { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .map .edge.ok, .map .lamp.ok { animation: none; } }
+.hsheet { position: absolute; right: 0; top: 56px; bottom: 0; width: min(420px, 100%); background: #000; border-left: 2px solid var(--dim-green-hi);
+  display: flex; flex-direction: column; z-index: 5; }
+.hsheet[hidden] { display: none; }
+.hsheet header { display: flex; align-items: center; gap: 8px; padding: 8px; border-bottom: 1px solid var(--line); }
+.hsheet header h2 { margin: 0 0 0 8px; font-size: 1.05rem; font-weight: 600; }
+.hsheet .body { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
+.hsheet .hrows { flex: 1; overflow: hidden; padding: 6px 10px; }
+.hsheet .hrow { display: flex; align-items: center; gap: 10px; min-height: 44px; border-bottom: 1px solid var(--line); }
+.hsheet .hrow .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.hsheet .hrow .dots { display: flex; gap: 5px; flex: none; }
+.hsheet .hrow.legend { min-height: 30px; gap: 6px; border-bottom: 0; flex-wrap: wrap; }
+.hsheet .hrow.legend .dot { width: 12px; height: 12px; }
+.hsheet .hrow.legend .dot.warn, .hsheet .hrow.legend .dot.down { width: 14px; height: 14px; }
+.hsheet .hrow.legend .dt { flex: none; margin-right: 8px; font-size: .75rem; }
+/* Five lamps, told apart by colour AND shape (the bridge theme recolours --green/--red, so these are fixed): ready = green disc, on call = blue ring,
+   not ready = yellow triangle, down = red diamond (hung: it pulses), can't tell = grey hollow ring. A measurement (disk, load) has no lamp at all. */
+.hsheet .hrow { --l-ok: #2bd96b; --l-call: #4da3ff; --l-warn: #ffd60a; --l-down: #ff3b3b; --l-off: #9aa0a8; }
+.hsheet .hrow .dot { box-sizing: border-box; }
+.hsheet .hrow .dot.ok { background: var(--l-ok); }
+.hsheet .hrow .dot.call { background: transparent; border: 3px solid var(--l-call); }
+.hsheet .hrow .dot.warn, .hsheet .hrow .dot.degraded { background: var(--l-warn); border-radius: 0; clip-path: polygon(50% 0, 100% 100%, 0 100%); width: 15px; height: 14px; }
+.hsheet .hrow .dot.down, .hsheet .hrow .dot.hung { background: var(--l-down); border-radius: 0; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); width: 15px; height: 15px; }
+.hsheet .hrow .dot.hung { animation: breathe 0.8s ease-in-out infinite; }
+.hsheet .hrow .dot.stale, .hsheet .hrow .dot.off { background: transparent; border: 2px solid var(--l-off); }
+.hsheet .hrow .dot.none { background: none; border: 0; }
+.hsheet .hrow .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hsheet .hrow .dt { color: var(--muted); font-size: .8rem; }
+.hsheet .hrow.about { align-items: flex-start; padding: 8px 0; }
+.hsheet .hrow.about .say { flex-basis: 100%; white-space: pre-wrap; font-size: .85rem; line-height: 1.4; color: var(--fg, #e8e8e8); }
+.hsheet .hrow .key { height: 36px; min-width: 36px; }
+.hsheet .hrow .key.on, .hsheet .key.on { border-color: var(--accent); color: var(--accent); }
+.hsheet .hrow.log { flex-wrap: wrap; align-items: flex-start; padding: 6px 0; }
+.hsheet .hrow.log .nm { white-space: normal; flex-basis: calc(100% - 38px); }
+.hsheet .hrow.log .dt { flex-basis: 100%; padding-left: 22px; }
+.hsheet .hrow .chip { height: 36px; }
+.hsheet .hrow.tap { cursor: pointer; }
+.hsheet .hrow.tap:hover { background: var(--dim-green); }
+.hsheet .hpager { display: flex; justify-content: center; align-items: center; gap: 10px; padding: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: .85rem; }
+.hsheet h3 { margin: 10px 10px 2px; font-size: .8rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.note { position: absolute; left: 12px; right: 12px; bottom: 12px; margin: 0; padding: 10px 12px; background: var(--panel); border: 1px solid var(--dim-green-hi); font-size: .9rem; z-index: 6; }

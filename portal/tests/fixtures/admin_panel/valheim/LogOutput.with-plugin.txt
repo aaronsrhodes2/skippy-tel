@@ -1,0 +1,40 @@
+[Message:   BepInEx] BepInEx 5.4.23.5 - valheim_server (9/29/2026 11:48:22 PM)
+[Message:   BepInEx] User is running BepInExPack Valheim version 5.4.2351
+[Info   :   BepInEx] Running under Unity vUnknown (post-2017)
+[Info   :   BepInEx] CLR runtime version: 4.0.30319.42000
+[Info   :   BepInEx] Supports SRE: True
+[Info   :   BepInEx] System platform: Bits64, Linux
+[Message:   BepInEx] Preloader started
+[Info   :   BepInEx] Loaded 1 patcher method from [BepInEx.Preloader 5.4.23.5]
+[Info   :   BepInEx] 1 patcher plugin loaded
+[Info   :   BepInEx] Patching [UnityEngine.CoreModule] with [BepInEx.Chainloader]
+[Message:   BepInEx] Preloader finished
+[Message:   BepInEx] Valheim Version: l-1.0.16
+[Info   :   BepInEx] Detected Unity version: v6000.0.75f1
+[Message:   BepInEx] Chainloader ready
+[Message:   BepInEx] Chainloader started
+[Info   :   BepInEx] 1 plugin to load
+[Info   :   BepInEx] Loading [Lab Plugin 1.2.3] (com.skippy.labplugin)
+[Info   :Lab Plugin] Lab plugin awake
+[Message:   BepInEx] Chainloader startup complete (1 loaded, 0 skipped, 0 failed)
+[Info   : Unity Log] 09/29/2026 23:53:05: Set background loading budget to Low
+
+[Info   : Unity Log] 09/29/2026 23:53:05: Loading first scene!
+
+[Info   : Unity Log] 09/29/2026 23:53:05: Preferences initialized! Activating first scene!
+
+[Info   : Unity Log] 09/29/2026 23:53:05: Loading: Starting to load scene: start.unity (169d7618616154c03be07e9ad3af5893)
+
+[Info   : Unity Log] 09/29/2026 23:53:05: Set background loading budget to Normal
+
+[Info   : Unity Log] 09/29/2026 23:53:05: Loaded localization file #0 - 'localization' language: 'English'
+
+[Info   : Unity Log] 09/29/2026 23:53:05: Loaded localization file #1 - 'localization_extra' language: 'English'
+
+[Info   : Unity Log] 09/29/2026 23:53:05: Loaded localization file #2 - 'heightmap_message' language: 'English'
+
+[Info   : Unity Log] 09/29/2026 23:53:05: Loaded localization file #3 - 'localization_witch' language: 'English'
+
+[Info   : Unity Log] 09/29/2026 23:53:05: Loaded localization file #4 - 'localization_ashlands' language: 'English'
+
+[Info   : Unity Log] 09/29/2026 23:53:05: Loaded localization file #5 - 'localization_deepnorth' language: 'English'

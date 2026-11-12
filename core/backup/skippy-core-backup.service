@@ -1,0 +1,11 @@
+[Unit]
+Description=SkippyCore git backup: bundle each repo in the trunk and put it in gs://skippy-tel-git-backup (core/backup/backup.py, docs/no-github.md)
+Wants=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/skippy-core/backup/backup.py run
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=2h

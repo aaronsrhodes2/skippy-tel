@@ -1,0 +1,343 @@
+Here's a complete single-file ASCII Arkanoid. Save it as an `.html` file and open it in a browser.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ASCII Arkanoid</title>
+<style>
+  body {
+    margin: 0;
+    background: #000;
+    color: #ccc;
+    font-family: "Courier New", Consolas, monospace;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 20px;
+    user-select: none;
+  }
+  h1 {
+    color: #ff0;
+    text-shadow: 0 0 6px #880;
+    margin: 0 0 8px 0;
+    font-size: 22px;
+    letter-spacing: 4px;
+  }
+  #hud, #msg {
+    white-space: pre;
+    font-size: 16px;
+    height: 22px;
+    color: #fff;
+  }
+  #screen {
+    font-size: 16px;
+    line-height: 1.15;
+    margin: 0;
+    padding: 0;
+    cursor: none;
+  }
+  #help {
+    margin-top: 10px;
+    color: #666;
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<h1>A R K A N O I D</h1>
+<div id="hud"></div>
+<pre id="screen"></pre>
+<div id="msg"></div>
+<div id="help">
+  ← → / A D : move &nbsp;|&nbsp; SPACE / CLICK : launch &nbsp;|&nbsp; MOUSE : move paddle &nbsp;|&nbsp; P : pause &nbsp;|&nbsp; R : restart
+</div>
+
+<script>
+(() => {
+  // ---------- CONFIG ----------
+  const COLS = 60;          // playfield width (chars)
+  const ROWS = 24;          // playfield height (chars)
+  const BW = 4;             // brick width (3 solid + 1 gap)
+  const NB = COLS / BW;     // bricks per row (15)
+  const BRICK_TOP = 3;      // first brick row
+  const MAX_BRICK_ROWS = 8;
+  const PW = 9;             // paddle width
+  const PR = ROWS - 2;      // paddle row
+  const TICK = 30;          // ms per frame
+  const SUBSTEPS = 4;
+  const PAL = ['#ff4040', '#ffff40', '#40a0ff', '#40ff40', '#ff40ff', '#ffa040'];
+  const SILVER = '#c0c0c0';
+  const DAMAGED = '#666666';
+  const PADDLE_COL = '#40ffff';
+  const BALL_COL = '#ffffff';
+
+  // ---------- STATE ----------
+  let bricks, px, ball, score, lives, level, state, msg, keys, speed, brickCount;
+  let mouseSeen = false;
+
+  const screenEl = document.getElementById('screen');
+  const hudEl = document.getElementById('hud');
+  const msgEl = document.getElementById('msg');
+
+  function buildLevel(lv) {
+    bricks = Array.from({ length: MAX_BRICK_ROWS }, () => Array(NB).fill(null));
+    const rows = Math.min(3 + lv, MAX_BRICK_ROWS);
+    brickCount = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let b = 0; b < NB; b++) {
+        // pattern holes on higher levels
+        if (lv > 1 && ((r * 7 + b * 3 + lv) % 11) === 0) continue;
+        const silver = (lv >= 2 && r === 0);
+        bricks[r][b] = {
+          color: silver ? SILVER : PAL[(r + lv) % PAL.length],
+          hp: silver ? 2 : 1
+        };
+        brickCount++;
+      }
+    }
+  }
+
+  function resetBall() {
+    ball = { x: px + PW / 2, y: PR - 1, vx: 0, vy: 0, launched: false };
+  }
+
+  function newGame() {
+    px = (COLS - PW) / 2;
+    score = 0;
+    lives = 3;
+    level = 1;
+    keys = { left: false, right: false };
+    startLevel();
+    state = 'ready';
+    msg = 'PRESS SPACE TO LAUNCH';
+  }
+
+  function startLevel() {
+    buildLevel(level);
+    resetBall();
+    speed = 0.45 + level * 0.05;
+  }
+
+  function launch() {
+    if (state === 'gameover') { newGame(); return; }
+    if (state === 'ready') {
+      const a = (Math.random() * 0.8 - 0.4);      // slight random angle
+      ball.vx = Math.sin(a) * speed;
+      ball.vy = -Math.cos(a) * speed;
+      ball.launched = true;
+      state = 'play';
+      msg = '';
+    }
+  }
+
+  // ---------- LOGIC ----------
+  function normalizeBall() {
+    const len = Math.hypot(ball.vx, ball.vy) || 1;
+    ball.vx = ball.vx / len * speed;
+    ball.vy = ball.vy / len * speed;
+  }
+
+  function hitBrick(cx, cy, prevCy) {
+    const r = cy - BRICK_TOP;
+    const b = Math.floor(cx / BW);
+    const br = bricks[r] && bricks[r][b];
+    if (!br) return false;
+
+    br.hp--;
+    if (br.hp <= 0) {
+      bricks[r][b] = null;
+      brickCount--;
+      score += 10 * level;
+    } else {
+      br.color = DAMAGED;
+      score += 5 * level;
+    }
+    return true;
+  }
+
+  function step() {
+    if (state === 'ready') {
+      ball.x = px + PW / 2;
+      ball.y = PR - 1;
+      return;
+    }
+    if (state !== 'play') return;
+
+    // paddle keyboard movement
+    const pSpeed = 1.6;
+    if (keys.left)  px -= pSpeed;
+    if (keys.right) px += pSpeed;
+    px = Math.max(0, Math.min(COLS - PW, px));
+
+    for (let s = 0; s < SUBSTEPS; s++) {
+      const prevCx = Math.floor(ball.x);
+      const prevCy = Math.floor(ball.y);
+      let nx = ball.x + ball.vx / SUBSTEPS;
+      let ny = ball.y + ball.vy / SUBSTEPS;
+
+      // walls
+      if (nx < 0) { nx = -nx; ball.vx = -ball.vx; }
+      if (nx > COLS - 1) { nx = 2 * (COLS - 1) - nx; ball.vx = -ball.vx; }
+      // ceiling
+      if (ny < 0) { ny = -ny; ball.vy = -ball.vy; }
+
+      // bricks
+      const cx = Math.floor(nx);
+      const cy = Math.floor(ny);
+      if (cy >= BRICK_TOP && cy < BRICK_TOP + MAX_BRICK_ROWS && cx % BW !== BW - 1) {
+        if (hitBrick(cx, cy, prevCy)) {
+          if (cy !== prevCy) ball.vy = -ball.vy;
+          else ball.vx = -ball.vx;
+          if (brickCount === 0) { nextLevel(); return; }
+        }
+      }
+
+      // paddle
+      if (ball.vy > 0 && ny >= PR && ball.y < PR) {
+        if (nx >= px - 0.3 && nx <= px + PW + 0.3) {
+          const hit = (nx - (px + PW / 2)) / (PW / 2);   // -1 .. 1
+          ny = PR - (ny - PR);                           // reflect
+          ball.vy = -Math.abs(ball.vy);
+          ball.vx = hit * speed * 0.9;
+          normalizeBall();
+        }
+      }
+
+      ball.x = nx;
+      ball.y = ny;
+
+      // bottom: lost ball
+      if (ball.y > ROWS - 1) {
+        lives--;
+        if (lives <= 0) {
+          state = 'gameover';
+          msg = 'GAME OVER - PRESS SPACE TO RESTART';
+        } else {
+          state = 'ready';
+          msg = 'LIFE LOST - PRESS SPACE';
+          resetBall();
+        }
+        return;
+      }
+    }
+  }
+
+  function nextLevel() {
+    level++;
+    startLevel();
+    state = 'ready';
+    msg = `LEVEL ${level} - PRESS SPACE`;
+  }
+
+  // ---------- RENDERING ----------
+  function render() {
+    // grid of {ch, color}
+    const grid = [];
+    for (let y = 0; y < ROWS; y++) {
+      grid.push(Array.from({ length: COLS }, () => ({ ch: ' ', color: null })));
+    }
+
+    // bricks
+    for (let r = 0; r < MAX_BRICK_ROWS; r++) {
+      for (let b = 0; b < NB; b++) {
+        const br = bricks[r][b];
+        if (!br) continue;
+        const y = BRICK_TOP + r;
+        for (let k = 0; k < BW - 1; k++) {
+          const x = b * BW + k;
+          grid[y][x] = { ch: '█', color: br.color };
+        }
+      }
+    }
+
+    // paddle
+    const pxi = Math.round(px);
+    for (let k = 0; k < PW; k++) {
+      let ch = '═';
+      if (k === 0) ch = '╞';
+      if (k === PW - 1) ch = '╡';
+      grid[PR][pxi + k] = { ch, color: PADDLE_COL };
+    }
+
+    // ball
+    const bx = Math.floor(ball.x);
+    const by = Math.floor(ball.y);
+    if (by >= 0 && by < ROWS && bx >= 0 && bx < COLS) {
+      grid[by][bx] = { ch: 'O', color: BALL_COL };
+    }
+
+    // build HTML
+    const esc = s => s;
+    let out = '┌' + '─'.repeat(COLS) + '┐\n';
+    for (let y = 0; y < ROWS; y++) {
+      out += '│';
+      for (let x = 0; x < COLS; x++) {
+        const c = grid[y][x];
+        out += c.color
+          ? `<span style="color:${c.color}">${esc(c.ch)}</span>`
+          : c.ch;
+      }
+      out += '│\n';
+    }
+    out += '└' + '─'.repeat(COLS) + '┘';
+
+    screenEl.innerHTML = out;
+
+    hudEl.textContent =
+      `SCORE ${String(score).padStart(5, '0')}   ` +
+      `LIVES ${'♥ '.repeat(Math.max(0, lives)).trim()}   ` +
+      `LEVEL ${level}`;
+
+    msgEl.textContent = msg;
+  }
+
+  // ---------- INPUT ----------
+  document.addEventListener('keydown', e => {
+    switch (e.key) {
+      case 'ArrowLeft': case 'a': case 'A': keys.left = true; e.preventDefault(); break;
+      case 'ArrowRight': case 'd': case 'D': keys.right = true; e.preventDefault(); break;
+      case ' ': e.preventDefault(); launch(); break;
+      case 'p': case 'P':
+        if (state === 'play') { state = 'paused'; msg = 'PAUSED'; }
+        else if (state === 'paused') { state = 'play'; msg = ''; }
+        break;
+      case 'r': case 'R': newGame(); break;
+    }
+  });
+  document.addEventListener('keyup', e => {
+    switch (e.key) {
+      case 'ArrowLeft': case 'a': case 'A': keys.left = false; break;
+      case 'ArrowRight': case 'd': case 'D': keys.right = false; break;
+    }
+  });
+
+  screenEl.addEventListener('mousemove', e => {
+    const r = screenEl.getBoundingClientRect();
+    const cw = r.width / (COLS + 2);
+    const col = (e.clientX - r.left) / cw - 1;
+    px = Math.max(0, Math.min(COLS - PW, col - PW / 2));
+    mouseSeen = true;
+  });
+  screenEl.addEventListener('click', launch);
+
+  // ---------- MAIN LOOP ----------
+  newGame();
+  setInterval(() => { step(); render(); }, TICK);
+  render();
+})();
+</script>
+</body>
+</html>
+```
+
+**How to play**
+- **← / →** or **A / D** moves the paddle; you can also move the mouse over the playfield.
+- **Space** or **click** launches the ball.
+- **P** pauses, **R** restarts.
+- Clear all bricks to advance. Silver bricks (level 2+) take two hits. Higher levels are faster and have holes in the brick pattern.
+- You start with 3 lives.
+
+The game is drawn entirely with text characters (`█`, `═`, `O`, box-drawing borders) in a `<pre>` element, with colors applied through `<span>` styling.

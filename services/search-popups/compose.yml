@@ -1,0 +1,53 @@
+# The search-speech pop-ups (docs/popups.md, docs/search-speech-popups.md): search_memory and diarize, each its own container on
+# skippy-pc's network, so the home reporter reaches them by name. Own Compose project: no shared file changes.
+#   python services/search-popups/seed_weights.py          # once: the search models into their volume (fp16 safetensors)
+#   docker compose -f services/search-popups/compose.yml build && docker compose -f services/search-popups/compose.yml up -d
+#   curl -s -X POST http://127.0.0.1:47430/refresh          # (from inside the network) the first index build
+name: skippy-popups-search
+services:
+  search:
+    build:
+      context: ../..                                   # the archive's parser (memory/) rides along: search.Dockerfile.dockerignore
+      dockerfile: services/search-popups/search.Dockerfile
+    container_name: skippy-popup-search
+    restart: unless-stopped
+    networks: [skippytel]
+    environment:
+      SEARCH_DEVICE: auto                              # the card when it has one (the reporter unloads Ollama first), else the CPU
+      BRIDGE_URL: http://host.docker.internal:9337     # the archive's non-Claude-Code conversations, through the bridge's /memory door
+      SKIPPY_HOME_TOKEN: ${SKIPPY_HOME_TOKEN:-}
+    volumes:
+      - search-popups-weights:/w:ro                    # bge-m3 + bge-reranker-v2-m3, fp16 (seed_weights.py)
+      - ${SEARCH_STATE:-../../state/search-popups}:/index   # the index (SQLite); set SEARCH_STATE when deploying from a worktree
+      - ${CONVERSATIONS_DIR:-D:/Aaron/conversations}/private-skippy:/src/agent:ro
+      - ${CLAUDE_PROJECTS:-C:/Users/aaron/.claude/projects}:/src/claude-projects:ro
+      - ${MENTAT_RESEARCH:-../../state/mentat-research}:/src/mentat:ro
+    mem_limit: 3g                                      # models load straight onto the card; a runaway is this container's kill, not the VM's
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    logging: {driver: json-file, options: {max-size: "2m", max-file: "2"}}
+  diarize:
+    build: ./diarize
+    container_name: skippy-popup-diarize
+    restart: unless-stopped
+    networks: [skippytel]
+    environment:
+      WHISPER_URL: http://whisper:8000                 # the whisper voice-gate already uses: never a second copy
+      DIARIZE_THREADS: "4"
+    volumes:
+      - ${MODELS_ROOT:-D:/models}/sherpa-onnx:/models:ro
+    mem_limit: 1g
+    logging: {driver: json-file, options: {max-size: "2m", max-file: "2"}}
+volumes:
+  search-popups-weights:
+    name: skippytel_search-popups-weights
+    external: true
+networks:
+  skippytel:
+    name: skippytel_default
+    external: true

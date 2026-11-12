@@ -1,0 +1,95 @@
+/* Nagatha's Video Service on the bridge (portal/templates/video.html, static/nagatha-app.js). The bridge's own sheet (static/bridge.css) draws
+   the keys, units, lamps, sheets, the top row, the list stage and the bar under it; this file is only what a film shelf adds: a row of
+   posters, a film's details panel, and the player over everything. Portal tokens only (templates/base.html); black base, no gradients
+   (on the Viture glasses black is see-through and a gradient is a smear). Its accent is amber (data-app="video"). */
+
+/* ── the page around the app: the bridge's, nothing more ──────────────────────────────────────────────────────────── */
+body.nv-locked { overflow: hidden; }
+.nv .deck .unit .name { color: var(--accent); }
+
+/* ── a row of posters ─────────────────────────────────────────────────────────────────────────────────────────────── */
+.vrow.cards { gap: 10px; padding: 0 12px; align-items: flex-start; border: 0; overflow: visible; }
+.film { flex: none; width: var(--cw, 104px); text-align: left; display: flex; flex-direction: column; gap: 4px; color: var(--white); }
+.film:focus-visible { outline: 2px solid var(--white); outline-offset: 2px; }
+.poster { position: relative; display: block; width: 100%; aspect-ratio: 2 / 3; overflow: hidden; background: var(--panel); border: 1px solid var(--dim-green-hi);
+          clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+.film:hover .poster, .film:active .poster { border-color: var(--accent); }
+.poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .25s ease; }
+.poster.loaded img { opacity: 1; }
+.poster .ph { position: absolute; inset: 0; display: grid; place-items: center; padding: 8px; text-align: center; color: var(--muted); font-size: .72rem; line-height: 1.25; overflow: hidden; }
+.poster.loaded .ph { display: none; }
+.poster .prog { position: absolute; left: 0; bottom: 0; height: 4px; width: var(--p, 0%); background: var(--accent); }
+.poster .seen { position: absolute; top: 5px; right: 5px; width: 12px; height: 12px; background: var(--accent); clip-path: polygon(0 55%, 18% 36%, 40% 58%, 82% 8%, 100% 28%, 40% 100%); }
+.film.coll .poster { border-color: var(--accent); }
+.c-title { font-size: .76rem; line-height: 1.2; color: var(--white); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.c-sub { font: 600 .68rem var(--mono); color: var(--muted); }
+.vtitle .gl, .vhead .gl { display: flex; }
+
+/* ── a film's details: a panel over the stage ─────────────────────────────────────────────────────────────────────── */
+#sheet { gap: 8px; overflow: hidden; }
+#sheet > :not(.d-backdrop) { position: relative; z-index: 1; }
+.d-backdrop { position: absolute; inset: 0; z-index: 0; overflow: hidden; opacity: .2; pointer-events: none; }
+.d-backdrop img { width: 100%; height: 100%; object-fit: cover; }
+.d-body { flex: none; display: flex; gap: 12px; align-items: flex-start; }
+.d-poster { flex: none; width: 34%; max-width: 150px; aspect-ratio: 2 / 3; position: relative; overflow: hidden; background: var(--panel); border: 1px solid var(--accent); }
+.d-poster img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.d-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.d-main h2 { margin: 0; color: var(--white); font-size: 1.2rem; line-height: 1.2; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
+.d-facts { margin: 0; font: 600 .8rem var(--mono); color: var(--ink); }
+.d-genres { margin: 0; font-size: .75rem; color: var(--accent); }
+.d-actions { flex: none; display: flex; gap: 8px; flex-wrap: wrap; }
+.d-actions .warn { margin: 0; font-size: .85rem; }
+.bp .key.act { width: auto; min-width: 56px; height: 48px; padding: 0 18px; gap: 8px; }
+.bp .key.act .g { width: 24px; height: 24px; }
+.bp .key.act .t { position: relative; z-index: 1; font: 700 .9rem var(--mono); }
+.d-overview { flex: 0 1 auto; margin: 0; min-height: 0; overflow: hidden; font-size: .85rem; line-height: 1.4; color: var(--ink);
+              display: -webkit-box; -webkit-line-clamp: 7; -webkit-box-orient: vertical; }
+@media (max-height: 700px) { .d-overview { -webkit-line-clamp: 4; } }
+@media (max-height: 560px) { .d-overview { display: none; } }
+.d-tech { flex: none; margin: 0; font: 600 .7rem var(--mono); color: var(--muted); }
+.d-coll { flex: none; display: flex; gap: 6px; flex-wrap: wrap; }
+.d-coll .chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 6px 10px; background: var(--panel); border: 1px solid var(--accent); color: var(--accent);
+                font-size: .78rem; text-decoration: none; border-radius: 0; }
+.d-coll .chip .g { width: 16px; height: 16px; flex: none; }
+.d-coll .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── the player: over everything ──────────────────────────────────────────────────────────────────────────────────── */
+.player { position: fixed; inset: 0; z-index: 100; background: var(--black); color: var(--white); overflow: hidden; touch-action: manipulation; }
+.player[data-idle="1"] { cursor: none; }
+.player video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--black); }
+.p-top, .p-ctl { position: absolute; left: 0; right: 0; z-index: 3; background: color-mix(in srgb, var(--black) 70%, transparent); transition: opacity .25s ease; }
+.p-top { top: 0; display: flex; align-items: center; gap: 10px; padding: calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 8px calc(12px + env(safe-area-inset-left)); }
+.p-top h2 { flex: 1; min-width: 0; margin: 0; font-size: 1rem; text-transform: none; letter-spacing: 0; color: var(--white); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.p-top .lamp { flex: none; width: 12px; height: 12px; }
+.p-ctl { bottom: 0; padding: 8px calc(12px + env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) calc(12px + env(safe-area-inset-left)); display: flex; flex-direction: column; gap: 4px; }
+.player[data-idle="1"] .p-top, .player[data-idle="1"] .p-ctl { opacity: 0; pointer-events: none; }
+#p-seek { width: 100%; height: 30px; margin: 0; }
+.p-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+@media (max-width: 600px) { .p-vol { display: none; } }
+.p-row .key { width: 44px; height: 42px; }
+.p-row .key.big { width: 56px; height: 48px; }
+.p-row .key.big .g { width: 26px; height: 26px; }
+.p-time { font: 600 .8rem var(--mono); color: var(--ink); white-space: nowrap; }
+.p-vol { width: 84px; height: 30px; margin: 0; flex: none; }
+.p-spin { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; pointer-events: none; }
+.p-spin .lamp { width: 30px; height: 30px; }
+.p-tap { position: absolute; inset: 0; z-index: 4; display: grid; place-items: center; background: color-mix(in srgb, var(--black) 55%, transparent); }
+.p-tap .tap-go { display: flex; align-items: center; gap: 12px; height: 64px; padding: 0 26px; color: var(--accent); background: var(--panel); border: 2px solid var(--accent);
+                 font: 700 1.1rem var(--mono); animation: breathe 1.6s ease-in-out infinite;
+                 clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); }
+.p-tap .tap-go .g { width: 30px; height: 30px; }
+.p-msg { position: absolute; z-index: 5; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(90vw, 420px); padding: 14px; display: flex; flex-direction: column; gap: 12px;
+         text-align: center; background: var(--panel); border: 1px solid var(--red); font-size: .9rem; line-height: 1.4; }
+.p-msg p { margin: 0; }
+.p-msg .acts { display: flex; gap: 10px; justify-content: center; }
+.p-menu { position: absolute; z-index: 6; right: calc(12px + env(safe-area-inset-right)); bottom: calc(96px + env(safe-area-inset-bottom)); min-width: 200px; max-width: 80vw; padding: 6px;
+          display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--accent); }
+.m-head { margin: 0; padding: 4px 8px; font: 700 .75rem var(--mono); color: var(--accent); }
+.m-item { display: flex; align-items: center; gap: 10px; padding: 10px 8px; text-align: left; font-size: .9rem; color: var(--white); }
+.m-item::before { content: ""; flex: none; width: 10px; height: 10px; border: 2px solid var(--muted); }
+.m-item[aria-checked="true"] { color: var(--accent); }
+.m-item[aria-checked="true"]::before { background: var(--accent); border-color: var(--accent); }
+.m-item:hover, .m-item:focus-visible { outline: none; background: var(--dim-green); }
+body.nv-playing .hud, body.nv-playing .foot { visibility: hidden; }
+@media (prefers-reduced-motion: reduce) { .poster img { transition: none; } }
+.bp .key.act.on .t { color: var(--black); }

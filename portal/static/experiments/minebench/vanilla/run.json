@@ -1,0 +1,33 @@
+{
+ "n": 15,
+ "title": "Choo-choo train, vanilla purple Skippy (nothing made for MineBench)",
+ "model": "Vanilla purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8) with purple's own system prompt and an empty setup: none of the Captain's skills, no shared memory, no checker; only MineBench's prompt in the folder",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 69654,
+ "minutes": 10,
+ "size": "141 x 68 x 216",
+ "verdict": "The fresh start's only build, and it reads as a train: a black locomotive with a gold dome, bell and cab, a coal tender and two boxcars coupled in one line on a ballasted track, a stone platform with lamp posts, a water tower and trees, in 10 minutes. With no checker it only checked the code's syntax with node and estimated its size (about 65,000 blocks; run, it is 69,654); it never ran the code, which works first time. Weak points: the smokestack is a huge dark inverted cone taller than the engine; the boiler is square, not round; the wheels are white spoked stars down both sides, lying flat instead of standing up (the wheel check finds all three disc shapes flat); and 93 small pieces float (3,992 blocks, mostly smoke and trim). Its own summary claims 12 spoked driving wheels and connecting rods; what shows is the flat stars. Found afterwards: its folder held MineBench's base prompt without the TOOL MODE section MineBench adds, the same gap as the first single calls; it wrote valid code anyway.",
+ "stats": {
+  "started": "2026-11-01T01:57:38.045Z",
+  "minutes": 10,
+  "tokens": {
+   "input": 37356,
+   "cache_read": 284668,
+   "output": 19545,
+   "total": 341569
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 37356,
+     "cache_read": 284668,
+     "output": 19545
+    }
+   }
+  ]
+ },
+ "series": "fresh",
+ "request": "experiments/minebench/vanilla/request.txt"
+}

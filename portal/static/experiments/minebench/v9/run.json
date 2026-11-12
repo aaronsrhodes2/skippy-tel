@@ -1,0 +1,32 @@
+{
+ "n": 11,
+ "title": "Choo-choo train, the same words, wheels buried in the ground (a negative result)",
+ "model": "Purple Skippy: Claude Code on Skippy Core's coder (the same Qwen3.6-35B-A3B, MTP, Q8), local and free, the same message as v5 word for word",
+ "prompt": "a choo-choo train",
+ "request": "experiments/minebench/v9/request.txt",
+ "comparable": true,
+ "blocks": 166589,
+ "minutes": 29,
+ "size": "216 x 82 x 108",
+ "verdict": "A negative result, kept. No wheel can be seen: the code meant three brick rings round an iron hub as driving wheels, but centred them at ground level, so the ground and the sleepers bury them. The agent never opened the voxel-build skill, which has a tested wheel helper, and the copy of the check in its folder was an old one with no wheel check, so it saw no problem: zero floating parts, committed as clean. The ground and the coal use Math.random instead of the seeded rng, so each run of the build is slightly different. Tool fixes from this run: the folder now gets the current check, which finds wheels of mixed materials and prints the wheel helper itself when wheels are turned or missing.",
+ "stats": {
+  "started": "2026-10-31T12:46:39.940Z",
+  "minutes": 29,
+  "tokens": {
+   "input": 129990,
+   "cache_read": 1747642,
+   "output": 81834,
+   "total": 1959466
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 129990,
+     "cache_read": 1747642,
+     "output": 81834
+    }
+   }
+  ]
+ }
+}

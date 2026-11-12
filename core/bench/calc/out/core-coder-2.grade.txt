@@ -1,0 +1,12 @@
+Traceback (most recent call last):
+  File "D:\Aaron\development\SkippyTel\.claude\worktrees\bold-moore-8841e4\core\bench\calc\check.py", line 7, in <module>
+    spec.loader.exec_module(mod)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "<frozen importlib._bootstrap_external>", line 1019, in exec_module
+  File "<frozen importlib._bootstrap_external>", line 1157, in get_code
+  File "<frozen importlib._bootstrap_external>", line 1087, in source_to_code
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "D:\Aaron\development\SkippyTel\.claude\worktrees\bold-moore-8841e4\core\bench\calc\out\core-coder-2.py", line 356
+    pos = [0]  # Reset position
+    ^^^
+IndentationError: expected an indented block after function definition on line 173

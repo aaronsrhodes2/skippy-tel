@@ -1,0 +1,671 @@
+<thinking>
+Here's a thinking process:
+
+1.  **Understand the Requirements:**
+   - **Class:** `TTLCache`
+   - **Parameters:** `capacity` (int, >= 1), `ttl` (float, > 0), `clock` (callable, defaults to `time.monotonic`)
+   - **Validation:** Raise `ValueError` if `capacity < 1` or `ttl <= 0`
+   - **Methods:**
+     - `put(key, value)`: Store/replace value, restart expiry. If capacity exceeded, first drop expired entries, then evict LRU if still full.
+     - `get(key, default=None)`: Return value if present and not expired, else default. Successful get marks as most recently used. Expired entry found by get is removed.
+     - `__len__`: Count non-expired entries.
+     - `__contains__(key)`: Check if key is live, without changing recency.
+     - `pop(key, default=None)`: Remove and return value of live entry, else default.
+   - **Complexity:** O(1) amortized for all operations except `put`'s expired sweep and `__len__`.
+   - **Output:** Single Python module in a code block.
+
+2.  **Data Structure Design:**
+   - Need O(1) lookups, insertions, deletions, and LRU tracking.
+   - Standard approach: `dict` for storage + `OrderedDict` (or `collections.OrderedDict`) for LRU tracking.
+   - Actually, `OrderedDict` maintains insertion/access order. We can use it to track recency.
+   - For TTL, we need to store the expiration time or creation time. Since `put` restarts expiry, storing `expires_at = clock() + ttl` is easier.
+   - Let's use `OrderedDict` where keys are cache keys, and values are `(value, expires_at)`.
+   - Wait, `OrderedDict` in Python 3.7+ maintains insertion order, but we need to update recency on `get` and `put`. `OrderedDict.move_to_end(key, last=True)` does exactly that.
+   - For `__len__`, we need to count non-expired entries. The requirement says `__len__` is O(1) amortized except for the expired sweep? Wait, the prompt says: "Every operation is O(1) amortised except the expired-entry sweep in put and __len__." This implies `__len__` might need to sweep expired entries, making it potentially O(N) in worst case, but that's allowed. Or maybe we can just count live ones by iterating? The prompt says "except the expired-entry sweep in put and __len__", so it's fine if `__len__` iterates to clean up.
+   - Actually, we can maintain a count of live entries, but cleaning up expired entries during `__len__` is acceptable per the prompt.
+   - Let's stick with `OrderedDict` for O(1) operations.
+
+3.  **Implement `put(key, value)`:**
+   - Check capacity: if `len(self.cache) >= capacity`:
+     - Sweep expired: iterate from oldest (beginning of OrderedDict) and remove expired ones.
+     - If still full, pop the oldest (first item).
+   - Insert/replace key: `self.cache[key] = (value, self.clock() + ttl)`
+   - Move to end (most recent): `self.cache.move_to_end(key)`
+   - Wait, `put` should restart expiry. So if key exists, update value and expires_at, then move to end.
+   - The sweep logic: "When a new key would exceed capacity, first drop every expired entry, then if still full evict the least recently used one."
+   - So:
+     ```python
+     if key in self.cache:
+         # Update existing
+         self.cache[key] = (value, self.clock() + ttl)
+         self.cache.move_to_end(key)
+     else:
+         if len(self.cache) >= self.capacity:
+             # Sweep expired
+             self._sweep_expired()
+         if len(self.cache) >= self.capacity:
+             # Evict LRU (oldest)
+             self.cache.popitem(last=False)
+         self.cache[key] = (value, self.clock() + ttl)
+     ```
+   - Wait, `_sweep_expired` should remove expired items. Since `OrderedDict` is ordered by LRU (oldest first), expired items are likely among the oldest, but not necessarily. However, the prompt says "first drop every expired entry", so we should iterate and remove all expired ones. To keep it efficient, we can just iterate the whole dict or maintain a separate structure? The prompt allows O(N) for sweep. Iterating the whole dict is fine.
+   - Actually, sweeping only from the beginning might miss expired items that were recently accessed. The prompt says "drop every expired entry", so we should check all or at least be careful. But typically, TTL caches sweep from the beginning or just iterate. I'll iterate through items and remove expired ones. Since it's allowed to be non-O(1), a simple loop is fine.
+   - Let's implement `_sweep_expired` to iterate over a copy of keys or just `list(self.cache.items())` and remove expired ones.
+   - Wait, `OrderedDict` order is LRU. Expired items are often at the front, but not guaranteed. I'll just iterate over all keys to remove expired ones.
+   - Actually, to be safe and simple:
+     ```python
+     def _sweep_expired(self):
+         now = self.clock()
+         expired_keys = [k for k, (_, exp) in self.cache.items() if now - exp >= self.ttl]
+         for k in expired_keys:
+             del self.cache[k]
+     ```
+   - This is O(N) but allowed.
+
+4.  **Implement `get(key, default=None)`:**
+   - Check if key in cache.
+   - If not, return default.
+   - If yes, check if expired: `now = self.clock(); if now - expires_at >= self.ttl:`
+     - Remove key, return default.
+   - Else, it's valid. Move to end (MRU), return value.
+   - Wait, `get` should not change recency for expired entries (they are removed). For valid entries, it marks as MRU.
+   - Implementation:
+     ```python
+     def get(self, key, default=None):
+         if key not in self.cache:
+             return default
+         value, expires_at = self.cache[key]
+         if self.clock() - expires_at >= self.ttl:
+             del self.cache[key]
+             return default
+         self.cache.move_to_end(key)
+         return value
+     ```
+
+5.  **Implement `__len__`:**
+   - "the number of entries that have not expired"
+   - "except the expired-entry sweep in put and __len__" -> so `__len__` can sweep.
+   - Implementation:
+     ```python
+     def __len__(self):
+         self._sweep_expired()
+         return len(self.cache)
+     ```
+   - Wait, `_sweep_expired` removes expired entries. That's fine.
+
+6.  **Implement `__contains__(key)`:**
+   - "True for a live entry, without changing recency."
+   - So we check if key is in cache and not expired, but do NOT move to end.
+   - If expired, remove it.
+   - Implementation:
+     ```python
+     def __contains__(self, key):
+         if key not in self.cache:
+             return False
+         value, expires_at = self.cache[key]
+         if self.clock() - expires_at >= self.ttl:
+             del self.cache[key]
+             return False
+         return True
+     ```
+
+7.  **Implement `pop(key, default=None)`:**
+   - "removes and returns a live entry's value, else default."
+   - So check if key exists and not expired. If expired, remove and return default.
+   - If valid, remove and return value.
+   - Implementation:
+     ```python
+     def pop(self, key, default=None):
+         if key not in self.cache:
+             return default
+         value, expires_at = self.cache[key]
+         if self.clock() - expires_at >= self.ttl:
+             del self.cache[key]
+             return default
+         del self.cache[key]
+         return value
+     ```
+
+8.  **Edge Cases & Details:**
+   - `capacity >= 1` and `ttl > 0` validation.
+   - `clock` defaults to `time.monotonic`.
+   - `put` replaces value and restarts expiry. If key exists, we update it. The prompt says "When a new key would exceed capacity...", so if it's an update, we don't need to evict.
+   - Wait, what if `put` is called with an existing key? It should just update. The capacity check only applies when adding a new key.
+   - Let's refine `put`:
+     ```python
+     def put(self, key, value):
+         if key in self.cache:
+             self.cache[key] = (value, self.clock() + self.ttl)
+             self.cache.move_to_end(key)
+             return
+         if len(self.cache) >= self.capacity:
+             self._sweep_expired()
+         if len(self.cache) >= self.capacity:
+             self.cache.popitem(last=False)
+         self.cache[key] = (value, self.clock() + self.ttl)
+     ```
+   - Wait, `self.clock()` is called multiple times. Should we cache it? The prompt says `clock()` returns current time. Calling it multiple times in one method might yield slightly different values, but for cache logic it's usually fine. To be safe, I'll call it once per method or use `time.monotonic()` directly. I'll stick to calling `self.clock()` when needed, or cache it in a local variable if consistency is needed. The prompt says `clock(time.monotonic)`, so it's fine.
+   - Actually, for `put`, I should probably call `self.clock()` once at the start to get `now`, then `expires_at = now + self.ttl`.
+   - Let's adjust `_sweep_expired` to take `now` or call `self.clock()`.
+   - I'll make `_sweep_expired` call `self.clock()` internally.
+
+   Let's reconsider `__len__`. The prompt says "except the expired-entry sweep in put and __len__." This implies `__len__` might do a sweep. My implementation does that.
+   What about `__contains__`? It shouldn't change recency. My implementation removes expired entries but doesn't move to end. That's correct.
+   What about `pop`? It removes and returns value. If expired, returns default. Correct.
+
+   One detail: `put` says "restarts that key's expiry". So `expires_at = self.clock() + self.ttl`.
+   `get` says "an entry expires when clock() - stored_at >= ttl". So comparison is `now - expires_at >= self.ttl`.
+   All good.
+
+   Let's check complexity requirements: "Every operation is O(1) amortised except the expired-entry sweep in put and __len__."
+   My `put` sweeps O(N) in worst case, then O(1) for insertion. Amortized O(1) is fine.
+   `get`, `__contains__`, `pop` are O(1).
+   `__len__` sweeps O(N), allowed.
+   `__contains__` does O(1) check, removes expired O(1). Good.
+
+   One potential issue: `OrderedDict` in Python 3.7+ preserves insertion order, and `move_to_end` updates order. This correctly implements LRU.
+   However, `put` for an existing key updates order. `get` updates order. `pop` removes. All consistent.
+
+   Let's write out the full module.
+
+   Structure:
+   ```python
+   import time
+   from collections import OrderedDict
+
+   class TTLCache:
+       def __init__(self, capacity: int, ttl: float, clock=time.monotonic):
+           if capacity < 1:
+               raise ValueError("capacity must be >= 1")
+           if ttl <= 0:
+               raise ValueError("ttl must be > 0")
+           self.capacity = capacity
+           self.ttl = ttl
+           self.clock = clock
+           self.cache = OrderedDict()
+
+       def _sweep_expired(self):
+           now = self.clock()
+           expired = [k for k, (_, exp) in self.cache.items() if now - exp >= self.ttl]
+           for k in expired:
+               del self.cache[k]
+
+       def put(self, key, value):
+           if key in self.cache:
+               self.cache[key] = (value, self.clock() + self.ttl)
+               self.cache.move_to_end(key)
+               return
+           if len(self.cache) >= self.capacity:
+               self._sweep_expired()
+           if len(self.cache) >= self.capacity:
+               self.cache.popitem(last=False)
+           self.cache[key] = (value, self.clock() + self.ttl)
+
+       def get(self, key, default=None):
+           if key not in self.cache:
+               return default
+           value, expires_at = self.cache[key]
+           if self.clock() - expires_at >= self.ttl:
+               del self.cache[key]
+               return default
+           self.cache.move_to_end(key)
+           return value
+
+       def __len__(self):
+           self._sweep_expired()
+           return len(self.cache)
+
+       def __contains__(self, key):
+           if key not in self.cache:
+               return False
+           value, expires_at = self.cache[key]
+           if self.clock() - expires_at >= self.ttl:
+               del self.cache[key]
+               return False
+           return True
+
+       def pop(self, key, default=None):
+           if key not in self.cache:
+               return default
+           value, expires_at = self.cache[key]
+           if self.clock() - expires_at >= self.ttl:
+               del self.cache[key]
+               return default
+           del self.cache[key]
+           return value
+   ```
+
+   Wait, `self.clock()` is called multiple times in `put` and `get`. This could lead to inconsistencies if the clock advances between calls. It's better to capture `now = self.clock()` at the start of each method.
+   Let's fix that:
+
+   ```python
+   import time
+   from collections import OrderedDict
+
+   class TTLCache:
+       def __init__(self, capacity: int, ttl: float, clock=time.monotonic):
+           if capacity < 1:
+               raise ValueError("capacity must be >= 1")
+           if ttl <= 0:
+               raise ValueError("ttl must be > 0")
+           self.capacity = capacity
+           self.ttl = ttl
+           self.clock = clock
+           self.cache = OrderedDict()
+
+       def _sweep_expired(self, now=None):
+           if now is None:
+               now = self.clock()
+           expired = [k for k, (_, exp) in self.cache.items() if now - exp >= self.ttl]
+           for k in expired:
+               del self.cache[k]
+
+       def put(self, key, value):
+           if key in self.cache:
+               now = self.clock()
+               self.cache[key] = (value, now + self.ttl)
+               self.cache.move_to_end(key)
+               return
+           if len(self.cache) >= self.capacity:
+               self._sweep_expired()
+           if len(self.cache) >= self.capacity:
+               self.cache.popitem(last=False)
+           now = self.clock()
+           self.cache[key] = (value, now + self.ttl)
+
+       def get(self, key, default=None):
+           if key not in self.cache:
+               return default
+           value, expires_at = self.cache[key]
+           now = self.clock()
+           if now - expires_at >= self.ttl:
+               del self.cache[key]
+               return default
+           self.cache.move_to_end(key)
+           return value
+
+       def __len__(self):
+           self._sweep_expired()
+           return len(self.cache)
+
+       def __contains__(self, key):
+           if key not in self.cache:
+               return False
+           _, expires_at = self.cache[key]
+           now = self.clock()
+           if now - expires_at >= self.ttl:
+               del self.cache[key]
+               return False
+           return True
+
+       def pop(self, key, default=None):
+           if key not in self.cache:
+               return default
+           value, expires_at = self.cache[key]
+           now = self.clock()
+           if now - expires_at >= self.ttl:
+               del self.cache[key]
+               return default
+           del self.cache[key]
+           return value
+   ```
+
+   Wait, `__contains__` says "without changing recency". My implementation doesn't call `move_to_end`, so it's correct.
+   `get` says "A successful get marks the key as most recently used". My implementation calls `move_to_end(key)`, correct.
+   `put` says "restarts that key's expiry". My implementation updates `expires_at`, correct.
+   `pop` says "removes and returns a live entry's value, else default". Correct.
+   `__len__` says "number of entries that have not expired". Correct.
+   Capacity check: "capacity >= 1 and ttl > 0, else ValueError". Correct.
+   Complexity: O(1) amortized except sweep in put and __len__. Correct.
+
+   One minor thing: `self.clock` is stored. The prompt says `clock=time.monotonic`. I'll keep it as an attribute.
+   Should I handle `__contains__` returning `True` without changing recency? Yes.
+   Should `__contains__` remove expired entries? The prompt says "True for a live entry, without changing recency." It doesn't explicitly say to remove expired ones, but it's good practice. I'll keep the removal.
+   Actually, `__contains__` might be called frequently. Removing expired entries on every `__contains__` call might be inefficient if many are expired. But it's O(1) per call, so it's fine. The prompt says "except the expired-entry sweep in put and __len__", implying other ops should be O(1). Removing one expired entry is O(1). So it's fine.
+
+   Let's double check the `put` logic for capacity:
+   "When a new key would exceed capacity, first drop every expired entry, then if still full evict the least recently used one."
+   My code:
+   ```python
+   if len(self.cache) >= self.capacity:
+       self._sweep_expired()
+   if len(self.cache) >= self.capacity:
+       self.cache.popitem(last=False)
+   ```
+   This matches exactly.
+
+   One detail: `OrderedDict.popitem(last=False)` removes the first item (oldest/LRU). Correct.
+   What about `put` updating an existing key? It doesn't trigger capacity check. Correct.
+   What about `ttl` comparison? `now - expires_at >= self.ttl` means it expires exactly at `ttl`. Correct.
+
+   Consider type hints? The prompt uses them in the signature. I'll add them to methods for completeness, though not strictly required.
+   I'll keep it clean.
+
+   Let's test mentally:
+   - `cache = TTLCache(2, 1.0, clock=lambda: 0)`
+   - `cache.put('a', 1)` -> cache: `{'a': (1, 1.0)}`
+   - `cache.put('b', 2)` -> cache: `{'a': (1, 1.0), 'b': (2, 1.0)}`
+   - `cache.put('c', 3)` -> len=2 >= cap. sweep: none. still full. pop LRU 'a'. cache: `{'b': (2, 1.0), 'c': (3, 1.0)}`
+   - `clock` advances to 1.5
+   - `cache.get('b')` -> expired. removes 'b', returns default.
+   - `cache.get('c')` -> not expired, moves to end (already at end), returns 3.
+   - `len(cache)` -> sweeps, returns 1.
+   - `__contains__('c')` -> True.
+   - `pop('c')` -> removes, returns 3.
+   All works.
+
+   One edge case: `clock` might be called multiple times in `put`. I cached it per branch. That's fine.
+   Actually, I'll just call `self.clock()` when needed. It's simpler and matches typical implementations. The slight time drift is negligible and usually not tested unless specifically designed. I'll stick to calling it when needed, or cache it once at the start of the method for consistency. I'll cache it once per method to be safe.
+
+   Wait, `put` for existing key: I call `self.clock()` inside the `if`. That's fine.
+   Let's refactor slightly to avoid multiple calls in one method:
+   ```python
+       def put(self, key, value):
+           if key in self.cache:
+               self.cache[key] = (value, self.clock() + self.ttl)
+               self.cache.move_to_end(key)
+               return
+           if len(self.cache) >= self.capacity:
+               self._sweep_expired()
+           if len(self.cache) >= self.capacity:
+               self.cache.popitem(last=False)
+           self.cache[key] = (value, self.clock() + self.ttl)
+   ```
+   This is fine.
+
+   One thing: `__contains__` says "without changing recency". My code doesn't change recency. Good.
+   What about `pop`? It removes the key, so recency doesn't matter.
+   What about `get`? "A successful get marks the key as most recently used". My code does `move_to_end`. Good.
+
+   Check `__len__` complexity: The prompt says "except the expired-entry sweep in put and __len__". So `__len__` is allowed to be O(N). My implementation sweeps. Good.
+
+   Should I use `time` module import? Yes.
+   Should I include type hints? The prompt uses them, so I'll add them.
+
+   Final check of the prompt: "When a new key would exceed capacity, first drop every expired entry, then if still full evict the least recently used one."
+   My code does exactly that.
+
+   One minor point: `OrderedDict` is in `collections`. I'll import it.
+   I'll write the complete module now.
+
+   Structure:
+   ```python
+   import time
+   from collections import OrderedDict
+
+   class TTLCache:
+       def __init__(self, capacity: int, ttl: float, clock=time.monotonic):
+           if capacity < 1:
+               raise ValueError("capacity must be >= 1")
+           if ttl <= 0:
+               raise ValueError("ttl must be > 0")
+           self.capacity = capacity
+           self.ttl = ttl
+           self.clock = clock
+           self.cache = OrderedDict()
+
+       def _sweep_expired(self):
+           now = self.clock()
+           expired_keys = [k for k, (_, exp) in self.cache.items() if now - exp >= self.ttl]
+           for k in expired_keys:
+               del self.cache[k]
+
+       def put(self, key, value):
+           if key in self.cache:
+               self.cache[key] = (value, self.clock() + self.ttl)
+               self.cache.move_to_end(key)
+               return
+           if len(self.cache) >= self.capacity:
+               self._sweep_expired()
+           if len(self.cache) >= self.capacity:
+               self.cache.popitem(last=False)
+           self.cache[key] = (value, self.clock() + self.ttl)
+
+       def get(self, key, default=None):
+           if key not in self.cache:
+               return default
+           value, expires_at = self.cache[key]
+           if self.clock() - expires_at >= self.ttl:
+               del self.cache[key]
+               return default
+           self.cache.move_to_end(key)
+           return value
+
+       def __len__(self):
+           self._sweep_expired()
+           return len(self.cache)
+
+       def __contains__(self, key):
+           if key not in self.cache:
+               return False
+           _, expires_at = self.cache[key]
+           if self.clock() - expires_at >= self.ttl:
+               del self.cache[key]
+               return False
+           return True
+
+       def pop(self, key, default=None):
+           if key not in self.cache:
+               return default
+           value, expires_at = self.cache[key]
+           if self.clock() - expires_at >= self.ttl:
+               del self.cache[key]
+               return default
+           del self.cache[key]
+           return value
+   ```
+
+   Wait, `__contains__` and `get` and `pop` call `self.clock()` multiple times if I don't cache it. It's fine.
+   One thing: `self.clock` might be a function that returns increasing values. Calling it twice in `get` could cause `now - expires_at >= self.ttl` to be true even if it was false on first call. To be robust, I'll cache `now = self.clock()` at the start of each method.
+   Let's adjust `get`, `__contains__`, `pop` to cache `now`.
+
+   ```python
+       def get(self, key, default=None):
+           if key not in self.cache:
+               return default
+           value, expires_at = self.cache[key]
+           now = self.clock()
+           if now - expires_at >= self.ttl:
+               del self.cache[key]
+               return default
+           self.cache.move_to_end(key)
+           return value
+   ```
+   This is better.
+
+   Actually, for `put`, I'll also cache `now` if needed, but it's fine as is.
+
+   Let's verify `__len__` sweep: It iterates over all items. That's O(N). Allowed.
+   Is there any requirement about `__iter__` or `keys()`, `values()`, `items()`? Not mentioned. I'll skip them.
+   The prompt says "Reply with the whole module in one ```python block."
+
+   One detail: `clock=time.monotonic` as default argument. In Python, default arguments are evaluated at definition time, which is fine for functions, but `time.monotonic` is a callable, so it's fine.
+   I'll keep it.
+
+   Final check of the code against requirements:
+   - `TTLCache(capacity: int, ttl: float, clock=time.monotonic)`: capacity >= 1 and ttl > 0, else ValueError. ✓
+   - `put(key, value)`: stores or replaces, restarts expiry. If new key exceeds capacity, drop expired, then evict LRU. ✓
+   - `get(key, default=None)`: value if present and not expired, else default. Successful get marks MRU. Expired found by get is removed. ✓
+   - `__len__`: number of non-expired. ✓
+   - `__contains__(key)`: True for live, without changing recency. ✓
+   - `pop(key, default=None)`: removes and returns live value, else default. ✓
+   - O(1) amortized except sweep in put and __len__. ✓
+
+   All good. I will generate the response.
+   One minor improvement: I'll add type hints to methods for completeness, though not strictly required. The prompt uses them in the signature, so I'll match.
+   I'll also make sure imports are at the top.
+   The code looks solid.
+   Output matches request.
+   Proceed. 
+   Self-Correction/Refinement during thought:
+   Wait, `__contains__` says "without changing recency". My implementation doesn't call `move_to_end`, so it's correct.
+   What about `pop`? It removes the key, so recency is irrelevant.
+   What about `get`? It calls `move_to_end`. Correct.
+   One thing: `put` updates an existing key. Does it need to check capacity? No, "When a new key would exceed capacity...". So existing key updates don't trigger eviction. Correct.
+   The sweep in `put` uses `_sweep_expired()` which calls `self.clock()`. That's fine.
+   I'll wrap it up.
+   One detail: `OrderedDict` is available in `collections`. I'll import it.
+   All set.
+   Output generation. 
+   ```python
+   import time
+   from collections import OrderedDict
+
+   class TTLCache:
+       def __init__(self, capacity: int, ttl: float, clock=time.monotonic):
+           if capacity < 1:
+               raise ValueError("capacity must be >= 1")
+           if ttl <= 0:
+               raise ValueError("ttl must be > 0")
+           self.capacity = capacity
+           self.ttl = ttl
+           self.clock = clock
+           self.cache = OrderedDict()
+
+       def _sweep_expired(self):
+           now = self.clock()
+           expired_keys = [k for k, (_, exp) in self.cache.items() if now - exp >= self.ttl]
+           for k in expired_keys:
+               del self.cache[k]
+
+       def put(self, key, value):
+           if key in self.cache:
+               self.cache[key] = (value, self.clock() + self.ttl)
+               self.cache.move_to_end(key)
+               return
+           if len(self.cache) >= self.capacity:
+               self._sweep_expired()
+           if len(self.cache) >= self.capacity:
+               self.cache.popitem(last=False)
+           self.cache[key] = (value, self.clock() + self.ttl)
+
+       def get(self, key, default=None):
+           if key not in self.cache:
+               return default
+           value, expires_at = self.cache[key]
+           now = self.clock()
+           if now - expires_at >= self.ttl:
+               del self.cache[key]
+               return default
+           self.cache.move_to_end(key)
+           return value
+
+       def __len__(self):
+           self._sweep_expired()
+           return len(self.cache)
+
+       def __contains__(self, key):
+           if key not in self.cache:
+               return False
+           _, expires_at = self.cache[key]
+           now = self.clock()
+           if now - expires_at >= self.ttl:
+               del self.cache[key]
+               return False
+           return True
+
+       def pop(self, key, default=None):
+           if key not in self.cache:
+               return default
+           value, expires_at = self.cache[key]
+           now = self.clock()
+           if now - expires_at >= self.ttl:
+               del self.cache[key]
+               return default
+           del self.cache[key]
+           return value
+   ```
+   This matches all requirements. I'll output it. 
+   One minor point: `clock` default argument is evaluated once, which is fine. 
+   The code is ready.✅
+   Output matches response. 
+   Proceeds. 
+   [Final Check]
+   - `capacity >= 1` and `ttl > 0` validation: checked.
+   - `put`: handles existing (update+move) and new (sweep+evict if needed, then insert). Correct.
+   - `get`: checks existence, expiration, removes if expired, moves to end if valid. Correct.
+   - `__len__`: sweeps and returns count. Correct.
+   - `__contains__`: checks existence, expiration, removes if expired, returns bool without moving. Correct.
+   - `pop`: checks existence, expiration, removes if expired/valid, returns value/default. Correct.
+   - Complexity: O(1) amortized except sweep in put/len. Correct.
+   All good. 
+   Output matches. 
+   [Done] 
+   *Self-Correction/Note during generation prep*: 
+   I should ensure that `__contains__` doesn't accidentally change recency. It doesn't. 
+   I should ensure `put` doesn't trigger sweep on update. It doesn't. 
+   The code is solid. 
+   Output matches the final block. 
+   Proceeds. 
+   [Output Generation] -> *Proceeds*
+
+</thinking>
+
+```python
+import time
+from collections import OrderedDict
+
+class TTLCache:
+    def __init__(self, capacity: int, ttl: float, clock=time.monotonic):
+        if capacity < 1:
+            raise ValueError("capacity must be >= 1")
+        if ttl <= 0:
+            raise ValueError("ttl must be > 0")
+        self.capacity = capacity
+        self.ttl = ttl
+        self.clock = clock
+        self.cache = OrderedDict()
+
+    def _sweep_expired(self):
+        now = self.clock()
+        expired_keys = [k for k, (_, exp) in self.cache.items() if now - exp >= self.ttl]
+        for k in expired_keys:
+            del self.cache[k]
+
+    def put(self, key, value):
+        if key in self.cache:
+            self.cache[key] = (value, self.clock() + self.ttl)
+            self.cache.move_to_end(key)
+            return
+        if len(self.cache) >= self.capacity:
+            self._sweep_expired()
+        if len(self.cache) >= self.capacity:
+            self.cache.popitem(last=False)
+        self.cache[key] = (value, self.clock() + self.ttl)
+
+    def get(self, key, default=None):
+        if key not in self.cache:
+            return default
+        value, expires_at = self.cache[key]
+        now = self.clock()
+        if now - expires_at >= self.ttl:
+            del self.cache[key]
+            return default
+        self.cache.move_to_end(key)
+        return value
+
+    def __len__(self):
+        self._sweep_expired()
+        return len(self.cache)
+
+    def __contains__(self, key):
+        if key not in self.cache:
+            return False
+        _, expires_at = self.cache[key]
+        now = self.clock()
+        if now - expires_at >= self.ttl:
+            del self.cache[key]
+            return False
+        return True
+
+    def pop(self, key, default=None):
+        if key not in self.cache:
+            return default
+        value, expires_at = self.cache[key]
+        now = self.clock()
+        if now - expires_at >= self.ttl:
+            del self.cache[key]
+            return default
+        del self.cache[key]
+        return value
+```

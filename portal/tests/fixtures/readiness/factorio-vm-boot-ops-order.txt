@@ -1,0 +1,93 @@
+Enable mod elevated-rails for DLC
+Enable mod quality for DLC
+Enable mod space-age for DLC
+usermod: no changes
+Map /factorio/saves/skippy.zip already exists, skipping map generation
+   0.001 2026-09-30 06:44:50; Factorio 2.0.77 (build 84539, linux64, headless, space-age)
+   0.001 Operating system: Linux
+   0.001 Config path: /opt/factorio/config/config.ini
+   0.001 Read data path: /opt/factorio/data
+   0.001 Write data path: /factorio [47981/60167MB]
+   0.001 Binaries path: /opt/factorio/bin
+   0.018 System info: [CPU: AMD EPYC 7B13, 2 cores, RAM: 7950 MB]
+   0.020 Environment: DISPLAY=<unset> WAYLAND_DISPLAY=<unset> DESKTOP_SESSION=<unset> XDG_SESSION_DESKTOP=<unset> XDG_CURRENT_DESKTOP=<unset> SDL_VIDEODRIVER=<unset> __GL_FSAA_MODE=<unset> __GL_LOG_MAX_ANISO=<unset> __GL_SYNC_TO_VBLANK=<unset> __GL_SORT_FBCONFIGS=<unset> __GL_YIELD=<unset>
+   0.026 Running in headless mode
+   0.026 Audio is disabled
+   1.849 Prototype list checksum: 3295867752
+   1.917 Info PlayerData.cpp:64: Local player-data.json available, timestamp 1790732719
+   1.917 Info PlayerData.cpp:71: Cloud player-data.json unavailable
+   1.933 Factorio initialised
+   1.934 Warning FileUtil.cpp:563: skippy not found; using /factorio/saves/skippy.zip
+   1.935 Info ServerSynchronizer.cpp:22: nextHeartbeatSequenceNumber(0) initialized Synchronizer nextTickClosureTick(0).
+   1.935 Info ServerMultiplayerManager.cpp:808: updateTick(18446744073709551615) changing state from(Ready) to(PreparedToHostGame)
+   1.935 Info ServerMultiplayerManager.cpp:808: updateTick(18446744073709551615) changing state from(PreparedToHostGame) to(CreatingGame)
+   1.938 Loading map /factorio/saves/skippy.zip: 765658 bytes.
+   1.957 Loading level.dat: 966543 bytes.
+   1.957 Info Scenario.cpp:154: Map version 2.0.77-0
+   2.000 Blueprint storage "blueprint-storage-2.dat" was not found, trying to load previous version storage "blueprint-storage.dat"
+   2.000 Loading script.dat: 1211 bytes.
+   2.009 Info UDPSocket.cpp:38: Opening socket at (IP ADDR:({0.0.0.0:34197}))
+   2.009 Hosting game at IP ADDR:({0.0.0.0:34197})
+   2.009 Info HttpSharedState.cpp:57: Downloading https://auth.factorio.com/generate-server-padlock-2?api_version=6
+   2.276 Info AuthServerConnector.cpp:112: Obtained serverPadlock for serverHash (8XJjd4zEbAcfw2wdSYw1sCLjhnCMZ1uo) from the auth server.
+   2.276 Info ServerMultiplayerManager.cpp:808: updateTick(0) changing state from(CreatingGame) to(InGame)
+   2.393 Info ServerRouter.cpp:668: Asking pingpong servers (pingpong1.factorio.com:34197, pingpong2.factorio.com:34197, pingpong3.factorio.com:34197, pingpong4.factorio.com:34197) for own address
+   2.394 Info UDPSocket.cpp:50: Opening socket for broadcast
+   2.394 Error InterruptibleStdioStream.cpp:55: Got EOF on stdin; closing
+   2.395 Info RemoteCommandProcessor.cpp:126: Starting RCON interface at IP ADDR:({0.0.0.0:27015})
+   2.395 Info CommandLineMultiplayer.cpp:292: Maximum segment size = 100; minimum segment size = 25; maximum-segment-size peer count = 10; minimum-segment-size peer count = 20
+   2.463 Info ServerRouter.cpp:547: Own address is IP ADDR:({203.0.113.7:34197}) (confirmed by pingpong1)
+   2.463 Error ServerMultiplayerManager.cpp:743: Matching server connection failed: Error when creating server game: Missing token.
+   2.496 Info ServerRouter.cpp:547: Own address is IP ADDR:({203.0.113.7:34197}) (confirmed by pingpong4)
+   2.546 Info ServerRouter.cpp:547: Own address is IP ADDR:({203.0.113.7:34197}) (confirmed by pingpong2)
++++ readlink -f /docker-entrypoint.sh
+++ dirname /docker-entrypoint.sh
++ INSTALLED_DIRECTORY=/
++ FACTORIO_VOL=/factorio
++ LOAD_LATEST_SAVE=false
++ GENERATE_NEW_SAVE=true
++ PRESET=
++ SAVE_NAME=skippy
++ BIND=
++ CONSOLE_LOG_LOCATION=
++ mkdir -p /factorio
++ mkdir -p /factorio/saves
++ mkdir -p /factorio/config
++ mkdir -p /factorio/mods
++ mkdir -p /factorio/scenarios
++ mkdir -p /factorio/script-output
++ [[ ! -f /factorio/config/rconpw ]]
++ [[ ! -f /factorio/config/server-settings.json ]]
++ [[ ! -f /factorio/config/map-gen-settings.json ]]
++ [[ ! -f /factorio/config/map-settings.json ]]
+++ wc -l
+++ find -L /factorio/saves -iname '*.tmp.zip' -mindepth 1
++ NRTMPSAVES=0
++ [[ 0 -gt 0 ]]
++ [[ '' == \t\r\u\e ]]
++ //docker-dlc.sh
++ EXEC=
+++ id -u
++ [[ 0 == 0 ]]
++ usermod -o -u 845 factorio
++ groupmod -o -g 845 factorio
++ chown -R factorio:factorio /factorio
++ EXEC='runuser -u factorio -g factorio --'
++ source //setup-exec.sh
+++ [[ -z runuser -u factorio -g factorio -- ]]
+++ [[ -f /bin/box64 ]]
+++ export EXEC
++ sed -i '/write-data=/c\write-data=\/factorio/' /opt/factorio/config/config.ini
+++ find -L /factorio/saves -iname '*.zip' -mindepth 1
+++ wc -l
++ NRSAVES=1
++ [[ true != true ]]
++ [[ true == true ]]
++ [[ -z skippy ]]
++ [[ -f /factorio/saves/skippy.zip ]]
++ echo 'Map /factorio/saves/skippy.zip already exists, skipping map generation'
+++ cat /factorio/config/rconpw
++ '[' -n '' ']'
++ '[' -n '' ']'
++ [[ false == true ]]
++ FLAGS+=(--start-server "$SAVE_NAME")

@@ -1,0 +1,851 @@
+"""The daily routines (daily.py): bedtime on "goodnight", the morning at its time only when he's home, coming home when the car gets back,
+skip / later / stop in the pauses, and Bilby's shuffle on the stereo (stereo.py)."""
+import asyncio
+import json
+import threading
+import time
+from types import SimpleNamespace
+
+import daily
+import housemem
+import hub
+from hub import FOLLOWUP, IDLE, Room
+from timers import Timers
+import pytest
+
+HOME = (37.1737, -122.1416)
+AWAY = (37.40, -122.00)
+
+
+@pytest.fixture(autouse=True)
+def _voice_as_is(monkeypatch):
+    monkeypatch.setattr(hub, "one_stream", lambda mp3, **k: mp3)          # no ffmpeg: the fake voice goes out as it is (and the next file gets the real one back)
+
+
+def stamp(date, hm):
+    return time.mktime(time.strptime(f"{date} {hm}", "%Y-%m-%d %H:%M"))
+
+
+class Link:
+    hub_follows_up = True
+
+    def __init__(self):
+        self.spoken, self.room, self.on_speak = [], None, None
+
+    async def heard(self, t): pass
+    async def released(self): pass
+    async def woke(self, by): pass
+    async def show(self, t): pass
+    async def voice_started(self): pass
+    async def voice_stopped(self): pass
+    async def idle_face(self): pass
+
+    async def speak(self, said, voice, follow_up=False):
+        self.spoken.append(said)
+        if self.on_speak:
+            self.on_speak(said)
+
+    announce = speak
+
+
+class Gate:
+    def tts(self, text): return b"mp3"
+    def summary(self, text): return text
+
+
+class Brain:
+    def __init__(self):
+        self.heard, self.offers, self.actions, self.news = [], [], [], None
+
+    def offer(self, text, note): self.offers.append((text, note))
+
+    def reply(self, heard):
+        self.heard.append(heard)
+        return "Brain answer."
+
+
+class House:
+    def __init__(self, things):
+        self.things = things                                            # {entity_id: (name, state)}
+        self.calls = []
+
+    def states(self, fresh=False):
+        return [{"entity_id": e, "state": st, "attributes": {"friendly_name": n}} for e, (n, st) in self.things.items()]
+
+    def _service(self, domain, service, data):
+        self.calls.append((service, data["entity_id"], data.get("brightness_pct")))
+        n, _ = self.things[data["entity_id"]]
+        self.things[data["entity_id"]] = (n, "on" if service == "turn_on" else "off")
+
+    def invalidate(self): pass
+
+
+class Client:
+    """Core, faked: says which task it was given, so the tests can see what was asked for and in what order."""
+
+    def __init__(self):
+        self.tasks = []
+        self.messages = self
+
+    def create(self, model, max_tokens, system, messages):
+        task = messages[0]["content"].split("\n\nMaterial:")[0]
+        self.tasks.append(task)
+        word = "serendipity" if task.startswith("Name one uncommon") else f"<{task.split('.')[0][:30]}>"
+        return SimpleNamespace(content=[SimpleNamespace(type="text", text=word)])
+
+
+def make(tmp_path, now, car=None, things=None, env=None, posts=None, home_ll=HOME):
+    car_state = {"cars": [car]} if car else {"cars": []}
+    posts = posts if posts is not None else []
+
+    def get(url, timeout=15):
+        if "/car" in url:
+            return car_state
+        if "open-meteo" in url:
+            return {"current": {"temperature_2m": 55, "apparent_temperature": 52, "weather_code": 2},
+                    "daily": {"temperature_2m_max": [66], "temperature_2m_min": [48], "precipitation_probability_max": [10], "weather_code": [2],
+                              "wind_speed_10m_max": [9], "uv_index_max": [4], "sunrise": ["2026-10-31T07:30"], "sunset": ["2026-10-31T18:15"]}}
+        if "/search" in url:
+            return {"results": [{"title": "serendipity: meaning and definition", "content": "serendipity, the faculty of making happy discoveries",
+                                 "url": "https://dict.example/serendipity", "engine": "x"},
+                                {"title": "Probe finds water", "content": "A probe found water.", "url": "https://news.example/1", "engine": "y"}]}
+        raise AssertionError(url)
+
+    def post(url, body, timeout=120):
+        posts.append((url, body))
+        return {"ok": True}
+    house = House(things if things is not None else {"light.bedroom": ("Bedroom", "off"), "light.k1": ("kitchen under 1", "on"),
+                                                      "switch.sec": ("security Light", "on"), "switch.fan": ("Desk fan", "on")})
+    hlog = housemem.HouseLog(tmp_path / "home", clock=lambda: now[0])
+    d = daily.Daily({"SKIPPY_HOME_LATLON": f"{home_ll[0]},{home_ll[1]}", **(env or {})}, house=house, client=Client(), model="m", hlog=hlog,
+                    state_dir=tmp_path / "daily", get=get, post=post, clock=lambda: now[0], sleep=lambda s: asyncio.sleep(0.001), log=lambda m: None)
+    d.gap_s = 0.05
+    d.bring_today = lambda: "What to bring or wear: a warm layer, down to 48 F."
+    d.night_shift = lambda: None                                        # never the real tools/nightly.py from a test (it prunes Docker and may deploy)
+    link, brain = Link(), Brain()
+    room = Room("office", link, Gate(), brain, Timers(), log=lambda m: None, hlog=hlog)
+    room.daily = d
+    return d, room, link, brain, house, posts, car_state
+
+
+def car_at(pos, **k):
+    return {"latitude": pos[0], "longitude": pos[1], "battery_level": 60, "charge_limit_soc": 80, "plugged_in": True, "charging_state": "Stopped",
+            "rated_battery_range_km": 300.0, "shift_state": "P", **k}
+
+
+async def finish(d, timeout=5):
+    t0 = time.monotonic()
+    while d.busy and time.monotonic() - t0 < timeout:
+        await asyncio.sleep(0.01)
+    assert not d.busy
+
+
+# ── bedtime ──
+def test_goodnight_turns_lights_off_charges_arms_sentry_and_offers_to_talk(tmp_path):
+    now = [stamp("2026-10-31", "22:30")]
+    d, room, link, brain, house, posts, _ = make(tmp_path, now, car=car_at(HOME))
+    d.hlog.event("command", room="office", words="what time is it?", outcome="ok")     # something happened today, for the day's summary
+
+    async def go():
+        await room.handle("goodnight")
+        await finish(d)
+    asyncio.run(go())
+    assert brain.heard == []                                            # the routine answered, not the brain
+    assert ("turn_off", "light.k1", None) in house.calls and ("turn_off", "switch.sec", None) in house.calls
+    assert not any(e == "switch.fan" for _, e, _ in house.calls)        # a plug that isn't a light stays as it is
+    assert [u.rsplit("/", 1)[-1] for u, _ in posts] == ["charge", "sentry"] and posts[1][1] == {"action": "arm"}
+    assert "Lights off, all 2." in link.spoken[0] and "The car is charging." in link.spoken[0] and "Sentry is armed." in link.spoken[0]
+    assert "Next: your day and tomorrow." in link.spoken[0]
+    assert "Anything on your mind" in link.spoken[-1] and room.mode == FOLLOWUP
+    log = [json.loads(x) for x in (tmp_path / "home" / "log" / "2026-10-31.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [e.get("outcome") for e in log if e["kind"] == "routine"] == ["started", "done"]
+    assert "routine" not in d.client.tasks and not any("routine" in t for t in d.client.tasks)
+
+
+def test_a_car_already_charging_is_left_alone_and_sentry_can_be_off(tmp_path):
+    now = [stamp("2026-10-31", "22:30")]
+    d, room, link, brain, house, posts, _ = make(tmp_path, now, car=car_at(HOME, charging_state="Charging"), env={"SKIPPY_BEDTIME_SENTRY": "off"})
+
+    async def go():
+        await room.handle("goodnight")
+        await finish(d)
+    asyncio.run(go())
+    assert posts == [] and "plugged in and charging" in link.spoken[0]
+
+
+def test_timed_bedtime_asks_first(tmp_path):
+    now = [stamp("2026-10-31", "21:00")]
+    d, room, link, brain, house, posts, _ = make(tmp_path, now)
+
+    async def go():
+        await room.handle("goodnight at 11")
+        assert "11 PM" in link.spoken[-1] and not d.busy
+        now[0] = stamp("2026-10-31", "23:00")
+        await d.tick(room)
+        assert "Bedtime routine?" in link.spoken[-1]
+        await room.handle("yes")
+        await finish(d)
+    asyncio.run(go())
+    assert "Anything on your mind" in link.spoken[-1]
+
+
+# ── skip, later, stop ──
+def test_skip_drops_the_next_part_and_stop_ends_it(tmp_path):
+    now = [stamp("2026-10-31", "22:30")]
+    d, room, link, brain, house, posts, _ = make(tmp_path, now, car=car_at(HOME))
+    said = []
+
+    def on_speak(text):
+        said.append(text)
+        if len(said) == 1:
+            asyncio.ensure_future(room.handle("skip"))
+    link.on_speak = on_speak
+
+    async def go():
+        await room.handle("goodnight")
+        await finish(d)
+    asyncio.run(go())
+    assert "Skipping it." in link.spoken
+    assert not any(s.startswith("<Sum up") for s in link.spoken)        # the day summary was skipped
+    assert "Anything on your mind" in link.spoken[-1]
+
+    d2, room2, link2, *_ = make(tmp_path / "b", now, car=car_at(HOME))
+    link2.on_speak = lambda text: asyncio.ensure_future(room2.handle("stop")) if len(link2.spoken) == 1 else None
+
+    async def go2():
+        await room2.handle("goodnight")
+        await finish(d2)
+    asyncio.run(go2())
+    assert "Fine. Routine over." in link2.spoken and not any("Anything on your mind" in s for s in link2.spoken)
+
+
+def test_later_snoozes_ten_minutes(tmp_path):
+    now = [stamp("2026-10-31", "22:30")]
+    d, room, link, brain, house, posts, _ = make(tmp_path, now, car=car_at(HOME))
+    off = [0.0]
+    d.mono = lambda: time.monotonic() + off[0]                          # the routine's clock, wound forward past the snooze
+    link.on_speak = lambda text: asyncio.ensure_future(room.handle("later")) if len(link.spoken) == 1 else None
+
+    async def go():
+        await room.handle("goodnight")
+        for _ in range(200):
+            await asyncio.sleep(0.005)
+        assert d.busy and d.run.snooze_until > time.monotonic() + daily.SNOOZE_S - 5
+        off[0] += daily.SNOOZE_S + 1
+        await finish(d)
+    asyncio.run(go())
+    assert "Ten minutes" in " ".join(link.spoken) and "Right. Where was I." in link.spoken and "Anything on your mind" in link.spoken[-1]
+
+
+# ── the morning ──
+def test_morning_runs_once_at_its_time_only_when_home(tmp_path):
+    now = [stamp("2026-11-02", "07:05")]
+    d, room, link, brain, house, posts, car = make(tmp_path, now, car=car_at(AWAY))
+
+    async def go():
+        await d.tick(room)
+        assert not d.busy
+        now[0] = stamp("2026-11-02", "07:10")
+        await d.tick(room)                                              # away (and nothing heard last night): skipped
+        assert not d.busy and d.state["last_morning"] == "2026-11-02"
+        now[0] = stamp("2026-11-03", "07:10")
+        car["cars"][0].update(latitude=HOME[0], longitude=HOME[1])
+        d._car_check = -1e9
+        await d.tick(room)
+        assert d.busy
+        await finish(d, 15)
+        d.state["last_morning"] = "2026-11-03"
+        await d.tick(room)
+        assert not d.busy
+    asyncio.run(go())
+    assert ("turn_on", "light.bedroom", 5) in house.calls and ("turn_on", "light.bedroom", 50) in house.calls
+    text = " ".join(link.spoken)
+    assert text.startswith("Good morning, Captain.") and "Next: the news." in link.spoken[0]
+    for task in ("Give him today's weather", "This morning's news", "One or two sentences on the car", "Tell him one short", "The word of the day"):
+        assert task.split(".")[0][:30] in text, task
+    tasks = d.client.tasks
+    assert any(t.startswith('The word of the day is "serendipity"') for t in tasks)
+    assert d.state["said"]["words"] == ["serendipity"]
+
+
+def test_good_morning_runs_it_by_hand(tmp_path):
+    now = [stamp("2026-11-02", "09:00")]
+    d, room, link, *_ = make(tmp_path, now, car=car_at(HOME))
+
+    async def go():
+        await room.handle("Good morning")
+        await finish(d, 15)
+    asyncio.run(go())
+    assert link.spoken[0].startswith("Good morning, Captain.")
+
+
+# ── coming home ──
+def test_coming_home_lights_now_then_news_music_and_his_day_once_he_is_heard(tmp_path):
+    now = [stamp("2026-11-02", "08:00")]
+    d, room, link, brain, house, posts, car = make(tmp_path, now, car=car_at(AWAY),
+                                                   things={"light.k1": ("kitchen under 1", "off"), "switch.sec": ("security Light", "off")})
+    shuffles = []
+
+    class Stereo:
+        playing = False
+
+        async def shuffle(self):
+            shuffles.append(1)
+            return 10
+    d.stereo = lambda: Stereo()
+
+    async def go():
+        await d.tick(room)
+        assert "away_since" in d.state
+        now[0] = stamp("2026-11-02", "18:30")                           # ten and a half hours later, after sunset
+        car["cars"][0].update(latitude=HOME[0], longitude=HOME[1])
+        d._car_check = -1e9
+        await d.tick(room)
+        assert ("turn_on", "light.k1", None) in house.calls and ("turn_on", "switch.sec", None) in house.calls
+        assert d.arrived_at is not None and not d.busy and link.spoken == []
+        room._voice_at = time.monotonic() + 1                           # he walks in and says something
+        await d.tick(room)
+        await finish(d)
+    asyncio.run(go())
+    assert shuffles == [1]
+    assert link.spoken[0].startswith("<He just got home: welcome") and link.spoken[-1].startswith("<He just got home from work")
+    assert brain.offers and room.mode == FOLLOWUP
+
+
+def test_a_short_trip_is_not_coming_home_from_work(tmp_path):
+    now = [stamp("2026-11-02", "12:00")]
+    d, room, link, brain, house, posts, car = make(tmp_path, now, car=car_at(AWAY))
+
+    async def go():
+        await d.tick(room)
+        now[0] = stamp("2026-11-02", "13:00")
+        car["cars"][0].update(latitude=HOME[0], longitude=HOME[1])
+        d._car_check = -1e9
+        await d.tick(room)
+    asyncio.run(go())
+    assert d.arrived_at is None and house.calls == []
+
+
+def test_home_is_learned_from_where_the_car_sleeps(tmp_path):
+    now = [stamp("2026-11-02", "03:00")]
+    d, room, *_ = make(tmp_path, now, car=car_at(HOME), env={"SKIPPY_HOME_LATLON": ""})
+    d.env.pop("SKIPPY_HOME_LATLON")
+
+    async def go():
+        await d.tick(room)
+    asyncio.run(go())
+    assert d.home() == (round(HOME[0], 3), round(HOME[1], 3))
+
+
+# ── the stereo ──
+def test_stereo_shuffles_the_library_and_moves_on_when_a_track_ends():
+    import stereo
+
+    class Play:
+        def __init__(self, src):
+            self.source, self.finished, self.gain = src, threading.Event(), 1.0
+
+    class Router:
+        sinks = {"hdmi": 1}
+
+        def __init__(self):
+            self.plays, self.stopped = [], []
+
+        def available(self, k): return True
+
+        def play(self, source, layer, targets, gain):
+            p = Play(source)
+            self.plays.append((p, layer, targets))
+            return p
+
+        def stop(self, p):
+            self.stopped.append(p)
+            p.finished.set()
+
+    class Media:
+        async def catalog(self): return {f"a/{i}.flac": (f"T{i}", "A", "B") for i in range(5)}
+        def track_url(self, path, start, towards=""): return "http://127.0.0.1:10800/m/x/track.flac?p=" + path
+
+    class Proc:
+        stdout = SimpleNamespace(read=lambda n: b"")
+        def kill(self): pass
+
+    async def go():
+        r = Router()
+        clock = [0.0]
+        s = stereo.StereoMusic(r, ["hdmi"], Media(), log=lambda m: None, clock=lambda: clock[0], popen=lambda *a, **k: Proc())
+        assert await s.shuffle() == 5
+        assert len(r.plays) == 1 and r.plays[0][1] == "media" and r.plays[0][2] == {"hdmi"}
+        first = s.box.track()
+        clock[0] = 100.0
+        r.plays[0][0].finished.set()                                    # the track ended by itself
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            if len(r.plays) == 2:
+                break
+        assert len(r.plays) == 2 and s.box.track() != first and s.box.idx == 1
+        s.duck(True, 30)
+        assert r.plays[1][0].gain == stereo.DUCK
+        await s.stop()
+        assert not s.playing
+    asyncio.run(go())
+
+
+def test_a_request_file_starts_a_routine(tmp_path):
+    now = [stamp("2026-10-31", "22:30")]
+    d, room, link, *_ = make(tmp_path, now, car=car_at(HOME))
+    (tmp_path / "daily").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "daily" / "request.json").write_text('{"routine": "bedtime"}', encoding="utf-8")
+
+    async def go():
+        await d.tick(room)
+        assert d.busy and not (tmp_path / "daily" / "request.json").exists()
+        await finish(d)
+    asyncio.run(go())
+    assert "Anything on your mind" in link.spoken[-1]
+
+
+def test_a_routine_moves_to_the_new_room_when_the_box_reconnects(tmp_path):
+    now = [stamp("2026-10-31", "22:30")]
+    d, room, link, brain, *_ = make(tmp_path, now, car=car_at(HOME))
+    new_link = Link()
+    new_room = Room("office", new_link, Gate(), brain, Timers(), log=lambda m: None)
+    new_room.daily = d
+
+    async def go():
+        await room.handle("goodnight")
+        room.buf = []                                                   # the old connection died mid-sentence: it never goes quiet
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+        await d.tick(new_room)
+        await finish(d)
+    asyncio.run(go())
+    assert "Anything on your mind" in new_link.spoken[-1]
+
+
+def test_core_down_means_plain_sourced_words_not_silence(tmp_path):
+    now = [stamp("2026-11-02", "07:10")]
+    d, room, link, *_ = make(tmp_path, now, car=car_at(HOME))
+
+    class Down:
+        messages = None
+
+        def __init__(self):
+            self.messages = self
+
+        def create(self, **k):
+            raise ConnectionError("Core is restarting")
+    d.client = Down()
+    assert asyncio.run(d.weather()).startswith("Today: a high of 66 and a low of 48 degrees, partly cloudy")
+    assert "news.example" in asyncio.run(d.morning_news()) or "The headlines." in asyncio.run(d.morning_news())
+    assert asyncio.run(d.joke()) is None
+
+
+def test_an_early_first_event_moves_tomorrows_morning(tmp_path):
+    now = [stamp("2026-11-02", "22:00")]
+    d, *_ = make(tmp_path, now)
+
+    async def first():
+        return stamp("2026-11-03", "07:00")
+    d.extras["first_tomorrow"] = first
+    said = asyncio.run(d.plan_tomorrow())
+    assert d.morning_time("2026-11-03") == "05:30" and "5:30 AM" in said
+
+    async def late():
+        return stamp("2026-11-03", "10:00")
+    d.extras["first_tomorrow"] = late
+    assert asyncio.run(d.plan_tomorrow()) is None and d.morning_time("2026-11-03") == "07:10"
+
+
+def test_the_morning_comes_before_the_days_first_alarm_and_waits_while_one_rings(tmp_path):
+    """The Captain, 2026-11-05: the 07:00 alarm began, the routine came at 07:10 and Skippy said the alarm over it: "move the routine to happen before the alarm"."""
+    now = [stamp("2026-11-05", "06:40")]
+    d, room, link, brain, house, posts, car = make(tmp_path, now, car=car_at(HOME))
+    ringing = [False]
+    d.extras["wake_alarm"] = {"2026-11-05": "07:00", "2026-11-03": "08:30", "2026-11-08": "11:30", "2026-11-09": "04:00", "2026-11-10": "04:35"}.get
+    d.extras["alarm_ringing"] = lambda: ringing[0]
+    assert d.morning_time("2026-11-05") == "06:50"                      # ten minutes ahead of the alarm: the briefing takes about six
+    assert d.morning_time("2026-11-03") == "08:20"                      # a later alarm moves it later: the briefing is for waking up to
+    assert d.morning_time("2026-11-06") == "07:10"                      # no alarm that day: the fixed time
+    assert d.morning_time("2026-11-08") == "07:10" and d.morning_time("2026-11-09") == "07:10"      # an alarm outside a morning's hours changes nothing
+    assert d.morning_time("2026-11-10") == "04:30"                      # never before 04:30
+    d.state["morning_override"] = {"2026-11-05": "05:30"}               # an early first event (plan_tomorrow) can only make it earlier
+    assert d.morning_time("2026-11-05") == "05:30"
+    d.state["morning_override"] = {"2026-11-05": "06:55"}
+    assert d.morning_time("2026-11-05") == "06:50"
+    d.state["morning_override"] = {}
+
+    async def go():
+        await d.tick(room)                                              # 06:40: not yet
+        assert not d.busy
+        now[0] = stamp("2026-11-05", "06:50")
+        ringing[0] = True
+        await d.tick(room)                                              # something rings: it is answered first, the briefing never speaks over it
+        assert not d.busy and d.state.get("last_morning") != "2026-11-05"
+        ringing[0] = False
+        await d.tick(room)
+        assert d.busy
+        await finish(d, 15)
+    asyncio.run(go())
+    assert d.state["last_morning"] == "2026-11-05" and link.spoken[0].startswith("Good morning, Captain.")
+
+
+def test_the_lead_before_the_alarm_is_a_setting_and_a_broken_alarm_clock_leaves_the_morning_alone(tmp_path):
+    now = [stamp("2026-11-04", "22:30")]
+    d, *_ = make(tmp_path, now, env={"SKIPPY_MORNING_BEFORE_ALARM_MIN": "15"})
+    d.extras["wake_alarm"] = {"2026-11-05": "07:00"}.get
+    assert d.morning_time("2026-11-05") == "06:45"
+
+    def broken(date):
+        raise RuntimeError("no clock")
+    d.extras["wake_alarm"] = broken
+    assert d.morning_time("2026-11-05") == "07:10" and asyncio.run(d.briefing_line()) is None
+
+
+def test_bedtime_says_when_the_briefing_comes_before_tomorrows_alarm(tmp_path):
+    now = [stamp("2026-11-04", "22:30")]
+    d, *_ = make(tmp_path, now)
+    d.extras["wake_alarm"] = {"2026-11-05": "07:00"}.get
+    assert asyncio.run(d.briefing_line()) == "The morning briefing comes at 6:50 AM, before it."
+    d.extras["wake_alarm"] = lambda date: None
+    assert asyncio.run(d.briefing_line()) is None                       # no alarm tomorrow: nothing to say
+
+
+def test_a_blank_or_unreadable_lead_and_a_malformed_alarm_time_never_stop_the_morning(tmp_path):
+    """SKIPPY_MORNING_BEFORE_ALARM_MIN= (blank) made morning_time raise on every tick of every alarm day: the briefing never ran, and the hub logged the
+    error twice a second. A malformed 'hhmm' in a hand-edited alarm list did the same (review of 2026-11-05)."""
+    now = [stamp("2026-11-05", "06:55")]
+    for n, lead in enumerate(("", "ten", "10 min", "nan", "inf")):
+        d, room, *_ = make(tmp_path / f"lead{n}", now, car=car_at(HOME), env={"SKIPPY_MORNING_BEFORE_ALARM_MIN": lead})
+        logged = []
+        d.log = logged.append
+        d.extras["wake_alarm"] = {"2026-11-05": "07:30"}.get
+        assert d.morning_time("2026-11-05") == "07:20", lead            # the default lead: ten minutes
+        for _ in range(3):
+            asyncio.run(d.tick(room))                                   # (a tick every half second: it must not raise, nor say it every time)
+        assert len([m for m in logged if "SKIPPY_MORNING_BEFORE_ALARM_MIN" in m]) <= 1, lead
+    d, room, *_ = make(tmp_path / "bad", now, car=car_at(HOME))
+    logged = []
+    d.log = logged.append
+    for bad in ("0700", "7", "07.00", "", "seven"):
+        d.extras["wake_alarm"] = {"2026-11-05": bad}.get
+        assert d.morning_time("2026-11-05") == "07:10", bad             # unreadable: the morning stays at its fixed time
+        asyncio.run(d.tick(room))
+    d.extras["wake_alarm"] = {"2026-11-05": "0700"}.get
+    for _ in range(5):
+        d.morning_time("2026-11-05")
+    assert len([m for m in logged if "first alarm" in m]) == 1          # said once a day, not on every tick
+
+
+def test_one_part_of_a_joined_line_that_fails_does_not_take_the_others_with_it(tmp_path):
+    now = [stamp("2026-11-04", "22:30")]
+    d, *_ = make(tmp_path, now)
+    d.log = lambda m: None
+
+    async def alarm():
+        return "Your alarm is set for 7:00."
+
+    async def broken():
+        raise RuntimeError("no clock")
+
+    async def nothing():
+        return None
+    assert asyncio.run(d._join(alarm, broken)()) == "Your alarm is set for 7:00."
+    assert asyncio.run(d._join(broken, nothing)()) is None
+
+
+def test_good_morning_by_hand_marks_the_day_so_the_scheduled_briefing_does_not_say_it_all_again(tmp_path):
+    """Run by hand at 06:20, the briefing did not mark the day; the scheduled one then started at 06:50 and he heard it a second time, ending as the alarm rang."""
+    now = [stamp("2026-11-05", "06:20")]
+    d, room, link, *_ = make(tmp_path, now, car=car_at(HOME))
+    d.extras["wake_alarm"] = {"2026-11-05": "07:00"}.get
+
+    async def go():
+        await room.handle("Good morning")
+        await finish(d, 15)
+        assert d.state["last_morning"] == "2026-11-05"
+        now[0] = stamp("2026-11-05", "06:50")
+        await d.tick(room)
+        assert not d.busy
+    asyncio.run(go())
+    assert len([s for s in link.spoken if s.startswith("Good morning, Captain.")]) == 1
+
+
+def test_the_morning_a_bedtime_leads_to_is_found_by_date_not_by_adding_a_day_of_seconds(tmp_path):
+    """The night before the spring-forward is 23 hours long (this machine's zone: US Pacific): +86400 s from 23:13 on 2027-03-13 is Monday, so he heard
+    Monday's alarm. A goodnight after midnight is for this very morning's alarm, which is the one the alarm line names (it takes the soonest)."""
+    schedule = {"2027-03-14": "07:00", "2027-03-15": "09:00", "2026-11-05": "07:00", "2026-11-06": "08:30", "2026-11-04": "06:00"}
+    for goodnight, said in (("2027-03-13 23:13", "6:50 AM"), ("2026-11-04 22:30", "6:50 AM"), ("2026-11-05 00:20", "6:50 AM"),
+                            ("2026-11-05 04:29", "6:50 AM"), ("2026-11-05 04:31", "8:20 AM")):
+        date, hm = goodnight.split()
+        d, *_ = make(tmp_path / goodnight.replace(" ", "-").replace(":", ""), [stamp(date, hm)])
+        d.extras["wake_alarm"] = schedule.get
+        assert asyncio.run(d.briefing_line()) == f"The morning briefing comes at {said}, before it.", goodnight
+
+
+def test_plan_tomorrow_says_the_time_the_briefing_really_comes_or_nothing(tmp_path):
+    """It quoted its own override, whatever the alarm's briefing time was, and the next line said the real one: two different times at one bedtime."""
+    now = [stamp("2026-11-04", "22:30")]
+    d, *_ = make(tmp_path, now)
+
+    async def early():
+        return stamp("2026-11-05", "08:00")                             # his first event is at 08:00: 90 minutes before it is 06:30
+    d.extras["first_tomorrow"] = early
+    d.extras["wake_alarm"] = {"2026-11-05": "08:30"}.get                # the alarm's own time is 08:20: the event's is the earlier
+    assert "6:30 AM" in asyncio.run(d.plan_tomorrow()) and d.morning_time("2026-11-05") == "06:30"
+    d.extras["wake_alarm"] = {"2026-11-05": "07:00"}.get                # the alarm's briefing is at 06:50: earlier than 06:30? no, later: the event's still leads
+    assert "6:30 AM" in asyncio.run(d.plan_tomorrow())
+
+    async def later():
+        return stamp("2026-11-05", "08:30")                             # 07:00: after the alarm's 06:50, so the early event changes nothing
+    d.extras["first_tomorrow"] = later
+    assert asyncio.run(d.plan_tomorrow()) is None and d.morning_time("2026-11-05") == "06:50"
+
+    async def odd():
+        return stamp("2026-11-05", "07:07")                             # 05:37: stored on the 5-minute mark below it, and said as stored
+    d.extras["first_tomorrow"] = odd
+    d.extras["wake_alarm"] = lambda date: None
+    said = asyncio.run(d.plan_tomorrow())
+    assert d.morning_time("2026-11-05") == "05:35" and "5:35 AM" in said
+
+
+def test_the_night_shift_starts_once_when_the_house_is_quiet_and_the_morning_reads_its_line(tmp_path):
+    now = [stamp("2026-11-03", "01:40")]
+    d, room, link, *_ = make(tmp_path, now)
+    started = []
+    d.night_shift = lambda: started.append(1)
+    room._turn_at = time.monotonic() - 60                               # he was still talking a minute ago
+
+    async def go():
+        await d.tick(room)
+        assert started == []
+        room._turn_at = time.monotonic() - 3600
+        await d.tick(room)
+        await d.tick(room)
+    asyncio.run(go())
+    assert started == [1]
+    (tmp_path / "daily" / "overnight.json").write_text(json.dumps({"at": now[0], "line": "Overnight: all clean."}), encoding="utf-8")
+    assert asyncio.run(d.overnight()) == "Overnight: all clean."
+    now[0] += 2 * 86400
+    assert asyncio.run(d.overnight()) is None
+
+
+def test_stop_the_music_reaches_the_stereo(tmp_path):
+    now = [stamp("2026-11-02", "08:00")]
+    d, room, link, brain, *_ = make(tmp_path, now)
+    calls = []
+
+    class Box:
+        queue = ["a"]
+        async def next(self): calls.append("next")
+        async def resume(self): calls.append("resume")
+
+    class Stereo:
+        playing = True
+        box = Box()
+        async def stop(self):
+            calls.append("stop")
+            Stereo.playing = False
+        def duck(self, *a): pass
+    d.stereo = lambda: Stereo()
+
+    async def go():
+        await room.handle("next song")
+        await room.handle("stop the music")
+        await room.handle("play the music")
+        await room.handle("what time is it")
+    asyncio.run(go())
+    assert calls == ["next", "stop", "resume"] and brain.heard == ["what time is it"]
+
+
+def coming_home_with_a_stop(tmp_path, stop_when):
+    """The car gets home after a long day and the coming-home routine waits to hear him; he says 'stop the music' at `stop_when` ('before' the car gets
+    home, 'between' its arrival and his being heard in the room, or never). How many times the routine shuffled the library."""
+    now = [stamp("2026-11-02", "08:00")]
+    d, room, link, brain, house, posts, car = make(tmp_path, now, car=car_at(AWAY),
+                                                   things={"light.k1": ("kitchen under 1", "off"), "switch.sec": ("security Light", "off")})
+    shuffles = []
+
+    class Stereo:
+        playing, pauses = True, 0                                       # (RadioClient.pauses counts only his stops through the music tool)
+
+        async def stop(self):
+            self.playing = False                                        # RadioClient.stop: the radio's pause, uncounted
+
+        async def shuffle(self):
+            shuffles.append(1)
+            return 10
+    stereo = Stereo()
+    d.stereo = lambda: stereo
+
+    async def go():
+        await d.tick(room)
+        if stop_when == "before":
+            await room.handle("stop the music")
+            stereo.playing = True                                       # (and something plays again by the time he is home)
+        now[0] = stamp("2026-11-02", "18:30")
+        car["cars"][0].update(latitude=HOME[0], longitude=HOME[1])
+        d._car_check = -1e9
+        await d.tick(room)
+        assert d.arrived_at is not None and not d.busy
+        if stop_when == "between":
+            await room.handle("stop the music")
+            assert not stereo.playing
+        room._voice_at = time.monotonic() + 1                           # he walks in and says something
+        await d.tick(room)
+        await finish(d)
+    asyncio.run(go())
+    return shuffles
+
+
+def test_a_stop_between_the_car_getting_home_and_the_routine_starting_keeps_the_routines_music_off(tmp_path):
+    """The other order of the 2026-11-04 incident: he stopped the music after the car got home but before the routine started (a stop claim() handled
+    itself, or one from another pod), so the routine's snapshot of his stops was taken after it and its shuffle played on."""
+    assert coming_home_with_a_stop(tmp_path / "between", "between") == []
+    assert coming_home_with_a_stop(tmp_path / "before", "before") == [1]        # a stop before the car even got home is long past: the shuffle is his welcome
+    assert coming_home_with_a_stop(tmp_path / "never", "never") == [1]
+
+
+# ── today's driving: leave-by and miles (core/routes on skippy-core) ──
+DENTIST = (37.2266, -121.9747)
+STORE = (37.2872, -121.9500)
+
+
+def iso(date, hm):
+    from datetime import datetime
+    return datetime.fromtimestamp(stamp(date, hm)).astimezone().isoformat()
+
+
+def with_roads(d, events, legs=((24.1, 32), (10.0, 15), (30.0, 35)), router_up=True):
+    """The calendar's events, the road door's geocode and route answers, faked; returns what was asked of the door."""
+    asked = {"geocode": [], "route": []}
+    places = {"Smile Dental, 100 Main St Suite 2, Los Gatos, CA 95030, USA": {"lat": DENTIST[0], "lon": DENTIST[1], "label": "Smile Dental", "approx": False},
+              "Orchard Supply, Campbell, CA": {"lat": STORE[0], "lon": STORE[1], "label": "Campbell", "approx": True},
+              "The Captain's house": {"lat": HOME[0] + 0.001, "lon": HOME[1], "label": "home", "approx": False}}
+    get0, post0 = d.get, d.post
+
+    def get(url, timeout=15):
+        if url.startswith(daily.ROUTES_URL + "/geocode?"):
+            import urllib.parse
+            q = dict(urllib.parse.parse_qsl(url.split("?", 1)[1]))
+            asked["geocode"].append(q)
+            if q["q"] not in places:
+                raise OSError("HTTP Error 404: no place matches")
+            return places[q["q"]]
+        return get0(url, timeout)
+
+    def post(url, body, timeout=120):
+        if url == daily.ROUTES_URL + "/route":
+            asked["route"].append(body["points"])
+            if not router_up:
+                raise OSError("connection refused")
+            return {"km": round(sum(k for k, _ in legs), 2), "minutes": sum(m for _, m in legs),
+                    "legs": [{"km": k, "minutes": m} for k, m in legs], "source": "Valhalla"}
+        return post0(url, body, timeout)
+    d.get, d.post = get, post
+
+    async def events_today():
+        return events
+    d.extras["events_today"] = events_today
+    return asked
+
+
+def a_day(date="2026-11-02"):
+    return [{"start": date, "end": date, "all_day": True, "summary": "Payday", "location": "Somewhere, CA"},
+            {"start": iso(date, "08:00"), "end": iso(date, "08:30"), "all_day": False, "summary": "Standup", "location": "https://zoom.us/j/123"},
+            {"start": iso(date, "10:00"), "end": iso(date, "11:00"), "all_day": False, "summary": "Dentist",
+             "location": "Smile Dental, 100 Main St Suite 2, Los Gatos, CA 95030, USA"},
+            {"start": iso(date, "12:30"), "end": iso(date, "13:00"), "all_day": False, "summary": "Lunch", "location": "The Captain's house"},
+            {"start": iso(date, "16:00"), "end": iso(date, "16:30"), "all_day": False, "summary": "Hardware", "location": "Orchard Supply, Campbell, CA"},
+            {"start": iso(date, "17:00"), "end": iso(date, "17:30"), "all_day": False, "summary": "Sync", "location": "Conf Room 4B"}]
+
+
+def test_the_morning_says_when_to_leave_for_the_first_off_site_meeting(tmp_path):
+    now = [stamp("2026-11-02", "07:10")]
+    d, room, link, *_ = make(tmp_path, now, car=car_at(HOME))
+    asked = with_roads(d, a_day())
+    said = asyncio.run(d.leave_by())
+    # 10:00, less the router's 32 minutes, less 10 spare = 9:18, down to five minutes
+    assert said == "Dentist at 10 AM is at Smile Dental, about 32 minutes and 15 miles by road, before traffic. Leave by 9:15 AM."
+    # home -> the dentist -> the store -> home: no Zoom, no all-day event, nothing at home, no room name the map doesn't know
+    assert asked["route"] == [[list(HOME), list(DENTIST), list(STORE), list(HOME)]]
+    assert [q["q"] for q in asked["geocode"]] == ["Smile Dental, 100 Main St Suite 2, Los Gatos, CA 95030, USA", "The Captain's house",
+                                                 "Orchard Supply, Campbell, CA", "Conf Room 4B"]
+    assert asked["geocode"][-1]["bounded"] == "1" and "bounded" not in asked["geocode"][0]     # no comma: only near home
+    assert asyncio.run(d.extras["miles_today"]()) == round(64.1 * daily.KM_TO_MI) == 40
+    assert len(asked["route"]) == 1                                                     # worked out once a day
+
+    d2, room2, link2, *_ = make(tmp_path / "b", now, car=car_at(HOME))
+    with_roads(d2, a_day())
+
+    async def go():
+        await room2.handle("Good morning")
+        await finish(d2, 15)
+    asyncio.run(go())
+    text = " ".join(link2.spoken)
+    assert "Leave by 9:15 AM." in text and "Next: when to leave." in text
+
+
+def test_a_late_start_or_a_town_only_place_is_said_plainly(tmp_path):
+    now = [stamp("2026-11-02", "09:25")]
+    d, *_ = make(tmp_path, now)
+    with_roads(d, a_day())
+    assert asyncio.run(d.leave_by()).endswith("You should be leaving now.")
+    now[0] = stamp("2026-11-02", "07:00")
+    d2, *_ = make(tmp_path / "b", now)
+    with_roads(d2, [e for e in a_day() if e["summary"] != "Dentist"], legs=((20.0, 25), (20.0, 25)))
+    assert asyncio.run(d2.leave_by()) == ("Hardware at 4 PM is at Orchard Supply, about 25 minutes and 12 miles by road, before traffic. "
+                                          "Leave by 3:25 PM. I could only find the town, so that's rough.")
+
+
+def test_todays_driving_past_the_cars_range_is_a_plain_warning(tmp_path):
+    now = [stamp("2026-11-02", "07:10")]
+
+    class Down:
+        def __init__(self):
+            self.messages = self
+
+        def create(self, **k):
+            raise ConnectionError("Core is restarting")
+    short = car_at(HOME, rated_battery_range_km=50.0)                               # ~31 miles; the day needs 40
+    d, *_ = make(tmp_path, now, car=short)
+    d.client = Down()
+    with_roads(d, a_day())
+    said = asyncio.run(d.car_report())
+    assert "needs about 40 miles of driving. That is MORE than the car's range" in said
+    d2, *_ = make(tmp_path / "b", now, car=car_at(HOME))                             # 300 km: ~186 miles
+    d2.client = Down()
+    with_roads(d2, a_day())
+    assert "needs about 40 miles of driving. The range covers it." in asyncio.run(d2.car_report())
+
+
+def test_no_leave_by_on_an_online_day_without_a_calendar_or_without_the_router(tmp_path):
+    now = [stamp("2026-11-02", "07:10")]
+    d, *_ = make(tmp_path, now)
+    with_roads(d, [e for e in a_day() if e["summary"] in ("Standup", "Lunch", "Sync")])
+    assert asyncio.run(d.leave_by()) is None and asyncio.run(d.miles_today()) is None
+    d2, *_ = make(tmp_path / "b", now)
+    assert asyncio.run(d2.leave_by()) is None and asyncio.run(d2.miles_today()) is None   # no Google: no calendar
+    assert "when to leave" not in [s.title for s in d2.morning_steps(None)]
+    d3, *_ = make(tmp_path / "c", now)
+    with_roads(d3, a_day(), router_up=False)
+    assert asyncio.run(d3.leave_by()) is None and asyncio.run(d3.miles_today()) is None   # said nothing rather than guessed
+
+
+def test_weather_says_what_to_bring(tmp_path):
+    now = [time.mktime((2026, 10, 31, 7, 10, 0, 0, 0, -1))]
+    d = make(tmp_path, now)[0]
+    seen = []
+
+    async def aword(task, material, max_tokens, persona=True, fallback=None):
+        seen.append((task, material))
+        return fallback
+    d.aword = aword
+    out = asyncio.run(d.weather())
+    assert "What to bring or wear: a warm layer" in seen[0][1] and "what to bring or wear" in seen[0][0]
+    assert out.endswith("What to bring or wear: a warm layer, down to 48 F.")
+
+    def broken():
+        raise ConnectionError("NWS down")
+    d.bring_today = broken
+    assert asyncio.run(d.weather()).startswith("Today: a high of 66")

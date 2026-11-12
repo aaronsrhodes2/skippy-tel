@@ -1,0 +1,33 @@
+# The quality 3D and video pop-ups on skippy-core (core/popups-3d/app.py, docs/3d-video-popups.md). The deployer adds this file
+# when /etc/skippy-core/core.env says CORE_POPUPS3D=1; the simulator and CI leave it out (the image carries ROCm, ~20 GB).
+#
+#   network_mode: host   like image-studio: ufw keeps the LAN out, Tailscale's own rules let the tailnet in, ALLOW_FROM narrows it
+#                        to skippy-pc. It calls the picture studio on 127.0.0.1:7347 for text_to_3d.
+#   /dev/kfd, /dev/dri   ROCm (Hunyuan3D-2) needs both; sd-cli (Wan) needs /dev/dri. seccomp off: ROCm's HSA runtime is refused
+#                        some memory calls under Docker's default profile.
+#   mem_limit            a runaway job is killed alone, before the OOM killer reaches the language models.
+services:
+  popups-3d:
+    build: ./popups-3d
+    restart: unless-stopped
+    network_mode: host
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    group_add:
+      - "${VIDEO_GID:-44}"
+      - "${RENDER_GID:-992}"
+    security_opt:
+      - seccomp=unconfined
+    mem_limit: 40g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      - PORT=7348
+      - MODELS=/models
+      - ALLOW_FROM=${POPUPS3D_ALLOW_FROM:-127.0.0.1,100.122.71.14}   # the box itself, and skippy-pc on the tailnet
+    volumes:
+      - ${MODELS_ROOT:-/srv/models}:/models:ro

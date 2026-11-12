@@ -1,0 +1,34 @@
+{
+ "n": 13,
+ "title": "Choo-choo train, Qwen3-8B in one call (our incomplete harness: no build, it loops)",
+ "model": "Skippy Core's stock Qwen3-8B (Q4), one call with MineBench's own prompt, the way MineBench runs a model",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 0,
+ "minutes": 19,
+ "size": "none",
+ "verdict": "Harness fault, found 2026-10-31: this call was not MineBench's procedure. Our copy of its prompt lacked the TOOL MODE section (\"you may use ONLY these runtime globals: block, box, line, rng, Math\"), and MineBench sends a failure back for up to 8 attempts where this got one. Later runs in this series give a model MineBench's way. What it did here: It started reasonably: a train body, an engine, windows and doors drawn as boxes in stone, glass and dirt. Then it fell into a loop, writing the same two block() lines (two stone blocks at the edge of the grid) over and over for 19 minutes until it reached its 28,000-token limit, so its JSON never closed. Not yet re-run MineBench's way. An 8B model at temperature 0 (the slot's setting for Mentat's routing) is the weakest builder here.",
+ "stats": {
+  "started": "2026-11-01T00:08:52Z",
+  "minutes": 19,
+  "tokens": {
+   "input": 1596,
+   "cache_read": 0,
+   "output": 28000,
+   "total": 29596
+  },
+  "models": [
+   {
+    "name": "Qwen3-8B (Skippy Core's stock 8B, router-stock slot: Q4_K_M)",
+    "tokens": {
+     "input": 1596,
+     "cache_read": 0,
+     "output": 28000
+    }
+   }
+  ]
+ },
+ "failed": "no voxel.exec call in the reply (it stopped at its output limit)",
+ "reply": "experiments/minebench/core-8b/reply.txt",
+ "series": "fresh"
+}

@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+{% block title %}Your dashboard — Maker Portal{% endblock %}
+{% block app %}me{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}gauge{% endblock %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='bridge-panes.css') }}">{% endblock %}
+{% block content %}
+{# The Captain's dashboard on the bridge: a deck with a control for each part (a lamp where something may need him), and a control opens
+   its pane. (Skippy, the chat, is the front page now: templates/front.html.) Every widget is a
+   pane of pages you flip (static/bridge-panes.js, Bridge.pager), never a scrolled page. Each widget is as it was: only the layout changed. #}
+{% set core_lamp = {'ok': 'on', 'degraded': 'warn', 'unknown': 'idle'}.get(core.verdict, 'off') %}
+{% set home_lamp = 'idle' if not home.paired else ('boot' if home.age is none else ('on' if home.online else 'warn')) %}
+{% set local = home.local or {} %}
+{% set weather_lamp = 'warn' if (local.commute and local.commute.alert) else ('idle' if not local.weather else '') %}
+{% set server_lamp = 'off' if not status else ('on' if status.status == 'RUNNING' else ('idle' if status.status == 'TERMINATED' else 'boot')) %}
+{# `buried`: the /me panes the Captain retired in the Admin Graveyard (modules.py, ids me-<pane>), passed in by app.py. Their markup stays; reviving one
+   is one tap there. Experiments moved to the main portal (/experiments, its About sheet). #}
+{% set all_units = [
+  ('mcp', 'tools', 'MCP', ''),
+  ('home', 'link', 'Home', home_lamp),
+  ('weather', 'globe', 'Weather and traffic', weather_lamp),
+  ('server', 'server', 'Server', server_lamp),
+  ('core', 'core', 'Core', core_lamp),
+  ('activity-pane', 'eye', 'Activity', ''),
+  ('watcher', 'gauge', 'Watcher', 'warn' if warnings else ''),
+  ('people', 'user', 'People', ''),
+  ('links', 'globe', 'Links', ''),
+] %}
+{% set units = all_units | rejectattr(0, 'in', buried) | list %}
+<canvas class="alive" aria-hidden="true"></canvas>
+<section class="adm" id="adm">
+  <div class="stage" id="astage">
+    <div class="deck" id="adeck" style="--rows: {{ (units | length + 1) // 2 }}; --rows-wide: {{ (units | length + 3) // 4 }}; --rows-side: {{ (units | length + 4) // 5 }}">
+      {% for id, glyph, label, lamp in units %}
+        <div class="unit named" {% if lamp %}data-s="{{ lamp }}"{% endif %} style="--i: {{ loop.index0 }}">
+          <i class="plate"></i>
+          <button type="button" class="hit" data-pane="{{ id }}" data-tel="pane:{{ id }}" aria-label="{{ label }}" title="{{ label }}"></button>
+          <i class="claws"><b></b><b></b><b></b></i>
+          {% if lamp %}<span class="lamp"></span>{% endif %}
+          <svg class="g" aria-hidden="true"><use href="#g-{{ glyph }}"/></svg>
+          <span class="name">{{ label }}</span>
+        </div>
+      {% endfor %}
+    </div>
+
+    <section id="mcp" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-tools"/></svg><span class="title">MCP</span></header>
+      <div class="pg"><div class="pg-flow">
+    <div class="w">
+      <h3>Private MCP servers</h3>
+      <p class="muted">The MCP servers you set up for Claude on skippy-pc (user scope). Test starts one, shakes hands and lists its tools, then stops it.
+        Nothing but its name and how it is reached is shown: never its keys or arguments.</p>
+      <p class="muted" id="mcp-state">Not loaded yet.</p>
+      <table id="mcp-list"></table>
+    </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+
+    <section id="home" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-link"/></svg><span class="title">Home</span></header>
+      <div class="pg"><div class="pg-flow">
+    <div class="w">
+      <h3>Home · skippy-pc</h3>
+      {% if not home.paired %}
+        <p class="muted">Not paired yet. Pairing gives the home reporter its own token, so skippy-pc can
+          push its status here (outbound only; nothing at home is exposed).</p>
+        <form method="post" action="{{ url_for('me.pair_home') }}"><button type="submit" data-tel="me:pair-home">Pair home</button></form>
+      {% elif home.age is none %}
+        <p class="warn">Paired, waiting for the first report.</p>
+        <p class="muted">Reports every ~15 s once the home reporter is running.</p>
+      {% else %}
+        {% set st = home.status %}
+        <p class="big">{% if home.online %}Online{% else %}<span class="warn">Silent</span>{% endif %}
+          <span class="muted">last report {{ home.age }} s ago</span></p>
+        <table>
+          {% for s in st.services or [] %}<tr><td><span style="color: {{ 'var(--green)' if s.ok else 'var(--red)' }}">{{ '●' if s.ok else '○' }}</span>
+            {{ s.name }}</td><td class="muted">{{ s.detail }}</td></tr>{% endfor %}
+        </table>
+        {% if st.ups %}{% set u = st.ups %}
+          <p class="{{ '' if u.on_ac else 'warn' }}">⚡ {{ 'On AC' if u.on_ac else 'ON BATTERY' }} · {{ u.charge }}% ·
+            {{ u.runtime }} min runtime{% if u.alert %} · {{ u.alert }}{% endif %}</p>{% endif %}
+        <p class="muted">Models: {{ (st.ollama_models or []) | join(', ') or 'none loaded' }}</p>
+        {% if st.photo_tags and st.photo_tags.total %}{% set t = st.photo_tags %}
+          <p class="muted">Photo tags: {{ t.tagged }} / {{ t.total }} ({{ (100 * t.tagged / t.total) | round | int }}%)</p>{% endif %}
+        {% if st.telemetry %}<details><summary class="muted">Least-used UI (removal candidates)</summary>
+          <table>{% for t in st.telemetry[:8] %}<tr><td>{{ t.app }} · {{ t.element }}</td>
+            <td class="muted">{{ t.clicks }} clicks · {{ 'today' if t.days_ago == 0 else t.days_ago ~ 'd ago' }}</td></tr>{% endfor %}</table>
+        </details>{% endif %}
+        {% set np = music.traktor.now_playing or (music.session and music.session.now_playing) %}
+        <p>♪ {% if np %}{{ np.artist }} — {{ np.title }}{% else %}<span class="muted">nothing playing</span>{% endif %}
+          · <a href="{{ url_for('music.player_page') }}">Bilby's Audio Service &rarr;</a></p>
+        <form method="post" action="{{ url_for('me.pair_home') }}" style="margin-top:6px">
+          <button type="submit" style="padding:3px 10px" title="Makes a new token; the old one stops working" data-tel="me:makes-a-new-token">Re-pair</button></form>
+      {% endif %}
+    </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+
+    {% if 'weather' not in buried %}
+    <section id="weather" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-globe"/></svg><span class="title">Weather and traffic</span></header>
+      <div class="pg"><div class="pg-flow">
+    {% if not local or local.disabled %}
+    <div class="w"><h3>Weather and traffic</h3>
+      <p class="muted">Nothing yet: skippy-pc's reporter sends the weather and the drive every few minutes once it is running with the new code.</p></div>
+    {% else %}
+    {% set c = local.commute %}
+    {% if c and c.alert %}<div class="w"><p class="warn"><b>{{ c.alert }}</b></p></div>{% endif %}
+    {% for key in ('home', 'work') %}{% set w = (local.weather or {}).get(key) %}{% if w %}
+    <div class="w">
+      <h3>{{ 'At home' if key == 'home' else 'At work' }}{% if w.ok %} &middot; {{ w.place }}{% endif %}</h3>
+      {% if w.ok %}
+        <p class="big">{{ w.temp_f }}&deg;F <span class="muted">{{ w.text }}, feels like {{ w.feels_f }}&deg;, wind {{ w.wind_mph }} mph</span></p>
+        <p class="muted">Today {{ w.lo_f }}&deg; to {{ w.hi_f }}&deg;{% if w.rain_chance %} &middot; {{ w.rain_chance }}% chance of rain{% endif %}</p>
+        {% for a in w.alerts %}<p class="warn">{{ a.event }}: {{ a.headline }}</p>{% endfor %}
+        <table>{% for h in w.next_hours %}<tr><td>{{ h.hour }}</td><td>{{ h.temp_f }}&deg;</td><td class="muted">{{ h.text }}{% if h.rain %} &middot; {{ h.rain }}% rain{% endif %}</td></tr>{% endfor %}</table>
+        {% if w.stale %}<p class="warn">Stale: last good reading {{ w.age_s // 60 }} min ago.</p>{% endif %}
+      {% else %}<p class="warn">{{ w.error }}</p>{% endif %}
+    </div>
+    {% endif %}{% endfor %}
+    {% if c %}
+    <div class="w">
+      <h3>The drive</h3>
+      {% for leg in c.legs %}
+        <p><span style="color: {{ 'var(--red)' if leg.delayed else 'var(--green)' }}">{{ '●' if not leg.delayed else '▲' }}</span> <b>{{ leg.name }}</b>: {{ leg.minutes }} min
+          <span class="muted">({{ leg.miles }} mi, usually {{ leg.free_flow_minutes }}{% if leg.delay_minutes %}, {{ leg.delay_minutes }} min slower{% endif %}{% if leg.route %}, via {{ leg.route }}{% endif %})</span></p>
+      {% endfor %}
+      {% if c.note %}<p class="muted">{{ c.note }}</p>{% endif %}
+      <h3 style="margin-top:8px">On your roads now (CHP)</h3>
+      {% for i in c.incidents %}<p class="{{ 'warn' if i.severity == 'major' else '' }}"><b>{{ i.kind }}</b> <span class="muted">{{ i.where }}{% if i.detail %} &middot; {{ i.detail }}{% endif %} &middot; {{ i.time }}</span></p>
+      {% else %}<p class="muted">{% if c.incidents_ok %}No incidents reported on SR 9, 17, 35, 85, 236, 237, US 101 or I-280 between home and work.{% else %}The CHP feed did not answer.{% endif %}</p>{% endfor %}
+    </div>
+    {% endif %}
+    {% endif %}
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+    {% endif %}
+
+    {% if 'server' not in buried %}
+    <section id="server" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-server"/></svg><span class="title">Server</span></header>
+      <div class="pg"><div class="pg-flow">
+    <div class="w">
+      <h3>Server</h3>
+      {% if not status %}<p class="error">Couldn't reach the VM: {{ error }}</p>{% else %}
+        <p class="big">{{ 'Online' if status.status == 'RUNNING' else ('Asleep' if status.status == 'TERMINATED' else status.status|title) }}</p>
+        <p class="muted">{{ status.machine_type }} · {{ status.games | join(', ') or 'no games' }}
+          {% if status.minutes_up() is not none %} · up {{ status.minutes_up() }} min
+          (≈ ${{ session_cost }} so far){% endif %}</p>
+        {% for g, code in codes.items() %}<p>{{ g }} invite code <code class="code">{{ code }}</code>{% if players.get(g) is not none %} · {{ players[g] }} playing{% endif %}</p>{% endfor %}
+        {% if res %}
+          <div class="muted">memory {{ res.memory_pct }}% of {{ res.memory_total_gb }} GB</div>
+          <div class="bar"><div class="{{ 'hot' if res.memory_pct > 85 }}" style="width: {{ res.memory_pct }}%"></div></div>
+          {% if res.disk_pct is defined %}<div class="muted">world disk {{ res.disk_pct }}%</div>
+          <div class="bar"><div class="{{ 'hot' if res.disk_pct > 80 }}" style="width: {{ res.disk_pct }}%"></div></div>{% endif %}
+        {% endif %}
+        <div class="row">
+          <a class="btn" href="{{ url_for('dashboard.index') }}" data-tel="me:game-servers">Game Servers</a>
+          <a class="btn" href="{{ url_for('admin.logs') }}" data-tel="me:logs">Logs</a>
+        </div>
+      {% endif %}
+    </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+    {% endif %}
+
+    {% if 'core' not in buried %}
+    <section id="core" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-core"/></svg><span class="title">Core</span></header>
+      <div class="pg"><div class="pg-flow">
+    <div class="w">
+      <h3>Core · skippy-tel</h3>
+      {% if core.verdict == 'unknown' %}
+        <p class="muted">No core health from home yet. It shows here once the home reporter (re)starts with the latest code.</p>
+      {% else %}
+        <p class="big">
+          {% if core.verdict == 'ok' %}<span style="color: var(--green)">Healthy</span>
+          {% elif core.verdict == 'degraded' %}<span class="warn">Degraded</span>
+          {% else %}<span style="color: var(--red)">Down</span>{% endif %}
+          <span class="muted">{% if core.api_version %}API v{{ core.api_version }} · {% endif %}{% if home.online %}last report {{ home.age }} s ago{% else %}<span class="warn">stale: home is silent</span>{% endif %}</span>
+        </p>
+        {% for p in core.problems %}<p class="warn">⚠ {{ p }}</p>{% endfor %}
+        {% if core.tiers %}<p class="muted">Tiers:
+          {% for t in core.tiers %}<span style="color: {{ 'var(--green)' if t.ok else 'var(--red)' }}">{{ '●' if t.ok else '○' }}</span> {{ t.name }}{{ ' · ' if not loop.last }}{% endfor %}</p>{% endif %}
+        <details><summary class="muted">All {{ core.services | length }} services</summary>
+          <table>{% for s in core.services %}<tr><td><span style="color: {{ 'var(--green)' if s.available else ('var(--muted)' if s.planned else 'var(--red)') }}">{{ '●' if s.available else '○' }}</span>
+            {{ s.name }}</td><td class="muted">{{ s.detail or ('up' if s.available else 'down') }}</td></tr>{% endfor %}</table>
+        </details>
+      {% endif %}
+    </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+    {% endif %}
+
+    {% if 'activity-pane' not in buried %}
+    <section id="activity-pane" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-eye"/></svg><span class="title">Activity</span></header>
+      <div class="pg"><div class="pg-flow">
+    {% include "_activity.html" %}
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+    {% endif %}
+
+    {% if 'watcher' not in buried %}
+    <section id="watcher" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-gauge"/></svg><span class="title">Watcher</span></header>
+      <div class="pg"><div class="pg-flow">
+    <div class="w">
+      <h3>Watcher</h3>
+      {% if warnings %}{% for w in warnings %}<p class="warn">⚠ {{ w }}</p>{% endfor %}
+      {% else %}<p>All quiet. <span class="muted">Memory, disk, crashes and blocked starts show here when
+        they need attention.</span></p>{% endif %}
+    </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+    {% endif %}
+
+    {% if 'people' not in buried %}
+    <section id="people" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-user"/></svg><span class="title">People</span></header>
+      <div class="pg"><div class="pg-flow">
+    <div class="w">
+      <h3>Friends</h3>
+      {% if friends %}<table>{% for email, info in friends %}<tr><td>{{ email }}</td>
+        <td class="muted">{{ info | join(', ') }}</td></tr>{% endfor %}</table>
+      {% else %}<p class="muted">No friends added yet.</p>{% endif %}
+      <p><a href="{{ url_for('admin.index') }}#friends">Manage friends &rarr;</a></p>
+    </div>
+
+    <div class="w">
+      <h3>Discord, lately</h3>
+      {% for m in chatter %}<p class="msg"><b>{{ m.author }}</b> <span class="muted">#{{ m.game }}</span> {{ m.text or (m.extra | join(' · ')) }}</p>
+      {% else %}<p class="muted">Nothing recent{% if not discord_ready %} (Discord bot not configured){% endif %}.</p>{% endfor %}
+    </div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+    {% endif %}
+
+
+    {% if 'links' not in buried %}
+    <section id="links" class="apane" hidden>
+      <header class="ahead"><button type="button" class="key" data-close aria-label="Back to the dashboard" title="Back" data-tel="me:back-to-the-dashboard"><svg class="g" aria-hidden="true"><use href="#g-back"/></svg></button>
+        <svg class="g mark" aria-hidden="true"><use href="#g-globe"/></svg><span class="title">Links</span></header>
+      <div class="pg"><div class="pg-flow">
+    <div class="w">
+      <h3>Home links</h3>
+      <p class="muted">Only reachable from your own devices on the mesh (Tailscale), so they live here, not on the friends' pages.</p>
+      {% for svc in services %}<p><a href="{{ svc.url }}">{{ svc.name }}</a> <span class="muted">{{ svc.description }}</span></p>{% endfor %}
+    </div>
+
+    <div class="w">
+      <h3>Calendar + inbox</h3>
+      <p class="muted">Today's events and unread mail land here once the portal is bridged to skippy-tel-core
+        (they stay admin-only in tool_policy.py).</p>
+    </div>
+
+    <div class="tools-empty">Your tools go here. Tell Skippy what you want and it becomes a widget.</div>
+      </div></div>
+      <div class="pips" hidden><i></i></div>
+    </section>
+    {% endif %}
+  </div>
+</section>
+<script src="{{ url_for('static', filename='bridge-alive.js') }}"></script>
+<script>Bridge.alive(document.querySelector("canvas.alive"), {colors: ["#a64dff", "#7a2cf0", "#d08cff", "#c040ff", "#5b2bd6", "#e6b3ff"]});</script>
+<script src="{{ url_for('static', filename='bridge-panes.js') }}"></script>
+<script>
+(function () {                                                    // the MCP pane: list on first open, Test per server (jobs on skippy-pc, polled)
+  const state = document.getElementById("mcp-state"), table = document.getElementById("mcp-list"), tile = document.querySelector("#adeck .hit");
+  if (!state || !tile) return;
+  const ASK = "{{ url_for('me.mcp_ask') }}", RESULT = "{{ url_for('me.mcp_result') }}";
+  let loaded = false;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function job(body) {
+    const r = await fetch(ASK, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body), credentials: "same-origin"});
+    const j = await r.json();
+    if (!r.ok || !j.job) throw new Error(j.error || "no answer");
+    for (let i = 0; i < 60; i++) {
+      await sleep(i < 5 ? 600 : 1500);
+      const p = await (await fetch(RESULT + "?job=" + encodeURIComponent(j.job), {credentials: "same-origin"})).json();
+      if (p.state === "done") return p.result;
+      if (p.state === "error" || p.state === "unknown") throw new Error(p.error || "skippy-pc dropped the job");
+    }
+    throw new Error("skippy-pc took too long");
+  }
+  function row(s) {
+    const tr = document.createElement("tr"), a = document.createElement("td"), b = document.createElement("td"), c = document.createElement("td");
+    a.textContent = s.name; b.className = "muted"; b.textContent = s.transport + " · " + s.via;
+    const out = document.createElement("div"); out.className = "muted";
+    const btn = document.createElement("button"); btn.type = "button"; btn.textContent = "Test"; btn.style.padding = "3px 10px";
+    btn.onclick = async () => {
+      btn.disabled = true; out.className = "muted"; out.textContent = "Testing…";
+      try {
+        const r = await job({name: s.name});
+        if (r.ok) { out.className = ""; out.style.color = "var(--green)"; out.textContent = "● " + (r.server || "up") + " · " + r.ms + " ms · " + (r.tools || []).length + " tools: " + (r.tools || []).join(", "); }
+        else { out.className = "warn"; out.textContent = "○ " + (r.error || "failed"); }
+      } catch (e) { out.className = "warn"; out.textContent = "○ " + e.message; }
+      btn.disabled = false;
+    };
+    c.append(btn, out); tr.append(a, b, c); return tr;
+  }
+  async function load() {
+    state.textContent = "Asking skippy-pc…";
+    try {
+      const r = await job({});
+      table.replaceChildren(...(r.servers || []).map(row));
+      state.textContent = (r.servers || []).length ? (r.servers.length + " configured.") : "None configured (claude mcp add --scope user …).";
+      loaded = true;
+    } catch (e) { state.textContent = e.message; }
+  }
+  tile.addEventListener("click", () => { if (!loaded) load(); });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,6 @@
+flask==3.1.3
+gunicorn==23.0.0
+# The one way to Jellyfin (jellyfin.py). requests is pinned with the portal's copy; urllib3 is imported there directly (Retry), so
+# it is pinned too, to the version the tests ran against.
+requests==2.32.3
+urllib3==2.8.0

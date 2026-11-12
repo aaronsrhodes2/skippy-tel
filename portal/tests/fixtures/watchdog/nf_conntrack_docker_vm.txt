@@ -1,0 +1,21 @@
+ipv4     2 udp      17 10 src=172.17.0.1 dst=172.17.0.5 sport=36197 dport=2457 [UNREPLIED] src=172.17.0.5 dst=172.17.0.1 sport=2457 dport=36197 mark=0 zone=0 use=2
+ipv4     2 udp      17 8 src=172.17.0.1 dst=172.17.0.5 sport=33373 dport=2457 [UNREPLIED] src=172.17.0.5 dst=172.17.0.1 sport=2457 dport=33373 mark=0 zone=0 use=2
+ipv4     2 udp      17 12 src=172.17.0.1 dst=172.17.0.5 sport=47708 dport=2456 [UNREPLIED] src=172.17.0.5 dst=172.17.0.1 sport=2456 dport=47708 mark=0 zone=0 use=2
+ipv4     2 udp      17 11 src=172.17.0.1 dst=172.17.0.5 sport=53396 dport=2456 [UNREPLIED] src=172.17.0.5 dst=172.17.0.1 sport=2456 dport=53396 mark=0 zone=0 use=2
+ipv4     2 udp      17 9 src=172.17.0.1 dst=172.17.0.5 sport=51562 dport=2456 [UNREPLIED] src=172.17.0.5 dst=172.17.0.1 sport=2456 dport=51562 mark=0 zone=0 use=2
+ipv4     2 udp      17 3 src=172.17.0.1 dst=172.17.0.5 sport=56427 dport=2456 [UNREPLIED] src=172.17.0.5 dst=172.17.0.1 sport=2456 dport=56427 mark=0 zone=0 use=2
+ipv4     2 udp      17 2 src=172.17.0.1 dst=172.17.0.5 sport=49339 dport=2456 [UNREPLIED] src=172.17.0.5 dst=172.17.0.1 sport=2456 dport=49339 mark=0 zone=0 use=2
+ipv4     2 udp      17 6 src=172.17.0.1 dst=172.17.0.5 sport=32798 dport=2457 [UNREPLIED] src=172.17.0.5 dst=172.17.0.1 sport=2457 dport=32798 mark=0 zone=0 use=2
+ipv4     2 udp      17 7 src=172.17.0.1 dst=172.17.0.5 sport=55703 dport=2456 [UNREPLIED] src=172.17.0.5 dst=172.17.0.1 sport=2456 dport=55703 mark=0 zone=0 use=2
+ipv4     2 udp      17 4 src=172.17.0.1 dst=172.17.0.5 sport=59996 dport=2457 [UNREPLIED] src=172.17.0.5 dst=172.17.0.1 sport=2457 dport=59996 mark=0 zone=0 use=2
+ipv4     2 udp      17 9 src=172.17.0.1 dst=172.17.0.5 sport=48133 dport=2457 [UNREPLIED] src=172.17.0.5 dst=172.17.0.1 sport=2457 dport=48133 mark=0 zone=0 use=2
+ipv4     2 udp      17 16 src=172.17.0.1 dst=172.17.0.5 sport=40709 dport=2457 [UNREPLIED] src=172.17.0.5 dst=172.17.0.1 sport=2457 dport=40709 mark=0 zone=0 use=2
+ipv4     2 udp      17 120 src=172.17.0.1 dst=172.17.0.8 sport=40334 dport=7778 src=172.17.0.8 dst=172.17.0.1 sport=7778 dport=40334 [ASSURED] mark=0 zone=0 use=2
+ipv4     2 udp      17 29 src=172.17.0.1 dst=172.17.0.8 sport=46413 dport=7778 src=172.17.0.8 dst=172.17.0.1 sport=7778 dport=46413 mark=0 zone=0 use=2
+ipv4     2 udp      17 20 src=192.168.65.6 dst=192.168.65.7 sport=47728 dport=53 src=192.168.65.7 dst=192.168.65.6 sport=53 dport=47728 mark=0 zone=0 use=2
+ipv4     2 udp      17 4 src=192.168.65.6 dst=192.168.65.7 sport=33118 dport=53 src=192.168.65.7 dst=192.168.65.6 sport=53 dport=33118 mark=0 zone=0 use=2
+ipv4     2 udp      17 28 src=172.17.0.3 dst=172.17.255.255 sport=44682 dport=34196 [UNREPLIED] src=172.17.255.255 dst=172.17.0.3 sport=34196 dport=44682 mark=0 zone=0 use=2
+ipv4     2 udp      17 28 src=172.17.0.6 dst=172.17.255.255 sport=58375 dport=34196 [UNREPLIED] src=172.17.255.255 dst=172.17.0.6 sport=34196 dport=58375 mark=0 zone=0 use=2
+ipv4     2 tcp      6 119 TIME_WAIT src=192.168.65.1 dst=192.168.65.7 sport=37931 dport=2376 src=192.168.65.7 dst=192.168.65.1 sport=2376 dport=37931 [ASSURED] mark=0 zone=0 use=2
+ipv4     2 tcp      6 42 TIME_WAIT src=192.168.65.1 dst=192.168.65.7 sport=17578 dport=2376 src=192.168.65.7 dst=192.168.65.1 sport=2376 dport=17578 [ASSURED] mark=0 zone=0 use=2
+ipv4     2 tcp      6 77 TIME_WAIT src=192.168.65.1 dst=192.168.65.7 sport=20244 dport=2376 src=192.168.65.7 dst=192.168.65.1 sport=2376 dport=20244 [ASSURED] mark=0 zone=0 use=2

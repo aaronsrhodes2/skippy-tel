@@ -1,0 +1,166 @@
+```python
+def evaluate(expr: str) -> float:
+    """
+    Evaluate an arithmetic expression string without using eval, exec, compile, or ast.
+    
+    Supports: integers, decimals, +, -, *, /, %, **, unary + and -, parentheses.
+    Precedence and associativity follow Python's rules.
+    """
+    if not expr or not expr.strip():
+        raise ValueError("Empty input")
+    
+    # Tokenize
+    tokens = _tokenize(expr)
+    if not tokens:
+        raise ValueError("Empty input")
+    
+    # Parse and evaluate using recursive descent
+    pos = [0]  # mutable position tracker
+    
+    def parse_expr():
+        """Parse addition and subtraction (lowest precedence)."""
+        left = parse_term()
+        while pos[0] < len(tokens) and tokens[pos[0]] in ('+', '-'):
+            op = tokens[pos[0]]
+            pos[0] += 1
+            right = parse_term()
+            if op == '+':
+                left = left + right
+            else:
+                left = left - right
+        return left
+    
+    def parse_term():
+        """Parse multiplication, division, modulo (higher precedence)."""
+        left = parse_power()
+        while pos[0] < len(tokens) and tokens[pos[0]] in ('*', '/', '%'):
+            op = tokens[pos[0]]
+            pos[0] += 1
+            right = parse_power()
+            if op == '*':
+                left = left * right
+            elif op == '/':
+                if right == 0:
+                    raise ZeroDivisionError("division by zero")
+                left = left / right
+            else:  # %
+                if right == 0:
+                    raise ZeroDivisionError("modulo by zero")
+                left = left % right
+        return left
+    
+    def parse_power():
+        """Parse exponentiation (right-associative, higher precedence)."""
+        base = parse_unary()
+        if pos[0] < len(tokens) and tokens[pos[0]] == '**':
+            pos[0] += 1
+            # For right-associativity, we recursively call parse_power
+            exponent = parse_power()
+            result = base ** exponent
+            return result
+        return base
+    
+    def parse_unary():
+        """Parse unary + and - (highest precedence among operators, right before atoms)."""
+        if pos[0] < len(tokens) and tokens[pos[0]] in ('+', '-'):
+            op = tokens[pos[0]]
+            pos[0] += 1
+            operand = parse_unary()  # right-associative for unary
+            if op == '-':
+                return -operand
+            else:
+                return operand
+        return parse_atom()
+    
+    def parse_atom():
+        """Parse numbers and parenthesized expressions."""
+        if pos[0] >= len(tokens):
+            raise ValueError("Unexpected end of input")
+        
+        token = tokens[pos[0]]
+        
+        if token == '(':
+            pos[0] += 1
+            result = parse_expr()
+            if pos[0] >= len(tokens) or tokens[pos[0]] != ')':
+                raise ValueError("Unbalanced parentheses")
+            pos[0] += 1
+            return result
+        elif token == ')':
+            raise ValueError("Unbalanced parentheses")
+        elif isinstance(token, (int, float)):
+            pos[0] += 1
+            return float(token)
+        else:
+            raise ValueError(f"Unknown token: {token}")
+    
+    result = parse_expr()
+    
+    if pos[0] < len(tokens):
+        raise ValueError("Unexpected token after expression")
+    
+    return result
+
+
+def _tokenize(expr: str):
+    """
+    Tokenize the expression string into numbers, operators, and parentheses.
+    """
+    tokens = []
+    i = 0
+    n = len(expr)
+    
+    while i < n:
+        c = expr[i]
+        
+        # Skip whitespace
+        if c in (' ', '\t', '\n', '\r'):
+            i += 1
+            continue
+        
+        # Check for two-character operators
+        if i + 1 < n:
+            two_char = expr[i:i+2]
+            if two_char == '**':
+                tokens.append('**')
+                i += 2
+                continue
+        
+        # Single character operators and parentheses
+        if c in ('+', '-', '*', '/', '%', '(', ')'):
+            tokens.append(c)
+            i += 1
+            continue
+        
+        # Numbers: integers and decimals
+        if c.isdigit() or c == '.':
+            # Parse number
+            start = i
+            has_dot = False
+            i += 1
+            while i < n:
+                ch = expr[i]
+                if ch.isdigit():
+                    i += 1
+                elif ch == '.':
+                    if has_dot:
+                        raise ValueError(f"Invalid number: {expr[start:i]}")
+                    has_dot = True
+                    i += 1
+                else:
+                    break
+            
+            num_str = expr[start:i]
+            if num_str == '.' or num_str == '':
+                raise ValueError(f"Invalid number: {num_str}")
+            if has_dot:
+                tokens.append(float(num_str))
+            else:
+                tokens.append(int(num_str))
+            continue
+        
+        # Unknown character
+        raise ValueError(f"Unknown character: {c}")
+    
+    return tokens
+```

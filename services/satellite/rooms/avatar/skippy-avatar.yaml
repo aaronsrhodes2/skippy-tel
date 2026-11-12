@@ -1,0 +1,22 @@
+# Made by avatar/build_avatar.py ball: Skippy's flat-shaded can (avatar/flat_can.py), blank, at five lean angles (-8, -4, 0, 4, 8 degrees; render_ball.html?shape=can&blank=1&tilts=...). The box draws the face on it. Don't edit by hand.
+image:
+  - file: avatar/frames/ball_flat/00.png
+    id: skippy_can_0
+    type: RGB565
+    transparency: alpha_channel
+  - file: avatar/frames/ball_flat/01.png
+    id: skippy_can_1
+    type: RGB565
+    transparency: alpha_channel
+  - file: avatar/frames/ball_flat/02.png
+    id: skippy_can_2
+    type: RGB565
+    transparency: alpha_channel
+  - file: avatar/frames/ball_flat/03.png
+    id: skippy_can_3
+    type: RGB565
+    transparency: alpha_channel
+  - file: avatar/frames/ball_flat/04.png
+    id: skippy_can_4
+    type: RGB565
+    transparency: alpha_channel

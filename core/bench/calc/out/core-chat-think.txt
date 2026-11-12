@@ -1,0 +1,1830 @@
+<thinking>
+Okay, I need to write a Python module that evaluates arithmetic expressions without using eval, exec, compile, or the ast module. The function is called evaluate(expr: str) -> float. Let me think about how to approach this.
+
+First, I remember that parsing expressions correctly requires handling operator precedence and associativity. Since the problem says to follow Python's rules, I need to make sure that the order of operations is correct. For example, ** has higher precedence than * / %, which in turn are higher than + -, and so on. Also, ** is right-associative, which means that 2**3**2 is 2^(3^2) = 2^9 = 512, not (2^3)^2 = 8^2 = 64.
+
+So, the plan is to parse the input string into tokens, then process them using a recursive descent parser. The parser will handle the different levels of precedence.
+
+Let me think about the steps:
+
+1. Tokenize the input string. The tokens can be numbers (integers or floats), operators (+, -, *, /, %, **), parentheses, and spaces. But spaces can be ignored except as separators.
+
+So first, I need to split the input into tokens. For example, "3 + 4 * 2" becomes ['3', '+', '4', '*', '2'].
+
+But how to handle numbers like .5 or 2., which are valid in Python. Also, numbers can have optional leading '+' or '-' signs, but that's part of the number's sign.
+
+Wait, but unary operators are also part of the expression. So, for example, -3 + 4 is allowed. But how to differentiate between a unary minus and a binary minus?
+
+This is a common problem in expression parsing. The tokenizer needs to recognize when a '-' is a unary operator. But perhaps during parsing, the parser can handle that. For example, when parsing an expression, if a '-' is at the beginning of an expression, or after an operator or parenthesis, it's a unary operator.
+
+So, the tokenizer should split the input into tokens, which can be numbers, operators, parentheses, etc. But the tokenizer needs to handle numbers correctly, including decimal points, and also handle the unary operators.
+
+So, the first step is to process the input string and split it into tokens. Let's think about writing a tokenizer function.
+
+The tokenizer will process the string character by character, grouping digits and decimal points into numbers, and other characters into operators or parentheses.
+
+But how to handle cases like "2.5", ".5", "5.", etc. So, for numbers, the tokenizer needs to read sequences of digits and possibly a decimal point. Also, numbers can have optional leading '+' or '-' signs. Wait, but the unary operators are separate. So, for example, "-2" is a number with a negative sign. But if it's part of an expression like "3 + -2", then the '-' is a unary operator.
+
+Wait, but in the case of a number, like "-2", it's a single token. However, in the case of "3 + -2", the '-' is a unary operator. So how to differentiate?
+
+This is a bit tricky. The tokenizer needs to recognize when a '-' is a unary operator. But maybe during parsing, the parser can handle that. For example, when the parser is expecting an expression, and it encounters a '-', it can treat it as a unary operator. But the tokenizer can't know that; it just splits into tokens. So perhaps the tokenizer will split the input into numbers, operators, and parentheses, and the parser will handle the unary operators.
+
+So, for the tokenizer, the steps could be:
+
+- Ignore spaces.
+- For each character, check if it's part of a number, operator, or parenthesis.
+
+But how to handle the cases where a '-' could be a unary operator or a binary operator.
+
+Let me think about the tokenization. For example:
+
+Input: "3 + -2 * (4 - 5)"
+
+The tokens would be ['3', '+', '-', '2', '*', '(', '4', '-', '5', ')'].
+
+But in this case, the '-' after the '+' is a unary operator. However, the tokenizer would just split it into a '-' token. The parser will then need to handle that.
+
+But during tokenization, I need to split the input into tokens. So, the tokenizer can process the input into:
+
+- Numbers: which can be integers or floats. For example, "123", "123.45", ".45", "123.", etc.
+- Operators: +, -, *, /, %, ** (but ** is two characters, so the tokenizer needs to check for that)
+- Parentheses: (, )
+
+But the problem is that ** is a single operator. So, when the tokenizer sees a '*', it needs to check if the next character is another '*' to form **.
+
+So, the tokenizer will process the input as follows:
+
+Loop through each character, ignoring spaces. For each character:
+
+If it's a digit or a '.', then start reading the number. But need to handle numbers like "123.", ".45", etc.
+
+But how to parse numbers:
+
+A number can be:
+
+- Optional sign (+ or -)
+- Followed by digits and possibly a decimal point.
+
+But also, numbers can have leading or trailing decimal points. For example, ".5" is 0.5, "5." is 5.0.
+
+So, the tokenizer can read a number as follows:
+
+When a digit or '.' is encountered, start reading the number. But need to check for the cases where the number has a decimal point.
+
+But how to handle cases like "2.3.4"? That would be invalid, so during tokenization, we can check for that. However, the tokenizer's job is to split into tokens, not to validate the entire expression. The validation will be done during parsing.
+
+So, the tokenizer can split the input into tokens, but if the input is invalid, like "2.3.4", the tokenizer will split into "2.3" and "." and "4", which would be invalid during parsing. But the problem says to raise ValueError for malformed input.
+
+But for the tokenizer, the main job is to split the input into tokens. So, the steps for the tokenizer:
+
+Initialize a list of tokens. Iterate through the input, skipping spaces.
+
+For each character:
+
+If it's a digit or '.', then start reading the number. So, for example, if the current character is '.', then we need to check if there is a digit before or after.
+
+But how to handle numbers with optional signs. For example, "-123.45".
+
+So, the number token can start with an optional '+' or '-', followed by digits and a decimal point.
+
+So, the tokenizer can process numbers as follows:
+
+When a digit or '.' is found, start building the number. Also, check if the first character is a '+' or '-'. But wait, if the current character is a '-', then it could be part of a number (like "-123") or a unary operator. But the tokenizer can't know that. So, the tokenizer will treat it as part of a number if it's part of a number. For example, in the input "-123", the tokenizer will read the '-' as part of the number. But in the input "3 + -2", the '-' is a separate token. So, how to handle that.
+
+Ah, this is a problem. Because in "3 + -2", the '-' is a unary operator, but in the input "-2", it's part of a number. How can the tokenizer distinguish between them?
+
+This is a classic problem in parsing. The tokenizer can't know the context. So, the tokenizer will split the input into tokens, and the parser will have to handle the unary operators.
+
+So, the tokenizer will split the input into tokens. For example:
+
+- "3 + -2" → tokens ['3', '+', '-', '2'].
+
+But the '-' here is a unary operator. However, the tokenizer doesn't know that. It's just a '-' token. The parser will have to determine if it's a unary operator or a binary operator.
+
+So, during parsing, when a '-' is encountered, the parser needs to check whether it's a unary operator. For example, in the expression "3 + -2", the '-' is a unary operator, but in "3 - 2", it's a binary operator.
+
+So, the tokenizer can split the input into tokens, and the parser will handle the unary operators.
+
+So, the tokenizer's job is to split the input into numbers, operators, and parentheses. So, the tokenizer can process the input as follows:
+
+- Ignore spaces.
+- For each character, if it's a digit or '.', start reading the number. Also, check if the number starts with a '+' or '-'.
+
+Wait, but numbers can have a leading '+' or '-', like "-123".
+
+So, the tokenizer can read the number as follows:
+
+When a '+' or '-' is encountered, check if it's part of a number. But how to differentiate between a unary operator and a number's sign. For example, in the input "-3 + 4", the '-' is a unary operator. But in the input "3 + -4", the '-' is a unary operator. But in the input "-3", it's a number.
+
+But again, the tokenizer can't know that. So, the tokenizer will treat the '-' as part of the number if it's followed by digits. But how to handle cases where the '-' is part of an operator.
+
+Wait, but in the case of "3 + -2", the '-' is a unary operator, but the tokenizer will split into tokens as '3', '+', '-', '2'.
+
+But the problem is that the tokenizer must correctly split the input into tokens, even if the input is invalid. For example, if the input is "3+-2", the tokenizer would split into '3', '+', '-', '2' which is invalid, but during parsing, the parser would detect that there's a dangling operator.
+
+But for the tokenizer, the main task is to split into tokens. So, the tokenizer can process the input into the following token types:
+
+- Numbers: which can be integers or floats.
+- Operators: +, -, *, /, %, **.
+- Parentheses: (, )
+
+But the operator ** is two characters. So, the tokenizer must check for that. For example, when a '*' is encountered, check if the next character is another '*' to form **.
+
+So, the tokenizer can be implemented as follows:
+
+Initialize a list of tokens. Iterate through the input, skipping spaces. For each character:
+
+If the character is a digit or '.', then read the entire number, possibly with a sign.
+
+But how to handle the sign. For example, "-123" is a number, but "3 - 2" is a binary operator.
+
+But the tokenizer can't know that. So, during the number parsing, the tokenizer can check if the current character is a '+' or '-', and then read the number. For example, the tokenizer would read the '-' as part of the number if it's followed by digits.
+
+But what about cases like "3--2"? That would be parsed as 3 - (-2) = 5. But the tokenizer would split into '3', '-', '-', '2' which is invalid. But during parsing, the parser would have to handle that.
+
+So, the tokenizer's code can be something like:
+
+def tokenize(expr):
+    tokens = []
+    i = 0
+    while i < len(expr):
+        c = expr[i]
+        if c.isspace():
+            i += 1
+            continue
+        # Check for numbers
+        if c.isdigit() or c == '.':
+            # parse number
+            start = i
+            if c == '.':
+                # check if there's a digit before or after
+                # but maybe it's a decimal point
+                # for example, ".5" or "5."
+                # So, we need to read all digits and possible '.'.
+                # So, let's read until we hit non-digit or non-.
+                # Also, check for leading '.' like ".5"
+                # So, collect all digits and one decimal point.
+                # But need to handle cases like "123.45.67" which is invalid, but the tokenizer will split into "123.45" and then '.' and '67', which would be invalid during parsing.
+                # So, the tokenizer can just read as much as possible.
+                # So, collect the number:
+                # start with '.'.
+                # So, read until no more digits or '.'.
+                # But need to handle the case where there is no digit before or after.
+                # For example, "123." is 123.0
+                # ".45" is 0.45
+                # "123.45" is 123.45
+                # So, the number can have a decimal point, but at least one digit must be present.
+                # But the tokenizer doesn't check for validity; the parser will do that.
+                # So, proceed.
+                # So, read all digits and possible '.'.
+                # But first, check if the current character is a '.'.
+                # So, we can have a loop that reads the number.
+                # So, for example, in the case of "123.45", the code will read all characters until it hits a non-digit or '.'.
+                # So, in this case, the code will read all of them.
+                # But how to handle leading or trailing '.'.
+                # So, the code can read until it can't anymore.
+                # So, let's proceed:
+                while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                    i += 1
+                tokens.append(expr[start:i])
+            else:
+                # c is a digit, so read all digits and possible '.'.
+                # So, similar to above.
+                while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                    i += 1
+                tokens.append(expr[start:i])
+        elif c in '+-*/%()':
+            # Check for ** operator
+            if c == '*' and i + 1 < len(expr) and expr[i+1] == '*':
+                tokens.append('**')
+                i += 2
+                continue
+            elif c == '-' and i + 1 < len(expr) and expr[i+1] == '-':
+                # But in the problem statement, the operators are +, -, *, /, %, **. So, -- is not an operator. So, perhaps the tokenizer should split into '-' and '-'. But how?
+                # But the problem says that the operators are the ones mentioned. So, the tokenizer can split '-' as a single token, and the parser would handle it.
+                # So, in this case, if the current character is '-', and the next is also '-', then the tokenizer would split into '-' and '-', but that's not an operator. However, during parsing, the parser would need to check for that. But the problem says that the function should raise ValueError for unknown characters. So, perhaps the tokenizer should not split '--' into two '-' tokens, but perhaps that's not possible. For example, in the input "--", the tokenizer would split into two '-' tokens, which would be invalid during parsing. But the problem requires that the function raises ValueError for unknown characters. So, the tokenizer may not have to handle that, but during parsing, the code would check for invalid operators.
+
+                # So, for the tokenizer, in this case, the code will check if the current character is a '-', and then check if the next is also '-', but since the operator ** is two '*'s, but other operators are single characters. So, the tokenizer will split the '-' as a single token.
+
+                # So, in this case, the code will check for the ** operator, but other operators are single characters. So, for example, in the input "--", the tokenizer would split into two '-' tokens.
+
+                # So, in the code, for the case when the current character is '-', and the next is also '-', but that's not part of an operator. So, the code will process it as a single '-'.
+
+                # So, the code for the current character being '-', we check if it's part of a ** operator. But since it's '-', not '*', we proceed to add the '-' as a token, and increment i by 1.
+
+                # So, in the code:
+
+                # So, the code for this part is:
+
+                tokens.append(c)
+                i += 1
+            else:
+                tokens.append(c)
+                i += 1
+        else:
+            # unknown character, raise error
+            raise ValueError(f"Unknown character: {c}")
+    return tokens
+
+Wait, but in the code above, for the case of '-', it's possible that the code could check for other operators, but the only operator that is two characters is **. So, the code for the tokenizer is as follows:
+
+When the current character is a '*', check if the next character is also a '*', and if so, add '**' as a token, and increment i by 2. Otherwise, add '*' as a token.
+
+For other operators, like '-', '+', etc., just add the single character.
+
+So, the code for the tokenizer would handle the ** operator correctly.
+
+But what about other operators? For example, in the input "3 + -2", the tokenizer would split into ['3', '+', '-', '2'].
+
+Now, the next step is to parse the tokens. The parser must handle the operator precedence and associativity.
+
+The standard way to parse expressions is to use a recursive descent parser with different levels for different precedence.
+
+The precedence levels for Python's operators are:
+
+- ** (right-associative)
+- * / % (left-associative)
+- + - (left-associative)
+
+So, the parser can have functions for each level:
+
+parse_expression() which handles + and - (lowest precedence)
+parse_term() which handles * / % (middle precedence)
+parse_power() which handles ** (highest precedence)
+
+But since ** is right-associative, the parse_power() function needs to handle that.
+
+The recursive descent parser works by having functions that parse expressions of a certain precedence level. For example:
+
+parse_expression() calls parse_term(), which calls parse_factor(), etc.
+
+But for the case of ** being right-associative, the parse_power() function would parse a power as a single term, and then check if there is another ** operator.
+
+So, here's the general approach:
+
+The parse_expression() function parses addition and subtraction. It calls parse_term(), which parses multiplication, division, modulus. parse_term() calls parse_power(), which parses exponentiation. parse_power() calls parse_factor(), which parses parentheses or numbers.
+
+But for the right associativity of **, when parsing a power, the parser should parse the right-hand side first. So, for example, in a**b**c, the parser would parse a as the left, and then parse the right as b**c.
+
+So, the parse_power() function would look like:
+
+def parse_power():
+    left = parse_term()
+    while the next token is '**':
+        consume the '**'
+        right = parse_power()  # because ** is right-associative
+        left = apply the ** operation to left and right
+    return left
+
+Wait, but in the recursive descent parser, the parse_power() function would parse the left-hand side, then check for **, and then parse the right-hand side with the same function (which would handle right associativity).
+
+So, the structure would be:
+
+parse_expression() -> parse_term() (which calls parse_power())
+
+parse_term() -> parse_power() (which calls parse_factor())
+
+parse_power() -> parse_factor() (which calls parse_expression? No, maybe not. Let me think again.)
+
+Wait, the standard way to structure this is:
+
+parse_expression() handles addition and subtraction, which have the lowest precedence.
+
+parse_term() handles multiplication, division, modulus, which have higher precedence.
+
+parse_power() handles exponentiation, which has higher precedence than term.
+
+But how to structure the functions.
+
+The parse_expression() function would parse a term, then check for '+' or '-', and recursively call itself for the next term.
+
+Wait, perhaps:
+
+def parse_expression():
+    left = parse_term()
+    while the next token is '+' or '-':
+        operator = get the operator
+        right = parse_term()
+        left = evaluate the operator with left and right
+    return left
+
+Similarly, parse_term() would parse a power, then check for * / %.
+
+def parse_term():
+    left = parse_power()
+    while the next token is * / %:
+        operator = get the operator
+        right = parse_power()
+        left = evaluate the operator with left and right
+    return left
+
+parse_power() would parse a factor, then check for **.
+
+def parse_power():
+    left = parse_factor()
+    while the next token is **:
+        consume the operator
+        right = parse_power()  # right-associative
+        left = left ** right
+    return left
+
+parse_factor() would parse a number or a parenthesized expression.
+
+def parse_factor():
+    if the next token is '(':
+        consume '('
+        value = parse_expression()
+        if the next token is ')':
+            consume ')'
+            return value
+        else:
+            raise error
+    else:
+        return parse_number()
+
+But then, how to handle unary operators. For example, in the case of -3, the parse_factor() would parse the '-' as part of the number. But in the case of 3 + -2, the '-' is a binary operator.
+
+Wait, no. The parse_expression() function would parse a term, which is a power, which is a factor, which is a number. But in the case of a unary minus, how to handle it.
+
+Ah, this is where the problem comes in. The parse_factor() function needs to handle unary operators. So, perhaps the parse_factor() function can check if the next token is a '+' or '-', and then parse a unary operator.
+
+But how to handle that. For example, in the case of "-3 + 4", the parse_expression() would call parse_term(), which calls parse_power(), which calls parse_factor(). The parse_factor() would check if the next token is a '+' or '-', and then parse the following expression as a unary operator.
+
+But how to do that. So, the parse_factor() function can be modified to check for unary operators.
+
+But this requires that the parser can differentiate between a unary operator and a binary operator.
+
+So, perhaps the parse_factor() function would first check for a unary operator. For example:
+
+def parse_factor():
+    if the next token is '+' or '-':
+        operator = get the token
+        value = parse_factor()  # recursively parse the expression
+        if operator is '-', return -value
+        else return +value
+    else:
+        return parse_number()
+
+Wait, but that would lead to infinite recursion. Because if the next token is '+', then parse_factor() would call parse_factor() again. But perhaps the code needs to have a way to parse the unary operators.
+
+Alternatively, perhaps the parse_expression() function should handle unary operators. But I'm getting a bit stuck here.
+
+Alternatively, the parse_expression() function can be modified to handle unary operators. For example, when the parser is expecting a term, it can check if the next token is a '+' or '-', and then parse it as a unary operator.
+
+But how to integrate that into the parsing structure.
+
+Another approach: the parse_expression() function can parse a term, which can be a power, which can be a factor, which can be a number or a parenthesized expression. However, the factor can also be a unary operator.
+
+But how to handle that. For example, in the case of "-3", the parse_expression() would parse a term, which is a power, which is a factor. The factor would be parsed as a unary operator.
+
+But how to detect that. So, the parse_factor() function would need to check if the next token is a '+' or '-', and if so, parse it as a unary operator. For example:
+
+def parse_factor():
+    # Check for unary operators
+    if current token is '+' or '-':
+        sign = current token
+        consume it
+        value = parse_factor()  # parse the rest of the expression
+        if sign is '-':
+            return -value
+        else:
+            return +value
+    else:
+        # parse number or parentheses
+        return parse_number_or_parenthesis()
+
+But this would lead to infinite recursion if the parse_factor() is called again. For example, if the current token is '-', then parse_factor() would call parse_factor() again. But in that case, the next token would be another '-', leading to another call.
+
+But that's not correct. So, the parse_factor() function should parse the number or a parenthesized expression, but also handle the unary operators.
+
+Wait, but the unary operator is part of the factor. For example, in the expression "-3", the factor is "-3", which is a unary minus applied to 3.
+
+But how to parse that. So, the parse_factor() function would check if the next token is '+' or '-', and if so, parse the following expression as a unary operator.
+
+But that would require that the parse_factor() function can parse expressions, which it's not supposed to do. Because the parse_factor() function is supposed to parse numbers or parenthesized expressions.
+
+Alternatively, the parse_factor() function can call parse_expression(), but that would lead to infinite recursion.
+
+Hmm, perhaps the solution is to have the parse_expression() function handle unary operators. But how?
+
+Another approach: the parse_expression() function can have a helper function to parse a primary expression, which can be a number or a parenthesized expression. Then, before parsing the primary expression, check if there is a unary operator.
+
+For example:
+
+def parse_expression():
+    left = parse_term()
+    while the next token is '+' or '-':
+        operator = get the operator
+        right = parse_term()
+        left = evaluate the operator with left and right
+    return left
+
+def parse_term():
+    left = parse_power()
+    while the next token is * / %:
+        operator = get the operator
+        right = parse_power()
+        left = evaluate operator
+    return left
+
+def parse_power():
+    left = parse_primary()
+    while the next token is **:
+        operator = get the operator
+        right = parse_power()
+        left = left ** right
+    return left
+
+def parse_primary():
+    if the next token is '(':
+        consume '('
+        value = parse_expression()
+        if the next token is ')':
+            consume ')'
+            return value
+        else:
+            raise error
+    else:
+        # parse number, but also handle unary operators
+        # but how?
+        # perhaps the parse_number() function can check for unary operators.
+
+Wait, but the parse_primary() function is supposed to parse a number or a parenthesized expression. However, the unary operators need to be handled before that. So, perhaps the parse_primary() function can check for a unary operator before parsing the number.
+
+Wait, but how to handle that. For example, in "-3", the parse_primary() would need to recognize that '-' is a unary operator, and then parse 3 as a number.
+
+So, perhaps the parse_primary() function can be modified as follows:
+
+def parse_primary():
+    # Check for unary operators
+    if the next token is '+' or '-':
+        sign = current token
+        consume it
+        value = parse_primary()
+        if sign is '-':
+            return -value
+        else:
+            return +value
+    else:
+        # parse number or parenthesized expression
+        if the next token is '(':
+            consume '('
+            value = parse_expression()
+            if the next token is ')':
+                consume ')'
+                return value
+            else:
+                error
+        else:
+            return parse_number()
+
+But this would cause infinite recursion if the next token is a '+' or '-', because parse_primary() would call itself again. For example, in the case of "--3", the first '-' is parsed as a unary operator, then the next '-' is parsed as a unary operator again.
+
+But in that case, the parse_primary() function would call itself again, and parse the '-' as a unary operator, leading to -(-3) = 3. Which is correct.
+
+So, this approach would handle unary operators correctly. Because each time the parse_primary() function is called, it checks if the next token is a '+' or '-', and if so, applies the unary operator.
+
+But how to implement this in code. The problem is that the parser needs to track the current token and the position in the tokens list.
+
+So, the parser needs to have a current token index. So, the code would have a list of tokens, and a variable like 'pos' that tracks the current position.
+
+So, the overall plan is:
+
+- Tokenize the input into a list of tokens.
+- Then, parse the tokens using a recursive descent parser with functions that track the current position.
+
+So, the evaluate function will:
+
+- Tokenize the input.
+- Check for any invalid tokens (like unknown characters).
+- Then, parse the tokens, handling the operators and parentheses.
+
+Now, the code structure would involve a parser class or functions that track the current position in the tokens. Since Python doesn't have a built-in parser, we can use a list of tokens and an index variable that is passed around.
+
+For example, the evaluate function could have a helper function that parses the tokens, with the current position as a parameter.
+
+But in Python, it's easier to have a class with state, but since the problem requires a module with a function, we can use a helper function with a mutable index.
+
+Alternatively, we can use a list to hold the current position, as integers are immutable.
+
+So, here's a possible approach:
+
+def evaluate(expr: str) -> float:
+    tokens = tokenize(expr)
+    pos = [0]  # current position in tokens
+    def parse_expression():
+        # parse term, then check for + or -
+        left = parse_term()
+        while pos[0] < len(tokens) and tokens[pos[0]] in ('+', '-'):
+            op = tokens[pos[0]]
+            pos[0] += 1
+            right = parse_term()
+            if op == '+':
+                left += right
+            elif op == '-':
+                left -= right
+        return left
+
+    def parse_term():
+        left = parse_power()
+        while pos[0] < len(tokens) and tokens[pos[0]] in ('*', '/', '%'):
+            op = tokens[pos[0]]
+            pos[0] += 1
+            right = parse_power()
+            if op == '*':
+                left *= right
+            elif op == '/':
+                left /= right
+            elif op == '%':
+                left %= right
+        return left
+
+    def parse_power():
+        left = parse_primary()
+        while pos[0] < len(tokens) and tokens[pos[0]] == '**':
+            pos[0] += 1
+            right = parse_power()
+            left **= right
+        return left
+
+    def parse_primary():
+        if pos[0] >= len(tokens):
+            raise ValueError("Unexpected end of input")
+        token = tokens[pos[0]]
+        if token == '(':
+            pos[0] += 1
+            val = parse_expression()
+            if pos[0] < len(tokens) and tokens[pos[0]] == ')':
+                pos[0] += 1
+                return val
+            else:
+                raise ValueError("Expected ')'")
+        elif token == '+' or token == '-':
+            # handle unary operator
+            sign = token
+            pos[0] += 1
+            val = parse_primary()
+            if sign == '-':
+                return -val
+            else:
+                return +val
+        else:
+            # parse number
+            try:
+                num = float(token)
+                pos[0] += 1
+                return num
+            except ValueError:
+                raise ValueError(f"Invalid number: {token}")
+
+    try:
+        result = parse_expression()
+        if pos[0] < len(tokens):
+            # there are tokens left, which means invalid input
+            raise ValueError("Unexpected tokens after expression")
+        return result
+    except Exception as e:
+        raise ValueError(str(e)) from e
+
+Wait, but this code has several issues. For example, the parse_primary() function first checks if the current token is a '(', then parses the expression. If it's a '+' or '-', then it's a unary operator. Otherwise, it parses the number.
+
+But what about numbers like "-123"? The parse_primary() function would see the '-' as a unary operator, then parse the number 123, and return -123. Which is correct.
+
+But what about the case where the '-' is a binary operator? For example, "3 - 2". The parse_expression() function would parse 3 as a term, then see the '-', and parse the next term (2), and subtract.
+
+Yes. So, the code seems to handle that.
+
+But there's a problem: the parse_primary() function is called by parse_power(), which is called by parse_term(), etc. But the parse_primary() function handles the unary operators.
+
+But what about the case where a '-' is a binary operator? For example, in the expression "3 - 2", the parse_expression() would call parse_term(), which calls parse_power(), which calls parse_primary(). The parse_primary() would parse 3 as a number. Then, the parse_term() would look for * / %, but there are none. Then, the parse_expression() would check for '+' or '-', and see the '-', so it would parse the next term (2). So, the code would correctly subtract.
+
+Another example: "3 + -2". The parse_expression() would parse the 3 as a term. Then, the '+' is processed, and the next term is parsed. The parse_term() calls parse_power(), which calls parse_primary(). The parse_primary() sees the '-', which is a unary operator, and returns -2. So the code would add 3 + (-2) = 1.
+
+But what about cases where the '-' is a binary operator. For example, "3 - 2".
+
+Yes, that would work.
+
+Now, the tokenizer code. But I need to write the tokenize function.
+
+But let's think about the tokenize function. For example:
+
+Input: "3 + -2 * (4 - 5)" → tokens would be ['3', '+', '-', '2', '*', '(', '4', '-', '5', ')'].
+
+But during parsing, the parse_primary() function would handle the '-', as a unary operator, when it is encountered in the parse_primary() function.
+
+But wait, in the case of the '-', which is part of the term. Let me think.
+
+In the case of the expression "3 + -2 * (4 - 5)", the tokens are as above.
+
+The parse_expression() function would parse 3 as a term. Then, the '+' is processed, and the next term is parsed. The parse_term() would parse the '-', which is part of the parse_power() function. Let's see:
+
+parse_term() calls parse_power(), which calls parse_primary(). The parse_primary() sees the '-', which is a unary operator, and then parses the '2' as a number. So, the term is -2. Then, the parse_term() would multiply by the next term. But the next token is '*', so the parse_term() would multiply by the next parse_power().
+
+Wait, but the code for parse_term() is:
+
+def parse_term():
+    left = parse_power()
+    while current token is * / %:
+        op = token
+        consume it
+        right = parse_power()
+        evaluate op
+
+So, in the case of the '-' being a unary operator, it's handled in the parse_primary() function, which is called by parse_power(), which is called by parse_term().
+
+So, in the example, the parse_term() would parse the '-' as a unary operator, and then the '2' as a number, so the parse_power() returns -2. Then, the '*' is processed, and the next parse_power() would parse the (4 - 5) part.
+
+So, the code seems to handle that.
+
+Now, the tokenizer function must correctly parse numbers and operators.
+
+But what about numbers like ".5" or "5."?
+
+The code for the tokenizer would read those as numbers.
+
+But the code for the tokenizer is not written yet. Let me think about implementing the tokenizer.
+
+Implementing the tokenize function:
+
+def tokenize(expr: str) -> list:
+    tokens = []
+    i = 0
+    while i < len(expr):
+        c = expr[i]
+        if c.isspace():
+            i += 1
+            continue
+        # Check for numbers
+        if c.isdigit() or c == '.':
+            start = i
+            # Check for possible sign
+            # Wait, but the sign is part of the number. So, for example, "-123" is a number.
+            # So, the code should read the entire number, including possible leading '+' or '-'.
+            # Wait, but in the tokenizer, how to know if the '-' is part of the number or a unary operator. But during tokenization, it's not possible to know. So, the tokenizer will read the '-' as part of the number if it is followed by digits or '.'.
+
+            # So, the code for the number:
+
+            # Check if the current character is a '+' or '-', but only if it's part of a number.
+
+            # Wait, the code here is for when c is a digit or '.'.
+
+            # So, the code can read the entire number, including possible leading '+' or '-'.
+
+            # Wait, but the code is in a loop where c is either a digit or '.'.
+
+            # So, for example, if the current character is '-', then the code would not enter this block. So, how to handle numbers with leading '+' or '-'?
+
+            # Oh, this is a problem. The code as written would not handle numbers like "-123", because the first character is '-', which is not a digit or '.'.
+
+            # So, the tokenizer code needs to check for possible signs before the number.
+
+            # So, the code should first check for a possible sign.
+
+            # So, the code should be modified to handle numbers that start with '+' or '-'.
+
+            # So, perhaps the code should first check if the current character is a '+' or '-', and then check if the next character is a digit or '.'.
+
+            # But that complicates the code. So, the correct way is to split the tokens into numbers, operators, etc.
+
+            # So, perhaps the code should be modified to first check for possible signs.
+
+            # So, here's a revised approach for the tokenizer:
+
+            # When the current character is a '+' or '-', check if it's part of a number or an operator.
+
+            # But this requires looking ahead. However, for the tokenizer, this can be handled as follows:
+
+            # For example, if the current character is '+' or '-', then check if the next character is a digit or '.'.
+
+            # But this is getting complicated. Maybe a better way is to split the input into tokens, handling numbers with optional signs.
+
+            # So, the code for the tokenizer should:
+
+            # - When a '+' or '-' is encountered, check if it is part of a number.
+
+            # But how to do that. For example, in the input "-123", the '-' is part of the number.
+
+            # So, the code should handle this. So, the code should first check for '+' or '-' as part of a number.
+
+            # So, here's a revised approach:
+
+            # When processing the input, if the current character is a '+' or '-', then check if the next character is a digit or '.'.
+
+            # But how to handle this in the code.
+
+            # Let's think: the current code is in a loop where c is either a digit or '.'.
+
+            # So, perhaps the code should first check for '+' or '-', and then handle the number.
+
+            # This suggests that the current code is missing this part.
+
+            # So, the code for the tokenizer should first check for possible signs.
+
+            # So, the code for the tokenizer should be:
+
+            # Check for signs.
+
+            # Let's adjust the code.
+
+            # So, in the code, the current character is c. If c is '+' or '-', then check if it's part of a number.
+
+            # But in the current code, the code is in a loop where c is either a digit or '.'.
+
+            # So, this suggests that the code is not handling the '+' and '-' as part of numbers.
+
+            # This is a problem. So, the code must be adjusted to handle numbers with signs.
+
+            # So, the code for the tokenizer needs to be revised.
+
+            # So, the correct approach is:
+
+            # When the current character is a '+' or '-', check if it is part of a number. For example, if the next character is a digit or '.', then it's part of a number. Otherwise, it's an operator.
+
+            # But this requires looking ahead, which can be done with a state.
+
+            # So, perhaps the code should be:
+
+            # For example, if the current character is '+' or '-', and the next character is a digit or '.', then it's part of a number. Else, it's a unary operator.
+
+            # But how to implement this.
+
+            # So, the code would need to first check for possible signs.
+
+            # Let me try to rewrite the tokenizer:
+
+            # So, in the loop:
+
+            # if the current character is '+' or '-', then check if the next character is a digit or '.', and if so, read the number as a token with sign.
+
+            # But this requires looking ahead, which complicates the code.
+
+            # Alternatively, the code can treat '+' and '-' as possible parts of numbers, but during the tokenization, the code can read them as part of numbers.
+
+            # So, here's a possible approach:
+
+            # When a '+' or '-' is encountered, it's part of the number if it is followed by a digit or '.'.
+
+            # So, in the code:
+
+            # For the current character c:
+
+            # if c is '+' or '-', then check if the next character is a digit or '.'.
+
+            # But this is not sufficient. For example, in the case of "3 + -2", the '-' is a unary operator, but in "3--2", it's a binary operator.
+
+            # But during tokenization, the code can't know that. So, the tokenizer will split the input into tokens, and the parser will handle the operators.
+
+            # So, the tokenizer should treat '+' and '-' as part of numbers if they are followed by digits or '.'.
+
+            # So, the code for the tokenizer can be:
+
+            # For the current character c:
+
+            # if c is '+' or '-', then check if the next character is a digit or '.'.
+
+            # if yes, then read the number, including the sign.
+
+            # else, treat as operator.
+
+            # But how to implement that.
+
+            # This seems complicated. Perhaps a better way is to use a regular expression to split the input into tokens.
+
+            # However, the problem says that the code should not use the ast module, but using regular expressions is allowed.
+
+            # So, perhaps using regular expressions to tokenize the input.
+
+            # For example, the regular expression can match numbers (including signs, decimals), operators, and parentheses.
+
+            # So, the regex pattern can be something like:
+
+            # [+-]?(\d+\.\d*|\.\d+|\d+)
+
+            # But need to handle the cases like ".5", "5.", etc.
+
+            # But this is getting complicated.
+
+            # Alternatively, the regex can split the input into tokens by matching numbers, operators, and parentheses.
+
+            # For example, using the re module to split the input into tokens.
+
+            # For example, the code can use:
+
+            import re
+
+            def tokenize(expr):
+                # Regular expression to match numbers, operators, parentheses, and spaces.
+                # This regex will split the input into tokens, handling numbers with optional signs, decimals, etc.
+                token_pattern = r"""
+                    (?:\d+\.\d*|\.\d+|\d+|\+|\-|\*|\*|\)|\(|\%|\+|\-)
+                """
+                # Wait, this is not correct. Let me think.
+
+                # The regex should match numbers and operators.
+
+                # The correct regex pattern can be:
+
+                # \d+\.\d*|\.\d+|\d+|[-+*/%()**]
+
+                # But need to handle the ** operator.
+
+                # So, perhaps the regex pattern can be:
+
+                # r'(\d+\.\d*|\.\d+|\d+|\+|\-|\*|\*|\%|\(|\))'
+
+                # But this is not correct. Because the ** is two '*'s, which need to be treated as a single token.
+
+                # So, the regex should match ** as a single token. So, the regex pattern can be:
+
+                # r'(\d+\.\d*|\.\d+|\d+|\+|\-|\*|\*|\%|\(|\))'
+
+                # But how to match ** as a single token. So, the regex should first check for **, then *.
+
+                # So, the regex pattern can be:
+
+                # The order of the regex patterns is important. For example, the pattern for ** should come before *.
+
+                # So, the regex can be written as:
+
+                # import re
+
+                # token_re = re.compile(r"""
+                #     (?:\d+\.\d*|\.\d+|\d+|    # numbers
+                #     | [-+*/%]                # operators
+                #     | $$                     # parentheses
+                #     | $$                     # parentheses
+                #     | **                     # exponent
+                #     ) 
+                # """, re.VERBOSE)
+
+                # Wait, but this is not correct. Let me think.
+
+                # So, the regex should match numbers, operators, and parentheses. The operators include +, -, *, /, %, **, and parentheses.
+
+                # But the ** is a single token. So, the regex must first match **, then other operators.
+
+                # So, the regex pattern can be:
+
+                # r'(\d+\.\d*|\.\d+|\d+|\+|\-|\*|\*|\%|\(|\))'
+
+                # But this will split ** into two * tokens. Which is not correct.
+
+                # So, the correct way is to have the regex match ** as a single token. So, the pattern must first check for **, then other operators.
+
+                # So, the regex can be:
+
+                # r'(\d+\.\d*|\.\d+|\d+|\+|\-|\*{2}|\*|\%|\(|\))'
+
+                # But this is getting complicated. Perhaps using the regex module to split the input into tokens with the following pattern:
+
+                # The regex pattern can be:
+
+                # r"""
+                #     (?:\d+\.\d*|\.\d+|\d+|    # numbers
+                #     | $$                      # parentheses
+                #     | $$                      # parentheses
+                #     | [+\-*/%]                # operators
+                #     | \*{2}                   # exponent
+                #     )
+                # """ 
+
+                # But I'm not sure. Perhaps a better approach is to use the shlex module, but it's not clear.
+
+                # Alternatively, use the following approach for the tokenizer:
+
+                # Iterate through the string, and for each character, check if it's part of a number, operator, or parenthesis.
+
+                # For example:
+
+                # def tokenize(expr):
+                #     tokens = []
+                #     i = 0
+                #     while i < len(expr):
+                #         c = expr[i]
+                #         if c.isspace():
+                #             i += 1
+                #             continue
+                #         if c in '+-*/%()':
+                #             if c == '*' and i + 1 < len(expr) and expr[i+1] == '*':
+                #                 tokens.append('**')
+                #                 i += 2
+                #             elif c == '*' or c == '+' or c == '-' or c == '/' or c == '%' or c == '(' or c == ')':
+                #                 tokens.append(c)
+                #                 i += 1
+                #         elif c.isdigit() or c == '.':
+                #             # parse number
+                #             start = i
+                #             if c == '.':
+                #                 # check for numbers like .5 or 5.
+                #                 # but need to read all digits and possible '.'.
+                #                 # but this is getting complicated.
+                #                 # So, read until non-digit and non-.
+                #                 while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                #                     i += 1
+                #                 tokens.append(expr[start:i])
+                #             else:
+                #                 # c is a digit
+                #                 while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                #                     i += 1
+                #                 tokens.append(expr[start:i])
+                #         else:
+                #             raise ValueError(f"Unknown character: {c}")
+                #     return tokens
+
+                # But this code doesn't handle numbers with signs. For example, "-123" would not be handled, because the code checks if the current character is a digit or '.', and the '-' is not.
+
+                # So, the code needs to handle signs as part of numbers. So, the code should first check for possible signs.
+
+                # So, the code can be modified as follows:
+
+                # When the current character is '+' or '-', check if it is part of a number. For example, if the next character is a digit or '.', then it's part of the number.
+
+                # So, in the code:
+
+                # For the current character c:
+
+                # if c is '+' or '-', and the next character is a digit or '.', then read the number including the sign.
+
+                # But how to implement that.
+
+                # So, the code can be:
+
+                # if c in '+-':
+                #     if i + 1 < len(expr) and (expr[i+1].isdigit() or expr[i+1] == '.'):
+                #         # start reading the number with sign
+                #         start = i
+                #         i += 1
+                #         while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                #             i += 1
+                #         tokens.append(expr[start:i])
+                #     else:
+                #         # it's a unary operator
+                #         tokens.append(c)
+                #         i += 1
+                # elif c.isdigit() or c == '.':
+                #     # read the number
+                #     ...
+
+                # But this is getting complicated. For example, the code must handle cases where the '+' or '-' is part of a number, or a unary operator.
+
+                # This suggests that the tokenizer needs to be more complex.
+
+                # Given the time constraints, perhaps it's better to use the re module to split the tokens. For example, the regex pattern can be:
+
+                # import re
+
+                # def tokenize(expr):
+                #     # This regex matches numbers (including those with signs, decimals), operators, and parentheses.
+                #     # The order of the patterns is important.
+                #     token_re = re.compile(r"""
+                #         (?:\d+\.?\d*|\.\d+|\d+|    # numbers
+                #         | $$                      # (
+                #         | $$                      # )
+                #         | \*{2}                   # **
+                #         | [+\-*/%]                # +, -, *, /, %
+                #         ), 
+                #         re.VERBOSE)
+                #     tokens = token_re.findall(expr)
+                #     return tokens
+
+                # But this is not correct, because the regex needs to match the tokens properly. Also, the regex needs to handle spaces.
+
+                # Alternatively, use re.findall with a pattern that matches numbers, operators, and parentheses, and ignore spaces.
+
+                # So, the regex pattern can be:
+
+                # r'([+-]?\d+\.?\d*|\.\d+|\d+|\+|\-|\*|\*|\%|\(|\))'
+
+                # But this is not correct. For example, the ** is not handled.
+
+                # Given the time, perhaps the best way is to use the following approach for the tokenizer:
+
+                # Split the input into tokens, handling numbers with optional signs, decimals, and operators.
+
+                # The code for the tokenizer can be:
+
+                # def tokenize(expr: str) -> list:
+                #     tokens = []
+                #     i = 0
+                #     while i < len(expr):
+                #         c = expr[i]
+                #         if c.isspace():
+                #             i += 1
+                #             continue
+                #         if c in '+-*/%()':
+                #             if c == '*' and i + 1 < len(expr) and expr[i+1] == '*':
+                #                 tokens.append('**')
+                #                 i += 2
+                #             else:
+                #                 tokens.append(c)
+                #                 i += 1
+                #         elif c.isdigit() or c == '.':
+                #             start = i
+                #             if c == '.':
+                #                 # handle cases like .5 or 5.
+                #                 # read until non-digit and non-.
+                #                 i += 1
+                #                 while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                #                     i += 1
+                #                 tokens.append(expr[start:i])
+                #             else:
+                #                 # read the number
+                #                 i += 1
+                #                 while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                #                     i += 1
+                #                 tokens.append(expr[start:i])
+                #         else:
+                #             raise ValueError(f"Unknown character: {c}")
+                #     return tokens
+
+                # But this code does not handle numbers with signs. So, for example, "-123" would not be parsed correctly, because the first character is '-', which is not a digit or '.'.
+
+                # So, to handle numbers with signs, we need to check for '+' or '-' at the beginning of a number.
+
+                # So, the code can be modified to:
+
+                # In the loop, after checking for spaces, check if the current character is '+' or '-', and then check if it is part of a number.
+
+                # So, here's the revised code:
+
+                # while i < len(expr):
+                #     c = expr[i]
+                #     if c.isspace():
+                #         i += 1
+                #         continue
+                #     if c in '+-':
+                #         # check if it is part of a number
+                #         if i + 1 < len(expr) and (expr[i+1].isdigit() or expr[i+1] == '.'):
+                #             # read the number with sign
+                #             start = i
+                #             i += 1
+                #             while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                #                 i += 1
+                #             tokens.append(expr[start:i])
+                #         else:
+                #             # it's a unary operator
+                #             tokens.append(c)
+                #             i += 1
+                #     elif c in '*/%()':
+                #         # handle operators
+                #         if c == '*' and i + 1 < len(expr) and expr[i+1] == '*':
+                #             tokens.append('**')
+                #             i += 2
+                #         else:
+                #             tokens.append(c)
+                #             i += 1
+                #     elif c.isdigit() or c == '.':
+                #         # handle numbers
+                #         start = i
+                #         if c == '.':
+                #             i += 1
+                #             while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                #                 i += 1
+                #             tokens.append(expr[start:i])
+                #         else:
+                #             i += 1
+                #             while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                #                 i += 1
+                #             tokens.append(expr[start:i])
+                #     else:
+                #         raise ValueError(f"Unknown character: {c}")
+
+                # This code handles numbers with signs. For example, "-123" would be parsed as a single token. Also, "+123" would be parsed as a number.
+
+                # But what about cases like "+-123"? That would be parsed as "+", "-", "123", which would be invalid during parsing. But the tokenizer doesn't validate that, it just splits into tokens.
+
+                # So, this code handles numbers with signs. Now, let's test this code with some examples:
+
+                # Example 1: "3 + -2 * (4 - 5)" → tokens would be ['3', '+', '-', '2', '*', '(', '4', '-', '5', ')'].
+
+                # In the code:
+
+                # When i=0, c='3' is digit, so read until non-digit or '.'.
+
+                # i=0, c='3' is digit, so start=0, i increments to 1. Next, expr[1] is ' ', so it's skipped.
+
+                # Then, when i=2, c is '+', which is an operator. So, added as '+', i=3.
+
+                # Then, i=3, c is '-', which is a '+' or '-'.
+
+                # Check if i+1 (4) is a digit or '.', which is '2' → yes.
+
+                # So, read from i=3 to i=4 (i increments to 4), and the token is '-2'.
+
+                # So, tokens are ['3', '+', '-2', ...]. Wait, no. Let's see:
+
+                # For i=3, c is '-', and i+1 is 4 (expr[4] is '2').
+
+                # So, code appends expr[3:4+1] (since i is incremented to 4, and the loop continues.
+
+                # So, the token is '-2'.
+
+                # So, the tokens for this example would be ['3', '+', '-2', '*', '(', '4', '-', '5', ')'].
+
+                # Which is correct.
+
+                # Another example: "-123" → token is '-123'.
+
+                # Another example: "+123" → token is '+123'.
+
+                # Another example: "3.5" → token is '3.5'.
+
+                # So, this code seems to handle numbers with signs.
+
+                # Now, the code for the tokenizer is written.
+
+                # But in the code above, when c is '+' or '-', it checks if the next character is a digit or '.', and if so, reads the number with the sign.
+
+                # So, the code for the tokenizer is as follows:
+
+                # Now, putting it all together.
+
+                # Now, back to the evaluate function.
+
+                # Now, the code for evaluate function will need to handle the tokens.
+
+                # But the code for the parser needs to handle the unary operators.
+
+                # Now, the code for the parser is as I wrote earlier, but with the tokenizer.
+
+                # Now, the code for the evaluate function:
+
+                # Now, let's think about possible errors.
+
+                # For example, empty input: raise ValueError.
+
+                # Unbalanced parentheses: during parsing, when the parser expects a ')', but it's not there.
+
+                # Dangling operators: like "3 +", which would have a dangling '+'.
+
+                # Two numbers in a row: like "3 4" → after parsing, the parser would have to detect that.
+
+                # So, during parsing, the parser will raise errors if it encounters an invalid situation.
+
+                # For example, in the parse_expression() function, after parsing a term, if the next token is an operator, it will parse it. But if after parsing a term, there is no operator, it returns.
+
+                # But during parsing, if the tokens are invalid, like "3 +", the parser will raise an error.
+
+                # Now, the code for the evaluate function.
+
+                # Now, putting all together.
+
+                # Now, the final code:
+
+                # The evaluate function will:
+
+                # - Tokenize the input.
+
+                # - Check for empty input.
+
+                # - Parse the tokens.
+
+                # Now, let's write the code.
+
+                # But the code must handle the tokens, and during parsing, raise ValueError for invalid inputs.
+
+                # Now, the code for the evaluate function.
+
+                # Let's start writing the code.
+
+                # First, the tokenizer.
+
+                # Now, the full code for the module:
+
+                # But I need to make sure that the tokenizer handles all cases.
+
+                # Now, here's the code:
+
+                import re
+
+                def evaluate(expr: str) -> float:
+                    if not expr.strip():
+                        raise ValueError("Empty input")
+                    tokens = tokenize(expr)
+                    pos = [0]
+                    def parse_expression():
+                        left = parse_term()
+                        while pos[0] < len(tokens) and tokens[pos[0]] in ('+', '-'):
+                            op = tokens[pos[0]]
+                            pos[0] += 1
+                            right = parse_term()
+                            if op == '+':
+                                left += right
+                            elif op == '-':
+                                left -= right
+                        return left
+
+                    def parse_term():
+                        left = parse_power()
+                        while pos[0] < len(tokens) and tokens[pos[0]] in ('*', '/', '%'):
+                            op = tokens[pos[0]]
+                            pos[0] += 1
+                            right = parse_power()
+                            if op == '*':
+                                left *= right
+                            elif op == '/':
+                                if right == 0:
+                                    raise ZeroDivisionError("division by zero")
+                                left /= right
+                            elif op == '%':
+                                if right == 0:
+                                    raise ZeroDivisionError("modulo by zero")
+                                left %= right
+                        return left
+
+                    def parse_power():
+                        left = parse_primary()
+                        while pos[0] < len(tokens) and tokens[pos[0]] == '**':
+                            pos[0] += 1
+                            right = parse_power()
+                            left **= right
+                        return left
+
+                    def parse_primary():
+                        if pos[0] >= len(tokens):
+                            raise ValueError("Unexpected end of input")
+                        token = tokens[pos[0]]
+                        if token == '(':
+                            pos[0] += 1
+                            val = parse_expression()
+                            if pos[0] >= len(tokens) or tokens[pos[0]] != ')':
+                                raise ValueError("Unbalanced parentheses")
+                            pos[0] += 1
+                            return val
+                        elif token in ('+', '-'):
+                            sign = token
+                            pos[0] += 1
+                            val = parse_primary()
+                            return -val if sign == '-' else val
+                        else:
+                            try:
+                                num = float(token)
+                                pos[0] += 1
+                                return num
+                            except ValueError:
+                                raise ValueError(f"Invalid token: {token}")
+
+                    try:
+                        result = parse_expression()
+                        if pos[0] < len(tokens):
+                            raise ValueError("Extra tokens after expression")
+                        return result
+                    except ZeroDivisionError as e:
+                        raise e
+                    except Exception as e:
+                        raise ValueError(str(e)) from e
+
+                def tokenize(expr: str) -> list:
+                    tokens = []
+                    i = 0
+                    while i < len(expr):
+                        c = expr[i]
+                        if c.isspace():
+                            i += 1
+                            continue
+                        if c in '+-':
+                            if i + 1 < len(expr) and (expr[i+1].isdigit() or expr[i+1] == '.'):
+                                start = i
+                                i += 1
+                                while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                                    i += 1
+                                tokens.append(expr[start:i])
+                            else:
+                                tokens.append(c)
+                                i += 1
+                        elif c in '*/%()':
+                            if c == '*' and i + 1 < len(expr) and expr[i+1] == '*':
+                                tokens.append('**')
+                                i += 2
+                            else:
+                                tokens.append(c)
+                                i += 1
+                        elif c.isdigit() or c == '.':
+                            start = i
+                            if c == '.':
+                                i += 1
+                                while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                                    i += 1
+                                tokens.append(expr[start:i])
+                            else:
+                                i += 1
+                                while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                                    i += 1
+                                tokens.append(expr[start:i])
+                        else:
+                            raise ValueError(f"Invalid character: {c}")
+                    return tokens
+
+                # But wait, the tokenizer code above has a problem. For example, when c is '+', and the next character is not a digit or '.', it adds the '+' as a token. But in the case of a unary operator, like in "3 + -2", the '-' is added as a token, and during parsing, it is handled as a unary operator.
+
+                # Now, testing some cases.
+
+                # Test case 1: "3 + 4" → tokens ['3', '+', '4'] → evaluate to 7.
+
+                # Test case 2: "3**2" → tokens ['3', '**', '2'] → 9.
+
+                # Test case 3: "2**-1" → tokens ['2', '**', '-', '1'] → 0.5.
+
+                # But during parsing, the '-' is a unary operator.
+
+                # In the parse_primary function, when the token is '-', it is handled as a unary operator.
+
+                # But wait, in the tokenize function, for the input "2**-1", the tokens would be ['2', '**', '-', '1'].
+
+                # During parsing, parse_power() would parse '2' as the left, then see the '**' and parse the right as parse_power().
+
+                # The right is '-', which is a token. parse_primary() is called, which sees the '-', and then calls parse_primary() again, which sees '1' as a number.
+
+                # So, the '-' is treated as a unary operator, and returns -1. So, 2 ** (-1) = 0.5.
+
+                # Which is correct.
+
+                # Now, what about "3--2" → tokens ['3', '-', '-', '2'].
+
+                # During parsing, the first '-' is a binary operator, and the second is a unary operator.
+
+                # parse_expression() → parse_term() → parse_power() → parse_primary() → '3' is parsed.
+
+                # Then, the '-' is a binary operator. So, the code would parse it as a binary operator.
+
+                # But how does the parser handle this.
+
+                # Let's see:
+
+                # In the parse_expression(), after parsing the '3', it sees the '-', which is a binary operator.
+
+                # Then, it calls parse_term(), which parses the '-', which is part of parse_power(), which calls parse_primary(), which sees the '-', and parses it as a unary operator, returning -2.
+
+                # So, the code would evaluate 3 - (-2) = 5.
+
+                # Which is correct.
+
+                # Now, what about "3 + -2"?
+
+                # Tokens: ['3', '+', '-', '2'].
+
+                # parse_expression() → parse_term() → parse_power() → parse_primary() → '3' is parsed.
+
+                # Then, the '+' is processed, and the next term is parsed.
+
+                # parse_term() calls parse_power(), which calls parse_primary(), which sees the '-', and parses it as a unary operator, returning -2.
+
+                # So, 3 + (-2) = 1.
+
+                # Which is correct.
+
+                # Now, what about "3 + 4 * 2" → 11.
+
+                # Tokens: ['3', '+', '4', '*', '2'].
+
+                # parse_expression() → parse_term() → parse_power() → '3' is parsed.
+
+                # Then, '+' is processed, and the next term is 4 * 2.
+
+                # So, the code returns 3 + (4 * 2) = 11.
+
+                # Which is correct.
+
+                # Now, what about "3 + 4 * (2 - 1)" → 3 + 4 * 1 = 7.
+
+                # Tokens: ['3', '+', '4', '*', '(', '2', '-', '1', ')'].
+
+                # The parser would handle the parentheses correctly.
+
+                # Now, what about "3 + 4 * (2 - 1" → unbalanced parentheses.
+
+                # During parsing, when the parser reaches the end of the tokens, it would raise an error.
+
+                # Now, what about "3 + 4 * 2 - 1" → 3 + 8 - 1 = 10.
+
+                # Now, what about "3 + 4 * 2**3" → 3 + 4 * 8 = 35.
+
+                # Now, what about "3 + 4 * 2**3**2" → 3 + 4 * 2^9 = 3 + 4*512 = 2051.
+
+                # The parser would correctly handle the right associativity of **.
+
+                # Now, what about "3 + 4 * (2 + 3)" → 3 + 4 * 5 = 23.
+
+                # Now, what about "3 + 4 * 2 + 1" → 3 + 8 + 1 = 12.
+
+                # Now, the code should handle all these cases.
+
+                # Now, what about "3 + 4 * 2 + 1" → parsed as (3 + (4 * 2)) + 1 → 11 + 1 = 12.
+
+                # Now, what about "3 + 4 * 2 + 1" → yes.
+
+                # Now, the code for the tokenizer and parser seems to handle these cases.
+
+                # Now, the code needs to handle the cases where the input is empty, has unbalanced parentheses, etc.
+
+                # Now, the code for the evaluate function has to handle these.
+
+                # Now, the code for the evaluate function raises ValueError for empty input, and other errors.
+
+                # For example, in the tokenize function, if the input is empty, the code raises ValueError.
+
+                # Now, the code for the evaluate function starts with:
+
+                if not expr.strip():
+                    raise ValueError("Empty input")
+
+                # But what about input like "   " (spaces only)? It would raise "Empty input".
+
+                # Now, what about the case where the input is "3 +", which has a dangling operator.
+
+                # During parsing, the parse_expression() function would parse the '3' as a term, then see the '+', and parse the next term, but there is no term, so it would raise an error.
+
+                # But how does the parser handle that? Let's see.
+
+                # For example, in the parse_expression() function, after parsing the term '3', it checks if the next token is '+' or '-', and if so, processes it.
+
+                # So, in the case of "3 +", the tokens are ['3', '+'].
+
+                # The parse_expression() function would call parse_term(), which would parse '3' as a term, then check if there are any '+' or '-', which is '+', so it would call parse_term() again.
+
+                # parse_term() calls parse_power(), which calls parse_primary(), which would see the '+' token, but in the parse_primary function, it would check if the token is a '(', '+', '-', or a number.
+
+                # Wait, no. The parse_primary function is called from parse_power(), which is called from parse_term(), which is called from parse_expression().
+
+                # In this case, the tokens are ['3', '+'].
+
+                # parse_expression() calls parse_term() → parse_term() calls parse_power() → parse_power() calls parse_primary().
+
+                # The parse_primary() function sees the token '3', parses it as a number, and returns 3.
+
+                # Then, parse_power() returns 3.
+
+                # parse_term() sees that the next token is '+', which is not in the set ['*', '/', '%'], so it returns 3.
+
+                # Then, parse_expression() sees the '+' token, and calls parse_term(), which would try to parse the next term. But the next token is '+', which is not a number or a parenthesis. So, during the parse_term() function, the parse_power() is called, which calls parse_primary(), which sees the '+' token.
+
+                # In the parse_primary function, the token is '+', which is in the 'if token in ('+', '-') block.
+
+                # So, the code would parse the '+' as a unary operator. But then, it would call parse_primary() again, which would see the next token (which is the end of the input), and raise an error.
+
+                # So, the code would raise an error.
+
+                # So, the code would raise an error for "3 +", which is correct.
+
+                # Now, what about the case where there are two numbers in a row, like "3 4"?
+
+                # The tokens would be ['3', '4'].
+
+                # During parsing, parse_expression() calls parse_term(), which calls parse_power(), which calls parse_primary(), which parses '3' as a number. Then, the next token is '4', which is parsed as a number, but in the parse_primary function, it's not a '(' or '+' or '-', so it would try to parse it as a number. But the code is in parse_primary(), which is called from parse_power(), which is called from parse_term(), which is called from parse_expression().
+
+                # Wait, the code for parse_primary() is called when the parser is expecting a primary expression. So, in the case of "3 4", the tokens are ['3', '4'].
+
+                # parse_expression() calls parse_term(), which calls parse_power(), which calls parse_primary().
+
+                # parse_primary() sees '3' as a number, and returns 3. Then, the parse_power() returns 3.
+
+                # parse_term() then checks if the next token is * / %, which is not. So, returns 3.
+
+                # Then, parse_expression() returns 3, and the next token is '4', which is not processed, so the code raises an error.
+
+                # So, during the evaluation, after parsing the '3', the code would check if there are any tokens left. If yes, it raises an error.
+
+                # So, in this case, after parsing '3', the pos[0] is 1, and the code would raise an error because there is a token '4' left.
+
+                # So, the code would raise a ValueError for "3 4".
+
+                # Which is correct.
+
+                # Now, what about the case where the input is "3 + 4 * 5 - 6 / 2" → 3 + 20 - 3 = 20.
+
+                # The code should handle this.
+
+                # Now, the code seems to handle all the cases.
+
+                # Now, the code needs to handle division by zero.
+
+                # In the parse_term() function, when dividing, it checks if the right is zero and raises ZeroDivisionError.
+
+                # So, the code in the parse_term() function:
+
+                if op == '/':
+                    if right == 0:
+                        raise ZeroDivisionError("division by zero")
+                    left /= right
+                elif op == '%':
+                    if right == 0:
+                        raise ZeroDivisionError("modulo by zero")
+                    left %= right
+
+                # But the problem says that division or modulo by zero raises ZeroDivisionError.
+
+                # Now, the code for the evaluate function should catch these and raise the appropriate error.
+
+                # Now, the code for the evaluate function is:
+
+                # Now, the final code.
+
+                # But I need to write the code in the module, and ensure that all the cases are handled.
+
+                # Now, the final code would be:
+
+                # But I need to make sure that all the code is written correctly.
+
+                # Now, the code for the evaluate function and tokenizer.
+
+                # But in the code above, the tokenizer function is written as part of the module.
+
+                # Now, the code for the module:
+
+                # But the user asked for the entire module in a single python block.
+
+                # So, the final code:
+
+                # Now, putting it all together.
+
+                # Now, the code:
+
+                # The code will have the evaluate function and the tokenize function.
+
+                # Now, the code:
+
+                # Also, the code must not use eval, exec, compile, or the ast module.
+
+                # Now, the final code:
+
+                # Here's the full code:
+
+                import re
+
+                def evaluate(expr: str) -> float:
+                    if not expr.strip():
+                        raise ValueError("Empty input")
+                    tokens = tokenize(expr)
+                    pos = [0]
+                    
+                    def parse_expression():
+                        left = parse_term()
+                        while pos[0] < len(tokens) and tokens[pos[0]] in ('+', '-'):
+                            op = tokens[pos[0]]
+                            pos[0] += 1
+                            right = parse_term()
+                            if op == '+':
+                                left += right
+                            elif op == '-':
+                                left -= right
+                        return left
+                    
+                    def parse_term():
+                        left = parse_power()
+                        while pos[0] < len(tokens) and tokens[pos[0]] in ('*', '/', '%'):
+                            op = tokens[pos[0]]
+                            pos[0] += 1
+                            right = parse_power()
+                            if op == '*':
+                                left *= right
+                            elif op == '/':
+                                if right == 0:
+                                    raise ZeroDivisionError("division by zero")
+                                left /= right
+                            elif op == '%':
+                                if right == 0:
+                                    raise ZeroDivisionError("modulo by zero")
+                                left %= right
+                        return left
+                    
+                    def parse_power():
+                        left = parse_primary()
+                        while pos[0] < len(tokens) and tokens[pos[0]] == '**':
+                            pos[0] += 1
+                            right = parse_power()
+                            left **= right
+                        return left
+                    
+                    def parse_primary():
+                        if pos[0] >= len(tokens):
+                            raise ValueError("Unexpected end of input")
+                        token = tokens[pos[0]]
+                        if token == '(':
+                            pos[0] += 1
+                            val = parse_expression()
+                            if pos[0] >= len(tokens) or tokens[pos[0]] != ')':
+                                raise ValueError("Unbalanced parentheses")
+                            pos[0] += 1
+                            return val
+                        elif token in ('+', '-'):
+                            sign = token
+                            pos[0] += 1
+                            val = parse_primary()
+                            return -val if sign == '-' else val
+                        else:
+                            try:
+                                num = float(token)
+                                pos[0] += 1
+                                return num
+                            except ValueError:
+                                raise ValueError(f"Invalid token: {token}")
+                    
+                    try:
+                        result = parse_expression()
+                        if pos[0] < len(tokens):
+                            raise ValueError("Extra tokens after expression")
+                        return result
+                    except ZeroDivisionError as e:
+                        raise e
+                    except Exception as e:
+                        raise ValueError(str(e)) from e
+
+                def tokenize(expr: str) -> list:
+                    tokens = []
+                    i = 0
+                    while i < len(expr):
+                        c = expr[i]
+                        if c.isspace():
+                            i += 1
+                            continue
+                        if c in '+-':
+                            if i + 1 < len(expr) and (expr[i+1].isdigit() or expr[i+1] == '.'):
+                                start = i
+                                i += 1
+                                while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                                    i += 1
+                                tokens.append(expr[start:i])
+                            else:
+                                tokens.append(c)
+                                i += 1
+                        elif c in '*/%()':
+                            if c == '*' and i + 1 < len(expr) and expr[i+1] == '*':
+                                tokens.append('**')
+                                i += 2
+                            else:
+                                tokens.append(c)
+                                i += 1
+                        elif c.isdigit() or c == '.':
+                            start = i
+                            if c == '.':
+                                i += 1
+                                while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                                    i += 1
+                                tokens.append(expr[start:i])
+                            else:
+                                i += 1
+                                while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                                    i += 1
+                                tokens.append(expr[start:i])
+                        else:
+                            raise ValueError(f"Invalid character: {c}")
+                    return tokens
+
+                # Now, this code should handle all the cases.
+
+                # But wait, in the tokenize function, when the current character is '.', it starts reading the number, but what if the '.' is not part of a number? For example, "3 + .5" is valid, but if the input is "3 + .", it would be parsed as a number '.' which is invalid.
+
+                # But the code for the tokenizer will parse it as a number, but during the parsing, the parse_primary function will try to parse it as a float, and raise an error.
+
+                # For example, the token '.' would be parsed as a float, which would raise ValueError.
+
+                # So, during the evaluate function, when the code tries to parse the '.' as a number, it would raise an error.
+
+                # So, the code would raise a ValueError.
+
+                # So, the code would handle that.
+
+                # Now, testing the case where the input is "3 + .5" → tokens ['3', '+', '.5'] → parsed as 3.5.
+
+                # Which is correct.
+
+                # Now, what about the input "3 + .5" → should return 3.5.
+
+                # Now, the code should handle that.
+
+                # Now, the code for the tokenizer and parser seems to handle all cases.
+
+                # Now, the code is written. But I need to make sure that all the error cases are handled.
+
+                # For example, in the case of "3 + 4 * (5 - 6)" → should return 3 + 4 * -1 = -1.
+
+                # Now, the code should handle it.
+
+                # Now, the code is written.
+
+                # Now, the final code is as above.
+
+</thinking>
+
+```python
+import re
+
+def evaluate(expr: str) -> float:
+    if not expr.strip():
+        raise ValueError("Empty input")
+    tokens = tokenize(expr)
+    pos = [0]
+    
+    def parse_expression():
+        left = parse_term()
+        while pos[0] < len(tokens) and tokens[pos[0]] in ('+', '-'):
+            op = tokens[pos[0]]
+            pos[0] += 1
+            right = parse_term()
+            if op == '+':
+                left += right
+            elif op == '-':
+                left -= right
+        return left
+    
+    def parse_term():
+        left = parse_power()
+        while pos[0] < len(tokens) and tokens[pos[0]] in ('*', '/', '%'):
+            op = tokens[pos[0]]
+            pos[0] += 1
+            right = parse_power()
+            if op == '*':
+                left *= right
+            elif op == '/':
+                if right == 0:
+                    raise ZeroDivisionError("division by zero")
+                left /= right
+            elif op == '%':
+                if right == 0:
+                    raise ZeroDivisionError("modulo by zero")
+                left %= right
+        return left
+    
+    def parse_power():
+        left = parse_primary()
+        while pos[0] < len(tokens) and tokens[pos[0]] == '**':
+            pos[0] += 1
+            right = parse_power()
+            left **= right
+        return left
+    
+    def parse_primary():
+        if pos[0] >= len(tokens):
+            raise ValueError("Unexpected end of input")
+        token = tokens[pos[0]]
+        if token == '(':
+            pos[0] += 1
+            val = parse_expression()
+            if pos[0] >= len(tokens) or tokens[pos[0]] != ')':
+                raise ValueError("Unbalanced parentheses")
+            pos[0] += 1
+            return val
+        elif token in ('+', '-'):
+            sign = token
+            pos[0] += 1
+            val = parse_primary()
+            return -val if sign == '-' else val
+        else:
+            try:
+                num = float(token)
+                pos[0] += 1
+                return num
+            except ValueError:
+                raise ValueError(f"Invalid token: {token}")
+    
+    try:
+        result = parse_expression()
+        if pos[0] < len(tokens):
+            raise ValueError("Extra tokens after expression")
+        return result
+    except ZeroDivisionError as e:
+        raise e
+    except Exception as e:
+        raise ValueError(str(e)) from e
+
+def tokenize(expr: str) -> list:
+    tokens = []
+    i = 0
+    while i < len(expr):
+        c = expr[i]
+        if c.isspace():
+            i += 1
+            continue
+        if c in '+-':
+            if i + 1 < len(expr) and (expr[i+1].isdigit() or expr[i+1] == '.'):
+                start = i
+                i += 1
+                while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                    i += 1
+                tokens.append(expr[start:i])
+            else:
+                tokens.append(c)
+                i += 1
+        elif c in '*/%()':
+            if c == '*' and i + 1 < len(expr) and expr[i+1] == '*':
+                tokens.append('**')
+                i += 2
+            else:
+                tokens.append(c)
+                i += 1
+        elif c.isdigit() or c == '.':
+            start = i
+            if c == '.':
+                i += 1
+                while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                    i += 1
+                tokens.append(expr[start:i])
+            else:
+                i += 1
+                while i < len(expr) and (expr[i].isdigit() or expr[i] == '.'):
+                    i += 1
+                tokens.append(expr[start:i])
+        else:
+            raise ValueError(f"Invalid character: {c}")
+    return tokens
+```

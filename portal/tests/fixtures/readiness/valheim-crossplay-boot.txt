@@ -1,0 +1,94 @@
+INFO - Setting uid:gid of valheim to 0:0
+INFO - Setting timezone America/Los_Angeles
+INFO - Setting up syslogd - logging to stdout
+DEBUG - [1] - Creating cron to do world backups using schedule 5 * * * *
+DEBUG - [1] - Creating cron to check for updates using schedule */15 * * * *
+DEBUG - [1] - Creating cron to restart valheim-server using schedule 10 5 * * *
+2026-09-29 23:56:43,230 INFO RPC interface 'supervisor' initialized
+2026-09-29 23:56:43,231 INFO supervisord started with pid 26
+2026-09-29 23:56:44,233 INFO spawned: 'syslogd' with pid 27
+2026-09-29 23:56:44,234 INFO spawned: 'crond' with pid 28
+2026-09-29 23:56:44,235 INFO spawned: 'valheim-bootstrap' with pid 29
+Sep 29 23:56:44 syslogd started: BusyBox v1.36.1
+2026-09-29 23:56:44,235 INFO success: valheim-bootstrap entered RUNNING state, process has stayed up for > than 0 seconds (startsecs)
+Sep 29 23:56:44 crond[28]: crond (busybox 1.36.1) started, log level 8
+Sep 29 23:56:44 supervisord: valheim-bootstrap DEBUG - [29] - Running commit e36cbfb0ddc8ff7e8530dee378a9521fe6c28fed
+Sep 29 23:56:44 supervisord: valheim-bootstrap DEBUG - [29] - SteamCMD depot manifest cache persisted at /opt/valheim/dl/depotcache
+2026-09-29 23:56:44,324 INFO spawned: 'valheim-updater' with pid 37
+Sep 29 23:56:44 supervisord: valheim-updater DEBUG - [37] - Running Valheim Server updater as user valheim uid 0
+Sep 29 23:56:44 supervisord: valheim-updater DEBUG - [37] - Valheim updater was just started - skipping connected players check
+Sep 29 23:56:44 supervisord: valheim-updater INFO - Downloading/updating/validating Valheim server from Steam
+2026-09-29 23:56:45,432 INFO success: syslogd entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2026-09-29 23:56:45,432 INFO success: crond entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+2026-09-29 23:56:45,432 INFO success: valheim-updater entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+Sep 29 23:56:45 supervisord: valheim-bootstrap valheim-updater: started
+Sep 29 23:56:45 supervisord: valheim-updater steamcmd.sh[71]: Starting  /opt/steamcmd/linux32/steamcmd
+2026-09-29 23:56:45,533 INFO spawned: 'valheim-backup' with pid 79
+Sep 29 23:56:45 supervisord: valheim-backup INFO - Backing up Valheim server worlds to /config/backups/worlds-20260929-235645.zip
+Sep 29 23:56:45 supervisord: valheim-backup INFO - Removing backups older than 7 days
+2026-09-29 23:56:46,555 INFO success: valheim-backup entered RUNNING state, process has stayed up for > than 1 seconds (startsecs)
+Sep 29 23:56:46 supervisord: valheim-bootstrap valheim-backup: started
+2026-09-29 23:56:46,569 INFO exited: valheim-bootstrap (exit status 0; expected)
+Sep 29 23:56:46 supervisord: valheim-updater Redirecting stderr to '/home/valheim/Steam/logs/stderr.txt'
+Sep 29 23:56:46 supervisord: valheim-updater Logging directory: '/home/valheim/Steam/logs'
+Sep 29 23:56:46 supervisord: valheim-updater [  0%] Checking for available updates...
+Sep 29 23:56:46 supervisord: valheim-updater [----] Verifying installation...
+Sep 29 23:56:46 supervisord: valheim-updater UpdateUI: skip show logo
+Sep 29 23:56:46 supervisord: valheim-updater Steam Console Client (c) Valve Corporation - version 1788292693
+Sep 29 23:56:46 supervisord: valheim-updater -- type 'quit' to exit --
+Sep 29 23:56:49 supervisord: valheim-updater OK
+Sep 29 23:56:49 supervisord: valheim-updater 
+Sep 29 23:56:51 supervisord: valheim-updater OK
+Sep 29 23:56:53 supervisord: valheim-updater OK
+Sep 29 23:56:58 supervisord: valheim-updater Success! App '896660' fully installed.
+Sep 29 23:56:58 supervisord: valheim-updater OK
+Sep 29 23:56:58 supervisord: valheim-updater INFO - Valheim Server is already the latest version
+Sep 29 23:56:58 supervisord: valheim-updater DEBUG - [37] - Writing file to start Valheim server
+2026-09-29 23:56:59,086 INFO spawned: 'valheim-server' with pid 136
+Sep 29 23:56:59 supervisord: valheim-server INFO - Running Valheim Server
+Sep 29 23:56:59 supervisord: valheim-server DEBUG - [136] - Server config is name: Skippy Valheim, port: 2456/udp, world: Skippy, public: 0, mod: none
+Sep 29 23:56:59 supervisord: valheim-server DEBUG - [136] - Waiting for server to listen on UDP query port 2457
+Sep 29 23:57:04 supervisord: valheim-server DEBUG - [136] - Waiting for server to listen on UDP query port 2457
+Sep 29 23:57:05 supervisord: valheim-server 09/29/2026 23:57:05: Get create world Skippy
+Sep 29 23:57:05 supervisord: valheim-server 09/29/2026 23:57:05: SaveSystem.Reload for World is done [30ms]
+Sep 29 23:57:05 supervisord: valheim-server 09/29/2026 23:57:05: Using environment steamid 892970
+Sep 29 23:57:05 supervisord: valheim-server 09/29/2026 23:57:05: Using steam APPID:892970
+Sep 29 23:57:05 supervisord: valheim-server 09/29/2026 23:57:05: Server ID 90071992547409920
+Sep 29 23:57:05 supervisord: valheim-server 09/29/2026 23:57:05: Authentication:k_ESteamNetworkingAvailability_Waiting
+Sep 29 23:57:05 supervisord: valheim-server 09/29/2026 23:57:05: Steam game server initialized
+Sep 29 23:57:05 supervisord: valheim-server 09/29/2026 23:57:05: Valheim version: l-1.0.16 (network version 40)
+Sep 29 23:57:06 supervisord: valheim-server 09/29/2026 23:57:06: SaveSystem.Reload for Character is done [0ms]
+Sep 29 23:57:06 supervisord: valheim-server 09/29/2026 23:57:06: Sending PlayFab login request (attempt 1)
+Sep 29 23:57:06 supervisord: valheim-server 09/29/2026 23:57:06: Login postponed until ID has been set.
+2026-09-29 23:57:09,094 INFO success: valheim-server entered RUNNING state, process has stayed up for > than 10 seconds (startsecs)
+Sep 29 23:57:09 supervisord: valheim-server DEBUG - [136] - Server is now listening on UDP query port 2457
+Sep 29 23:57:09 supervisord: valheim-updater valheim-server: started
+Sep 29 23:57:09 supervisord: valheim-server 09/29/2026 23:57:09: ZRpc timeout set to 30s 
+Sep 29 23:57:09 supervisord: valheim-server 09/29/2026 23:57:09: Checking for any blocked players in the historical player list...
+Sep 29 23:57:13 supervisord: valheim-server 09/29/2026 23:57:13: PlayFab custom ID set to "PlayFab_Skippy Valheim_2456_4c5edbfb76a58c18e04fc18379386ec8"
+Sep 29 23:57:13 supervisord: valheim-server 09/29/2026 23:57:13: Sending PlayFab login request (attempt 2)
+Sep 29 23:57:13 supervisord: valheim-server 09/29/2026 23:57:13: Semaphore type: ManualResetEventSlim
+Sep 29 23:57:13 supervisord: valheim-server 09/29/2026 23:57:13: Opened PlayFab server
+Sep 29 23:57:14 supervisord: valheim-server 09/29/2026 23:57:14: Game server connected
+Sep 29 23:57:14 supervisord: valheim-server 09/29/2026 23:57:14: Logged in PlayFab user via custom ID
+Sep 29 23:57:14 supervisord: valheim-server 09/29/2026 23:57:14: PlayFab logged in as "PlayFab_Skippy Valheim_2456_4c5edbfb76a58c18e04fc18379386ec8"
+Sep 29 23:57:14 supervisord: valheim-server 09/29/2026 23:57:14: PlayFab local entity ID is 3317C2AF76ABDF64
+Sep 29 23:57:14 supervisord: valheim-server IPv4, returning 203.0.113.7:2456
+Sep 29 23:57:14 supervisord: valheim-server 09/29/2026 23:57:14: New session server "Skippy Valheim" that has join code , now 0 player(s)
+Sep 29 23:57:14 supervisord: valheim-server 09/29/2026 23:57:14: Register PlayFab server "Skippy Valheim" with IP 203.0.113.7:2456
+Sep 29 23:57:14 supervisord: valheim-server 09/29/2026 23:57:14: Server 'Skippy Valheim' begin PlayFab create and join network for server 
+Sep 29 23:57:15 supervisord: valheim-server This is the serverIP used to register the server: 203.0.113.7:2456
+Sep 29 23:57:15 supervisord: valheim-server 09/29/2026 23:57:15: Session "Skippy Valheim" registered with join code 551603
+Sep 29 23:57:17 supervisord: valheim-server 09/29/2026 23:57:17: Session "Skippy Valheim" with join code 551603 and IP 203.0.113.7:2456 is active with 0 player(s)
+2026-09-29 23:58:41,956 WARN received SIGTERM indicating exit request
+2026-09-29 23:58:41,956 INFO waiting for syslogd, crond, valheim-backup, valheim-updater, valheim-server to die
+Sep 29 23:58:41 supervisord: valheim-server DEBUG - [136] - Received signal to shut down valheim-server
+Sep 29 23:58:41 supervisord: valheim-server INFO - Shutting down Valheim server with PID 140
+Sep 29 23:58:41 supervisord: valheim-server DEBUG - [136] - Waiting for Valheim Server with PID 140 to shut down
+Sep 29 23:58:42 supervisord: valheim-server 09/29/2026 23:58:42: Game - OnApplicationQuit
+Sep 29 23:58:42 supervisord: valheim-server 09/29/2026 23:58:42: Shutting down
+Sep 29 23:58:42 supervisord: valheim-server ZPlayFabMatchmaking::UnregisterServer - unregistering server now. State: Active
+Sep 29 23:58:42 supervisord: valheim-server 09/29/2026 23:58:42: Unregister PlayFab server "Skippy Valheim" and leaving network "310c5159-55bf-4be3-843a-7d162542c521|AwA6r3NF4uyMG/9BMKBtvmPwJa0C/ldlc3RVcwAAAAAAAAAAAAAAAAAAtndhtFmwm2+5xoip1gMQZO0ZPAJr9HsbOYa1hNGP3Va8FUtkbnMtaXIwLTgxZTUtMjcwZjA1ZTAtOTY5Yi00NTQ4LWFlZmYtYWRjZTUzNjg4NzYxLndlc3R1cy5jbG91ZGFwcC5henVyZS5jb20="
+Sep 29 23:58:42 supervisord: valheim-server ZPlayFabSocket::Dispose. State: LISTEN
+Sep 29 23:58:42 supervisord: valheim-server ZPlayFabSocket::Dispose. leave lobby. LobbyId: 
+Sep 29 23:58:42 supervisord: valheim-server ZPlayFabSocket::Dispose. State: CLOSED

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Texts — Maker Portal{% endblock %}
+{% block app %}texts{% endblock %}
+{% block ui %}bridge{% endblock %}
+{% block glyph %}chats{% endblock %}
+{% block head %}
+<style>
+  /* Texts (texts.py, the Captain only): his Google Voice texts, newest first, a screen at a time (Bridge.PList). A verification code in a text is a
+     <code class="code">: one tap copies it (static/copy.js). */
+  .trow { gap: 10px; padding: 0 6px; }
+  .trow .gl { flex: none; display: flex; color: var(--accent); }
+  .trow .gl .g { width: 26px; height: 26px; }
+  .trow .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+  .trow .l1 { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  .trow .who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; font-size: .98rem; color: var(--white); }
+  .trow .when { flex: none; font: 600 .72rem var(--mono); color: var(--muted); }
+  .trow .l2 { font-size: .8rem; line-height: 1.3; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .trow code.code { flex: none; font: 700 1.3rem var(--mono); letter-spacing: .08em; color: var(--green); }
+  .trow.fresh { border-left: 3px solid var(--green); padding-left: 3px; }
+</style>
+{% endblock %}
+{% block content %}
+<section class="bp" id="texts" data-state="{{ url_for('texts.state') }}">
+  <div class="bp-stage" id="stage">
+    <div class="bp-list" id="listwrap">
+      <div class="bp-page" id="scroll" tabindex="-1"><div class="vl-host" id="host" role="list"></div></div>
+      <div class="scrub" id="scrub" role="slider" aria-label="Page" aria-valuemin="1" aria-valuemax="1" aria-valuenow="1" tabindex="0">
+        <div class="pips" id="pips"><i></i></div><span class="pgno" id="pgno"></span>
+      </div>
+    </div>
+  </div>
+</section>
+<script>
+  (function () {
+    "use strict";
+    var root = document.getElementById("texts"), STATE_URL = root.dataset.state, ROW = 76, EVERY_MS = 30000, FRESH_S = 300;
+    var svg = function (g) { return '<svg class="g" aria-hidden="true"><use href="#g-' + g + '"/></svg>'; };
+    var el = function (tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+    var list = new Bridge.PList(document.getElementById("scroll"), document.getElementById("host"), {}, { pips: document.getElementById("pips"), pgno: document.getElementById("pgno"), scrub: document.getElementById("scrub") });
+
+    function when(at) {                                   // 'now', '12 min', or the clock time today, else the day
+      var s = Math.max(0, Date.now() / 1000 - at), d = new Date(at * 1000), today = new Date();
+      if (s < 60) return "now";
+      if (s < 3600) return Math.round(s / 60) + " min";
+      if (d.toDateString() === today.toDateString()) return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+      return d.toLocaleDateString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+    }
+    function textRow(withCode) {
+      return {
+        make: function () {
+          var e = el("div", "vrow trow"), g = el("span", "gl"), t = el("div", "txt"), l1 = el("div", "l1");
+          e._who = el("span", "who"); e._when = el("span", "when"); e._body = el("div", "l2");
+          g.innerHTML = svg("chats"); l1.append(e._who, e._when); t.append(l1, e._body); e.append(g, t);
+          if (withCode) { e._code = el("code", "code"); e.append(e._code); }
+          e.setAttribute("role", "listitem");
+          return e;
+        },
+        bind: function (e, r) {
+          var x = r.t;
+          e._who.textContent = x.from; e._when.textContent = when(x.at); e._body.textContent = x.body;
+          e.title = x.number || x.from;
+          e.classList.toggle("fresh", !!x.code && Date.now() / 1000 - x.at < FRESH_S);
+          if (withCode) e._code.textContent = x.code;
+        },
+      };
+    }
+    list.makers.text = textRow(false);
+    list.makers.coded = textRow(true);
+    list.makers.msg = {
+      make: function () { var e = el("div", "vrow vmsg"); e._g = el("span"); e._t = el("span"); e.append(e._g, e._t); return e; },
+      bind: function (e, r) { e._g.innerHTML = svg(r.glyph); e._t.textContent = r.text; },
+    };
+
+    function rowsOf(state) {
+      if (!state.connected) return [{ type: "msg", h: 110, glyph: "link", text: state.why || "Google isn't connected: press Connect Google for Skippy in Admin." }];
+      var rows = (state.texts || []).map(function (x) { return { type: x.code ? "coded" : "text", h: ROW, t: x }; });
+      if (state.why) rows.unshift({ type: "msg", h: 56, glyph: "link", text: state.why });
+      if (!rows.length) rows.push({ type: "msg", h: 110, glyph: "chats", text: "No texts in the last 7 days. In Google Voice: Settings, Messages, Forward messages to email." });
+      return rows;
+    }
+    var busy = false;
+    function load() {
+      if (document.hidden || busy) return;
+      busy = true;
+      fetch(STATE_URL, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" } })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error("HTTP " + r.status)); })
+        .then(function (s) { list.setRows(rowsOf(s), list.page); })
+        .catch(function () { list.setRows([{ type: "msg", h: 110, glyph: "link", text: "The portal didn't answer. Trying again." }], 0); })
+        .then(function () { busy = false; });
+    }
+    if (window.ResizeObserver) new ResizeObserver(function () { list.resize(); }).observe(document.getElementById("stage"));
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "PageDown" || e.key === "PageUp") { e.preventDefault(); list.go(list.page + (e.key === "PageDown" ? 1 : -1)); }
+    });
+    document.addEventListener("visibilitychange", load);
+    setInterval(load, EVERY_MS);
+    load();
+  })();
+</script>
+{% endblock %}

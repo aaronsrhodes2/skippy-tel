@@ -1,0 +1,946 @@
+{# The private Skippy: the left side of the Captain's dashboard. Claude Code (Sonnet 5.5, medium effort, full permissions) on
+   skippy-pc, reached through the home reporter (workshop.py). Only the messages you type ever leave this
+   page; the conversation lives on skippy-pc, and this page keeps a copy of the transcript for display.
+
+   This card is the Captain's only way in when he is away from the PC, so it must never dead-end. Once, a redeploy
+   mid-task left it "went quiet" with Send greyed out and no way out but New chat. Now: a quiet link shows what is
+   going on and for how long, asks skippy-pc to check again by itself (and on the Check again button), brings Send
+   back after 30 s, and keeps polling for as long as the page is open. #}
+<style>
+  .me-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; margin: 0; }
+  .me-chat header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .me-chat header h3 { margin: 0; flex: 1; }
+  .me-chat .wlog { flex: 1; min-height: 0; margin: 8px 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }   /* a plain scrolling transcript: it is long, and a wide window must not cut it into columns */
+  .me-chat .turn { display: block; margin: 8px 6px; padding: 8px 10px; border-radius: 8px; white-space: pre-wrap; font-size: .9rem; overflow-wrap: anywhere; }
+  .me-chat .turn.user { background: #111; border: 1px solid #333; }
+  .me-chat .turn.assistant { background: var(--dim-green); border: 1px solid var(--dim-green-hi); color: var(--ink); }
+  .me-chat .turn.failed { border-color: var(--red); }
+  .me-chat .turn p { margin: 0 0 6px; }
+  .me-chat .turn .cp { float: right; margin: 0 4px 2px 8px; padding: 0 6px; min-width: 0; font-size: .7rem; opacity: .55; clip-path: none; }     /* clip-path: none: the portal's button notch must not cut the label */
+  .me-chat .turn .cp:hover { opacity: 1; }
+  .me-chat .todo { margin: 6px 0 8px; padding: 6px 10px; border: 1px solid var(--dim-green-hi); background: #000; font-size: .85rem; }
+  .me-chat .todo .th { color: var(--muted); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 3px; }
+  .me-chat .todo .it { margin: 2px 0; }
+  .me-chat .todo .it .mk { display: inline-block; width: 1.4em; color: var(--muted); }
+  .me-chat .todo .it.done { color: var(--muted); text-decoration: line-through; }
+  .me-chat .todo .it.done .mk { color: var(--accent); text-decoration: none; }
+  .me-chat .todo .it.doing { color: #fff; }
+  .me-chat .todo .it.doing .mk { color: var(--accent); }
+  .me-chat .ask { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0 2px; }
+  .me-chat .ask button.opt { margin: 0; padding: 8px 14px; }
+  .me-chat .md p { margin: 0 0 8px; }
+  .me-chat .md h5, .me-chat .md h6 { margin: 10px 0 4px; font-size: .95rem; color: var(--accent); text-transform: none; letter-spacing: 0; }
+  .me-chat .md ul, .me-chat .md ol { margin: 0 0 8px; padding-left: 22px; }
+  .me-chat .md blockquote { margin: 0 0 8px; padding: 2px 10px; border-left: 3px solid var(--accent); color: var(--muted); }
+  .me-chat .md pre.codeblock { margin: 0 0 8px; padding: 8px 10px; background: #000; border: 1px solid var(--dim-green-hi); overflow-x: auto; white-space: pre; font: .8rem/1.4 ui-monospace, Consolas, monospace; }
+  .me-chat .md a { color: var(--accent); overflow-wrap: anywhere; }
+  .me-chat .working { color: var(--muted); font-size: .85rem; margin-top: 4px; }
+  .me-chat .working .dots { color: var(--amber); letter-spacing: 2px; animation: breathe 1.2s ease-in-out infinite; }
+  .me-chat .row { display: flex; gap: 6px; align-items: stretch; margin: 0 6px 6px; }
+  .me-chat .row button.item { flex: 1; margin: 0; width: auto; }
+  .me-chat .row.open button.item { border-color: var(--accent); }
+  .me-chat .row button.unpin { flex: none; width: 40px; padding: 0; }
+  .me-chat .convs h4 { margin: 10px 6px 4px; font-size: .74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .me-chat .act { font-size: .74rem; color: var(--muted); margin: 2px 0; font-family: ui-monospace, Consolas, monospace; }
+  /* The toolchain strip (static/skippy-chain.js): the reply's bottom border, one segment per call, width by time. Its colours are the
+     house palette pinned here: the agent modes repaint --green/--cyan/--violet to purple or orange, and a strip of one colour says nothing. */
+  .me-chat .turn.assistant { position: relative; }
+  .me-chat .chain { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; display: flex; gap: 1px; border-radius: 0 0 8px 8px; overflow: visible; }
+  .me-chat .chain .seg { position: relative; flex: 1 1 0; min-width: 2px; height: 3px; background: var(--k, #6f8b94); cursor: pointer; }
+  .me-chat .chain .seg::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 14px; }   /* a 3 px line is too thin to hover or tap */
+  .me-chat .chain .seg:hover { height: 5px; margin-top: -2px; }
+  .me-chat .k-read { --k: #00ffff; }  .me-chat .k-edit { --k: #ffffff; }  .me-chat .k-shell { --k: #00ff88; }  .me-chat .k-git { --k: #c58cff; }
+  .me-chat .k-web { --k: #ff44aa; }   .me-chat .k-deploy { --k: #ffaa00; } .me-chat .k-house { --k: #ff8a3d; } .me-chat .k-other { --k: #8fa5ac; }
+  .me-chat .chain .seg.bad { --k: #ff4444; }
+  .me-chat .chain .warn { position: absolute; right: 16px; bottom: 3px; font-size: .78rem; line-height: 1; color: #ffaa00; cursor: pointer; }   /* clear of the bubble's cut corner */
+  .me-chat .chain-tip { position: absolute; left: 6px; right: 6px; bottom: 6px; z-index: 3; padding: 6px 8px; background: #000; border: 1px solid var(--dim-green-hi);
+                        font: .74rem/1.35 ui-monospace, Consolas, monospace; color: #fff; white-space: pre-wrap; }
+  .me-chat .chain-tip .th { font-weight: 600; color: var(--k, #fff); }
+  .me-chat .chain-tip .th.warn { color: #ffaa00; }
+  .me-chat .chain-tip .kd { color: var(--muted); }
+  .me-chat .chain-tip .fl { margin-top: 2px; }
+  .me-chat .chain-tip code.code { display: inline-block; margin-top: 3px; font-size: .72rem; overflow-wrap: anywhere; }
+  .me-chat .turn .ck { float: right; margin: 0 0 2px 4px; padding: 0 6px; min-width: 0; font-size: .7rem; opacity: .55; clip-path: none; }
+  .me-chat .turn .ck:hover, .me-chat .turn .ck[aria-expanded="true"] { opacity: 1; }
+  .me-chat .turn .ck.flagged { color: #ffaa00; opacity: .9; }
+  .me-chat pre.chain-list { margin: 6px 0; padding: 6px 8px; background: #000; border: 1px solid var(--dim-green-hi); font: .72rem/1.4 ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+  .me-chat .retry { font-size: .78rem; color: var(--amber, #FFAA00); font-style: italic; margin: 4px 0; }   /* the model went away mid-answer: it waits, never an error */
+  .me-chat details.steps { margin: 4px 0; font-size: .74rem; color: var(--muted); font-family: ui-monospace, Consolas, monospace; }
+  .me-chat details.steps > summary { cursor: pointer; list-style: none; padding: 2px 0; }
+  .me-chat details.steps > summary::-webkit-details-marker { display: none; }
+  .me-chat details.steps > summary::before { content: "\25B8 "; }
+  .me-chat details.steps[open] > summary::before { content: "\25BE "; }
+  .me-chat details.steps .act { margin: 2px 0 2px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .me-chat .note { font-size: .78rem; color: var(--amber); margin: 4px 0 0; }
+  .me-chat .note.bad { color: var(--red); }
+  /* The quiet-link strip sits under the log, not in it: it stays on screen however far the log is scrolled, and
+     its text changes at most every few seconds, so a screen reader is not read a ticking clock. */
+  .me-chat .quiet { margin: 0 0 8px; padding: 8px 10px; border: 1px solid var(--amber); border-radius: 8px; font-size: .8rem; color: var(--amber); }
+  .me-chat .quiet.bad { border-color: var(--red); color: var(--red); }
+  .me-chat .quiet .hint { margin-top: 4px; color: var(--ink); }
+  .me-chat .quiet .qbtns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .me-chat .quiet button { padding: 5px 12px; font-size: .8rem; }
+  .me-chat form { display: flex; flex-direction: column; gap: 6px; }
+  .me-chat textarea { resize: none; height: 3.6em; }
+  .me-chat [hidden] { display: none !important; }        /* the base button style would otherwise show Stop while idle */
+  .me-chat .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .me-chat .actions .send { flex: 1; min-width: 5em; }
+  .me-chat .ps-queue { display: flex; flex-direction: column; gap: 4px; }
+  .me-chat .ps-queue .qrow { display: flex; gap: 6px; align-items: center; border: 1px dashed var(--dim-green-hi); padding: 4px 8px; font-size: .82rem; color: var(--muted); }
+  .me-chat .ps-queue .qrow .qt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .me-chat .ps-queue .qrow button { padding: 0 6px; min-width: 0; margin: 0; }
+  .me-chat .ps-attach { display: flex; gap: 8px; flex-wrap: wrap; }
+  .me-chat .ps-attach .chip { position: relative; width: 64px; height: 64px; border: 1px solid var(--dim-green-hi); border-radius: 6px; overflow: hidden; background: var(--black); }
+  .me-chat .ps-attach .chip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .me-chat .ps-attach .chip button { position: absolute; top: 0; right: 0; padding: 0 5px; min-width: 0; line-height: 1.2; font-size: .8rem; background: var(--black); color: var(--ink); border: 0; }
+  .me-chat .imgs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .me-chat .imgs img { width: 72px; height: 72px; object-fit: cover; border: 1px solid var(--dim-green-hi); border-radius: 4px; }
+  .me-chat form.drop { outline: 1px dashed var(--accent); }
+  .me-chat .actions .vk { position: relative; width: 44px; height: 38px; flex: none; }
+  .me-chat .actions .vk .g { width: 20px; height: 20px; }
+  /* Projects and conversations: one row under the title. The picker is the open conversation's project (fixed once it
+     has a message: a conversation keeps to one repo) and becomes the choice for the next one after New chat. */
+  .me-chat .ps-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 8px; flex-shrink: 0; }   /* never squeezed by the log */
+  .me-chat .ps-bar select { flex: 1; min-width: 9em; }
+  .me-chat .ps-bar .notify { font-size: .78rem; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+  .me-chat .ps-bar .hint { flex-basis: 100%; font-size: .78rem; color: var(--amber); }
+  .me-chat .convs { flex: 1; min-height: 0; margin: 8px 0; overflow-y: auto; overscroll-behavior: contain; }
+  .me-chat .convs button.item { display: block; width: calc(100% - 12px); margin: 0 6px 6px; text-align: left; padding: 8px 10px; }
+  .me-chat .convs .title { display: block; color: var(--ink); overflow-wrap: anywhere; }
+  .me-chat .convs .meta { display: block; font-size: .74rem; color: var(--muted); margin-top: 2px; }
+  .me-chat .convs .msg { font-size: .8rem; color: var(--muted); margin: 6px 0; }
+  .me-chat .convs .msg.bad { color: var(--red); }
+  /* The ship card: proof that what Skippy pushed is live (portal/ship.py). Amber while it is on its way, green only when
+     the portal serves that commit, red with the run's link when the deploy failed. */
+  .me-chat .ship { margin: 8px 0 4px; padding: 8px 10px; border: 1px solid var(--amber); border-radius: 8px; white-space: normal; }
+  .me-chat .ship.ok { border-color: var(--green); }
+  .me-chat .ship.bad { border-color: var(--red); }
+  .me-chat .ship .head { font-weight: 600; color: var(--amber); }
+  .me-chat .ship.ok .head { color: var(--green); }
+  .me-chat .ship.bad .head { color: var(--red); }
+  .me-chat .ship .subj, .me-chat .ship .note { font-size: .78rem; color: var(--muted); margin-top: 2px; }
+  .me-chat .ship .stages { display: flex; gap: 10px; flex-wrap: wrap; font-size: .78rem; margin-top: 4px; }
+  .me-chat .ship .st { color: var(--muted); }
+  .me-chat .ship .st.done { color: var(--green); }
+  .me-chat .ship .st.running, .me-chat .ship .st.queued { color: var(--amber); }
+  .me-chat .ship .st.failed { color: var(--red); }
+  .me-chat .shot { display: block; max-width: 100%; margin-top: 6px; border: 1px solid var(--dim-green-hi); border-radius: 6px; }
+  .me-chat .ship .links { display: flex; gap: 12px; flex-wrap: wrap; font-size: .8rem; margin-top: 4px; }
+</style>
+<div class="w me-chat" id="private-skippy" data-ready="{{ 'yes' if workshop_ready else 'no' }}">
+  <header>
+    <span class="pill" id="ps-state" style="--accent: {{ 'var(--green)' if workshop_ready else 'var(--amber)' }}">{{ workshop_model or 'Sonnet 5.5' }}{{ '' if workshop_ready else ' · offline' }}</span>
+  </header>
+  {% if not workshop_ready %}
+    {% if workshop_reason %}
+      {# The bridge said why (home passes its own plain words along). A `backticked` command in it is copyable, like
+         everywhere else on the portal; autoescape covers the text, which comes from whatever holds the home token. #}
+      <p class="note">skippy-pc's workshop isn't ready: {% for part in workshop_reason.split('`') %}{% if loop.index is even %}<code class="code">{{ part }}</code>{% else %}{{ part }}{% endif %}{% endfor %}</p>
+    {% else %}
+    <p class="note">skippy-pc's workshop isn't answering. On skippy-pc run <code class="code">make bridge</code> (and make sure
+      <code>claude</code> there is signed in: <code class="code">/login</code>) and the home reporter is up.</p>
+    {% endif %}
+  {% endif %}
+  <div class="ps-bar">
+    <select id="ps-project" aria-label="Folder" title="Which project or folder the agent works in (fixed once a conversation has a message)" data-tel="workshop:ps-project">
+      {% for p in workshop_projects %}<option value="{{ p.id }}">{{ p.name }}</option>{% endfor %}
+      <option value="__new__">＋ New folder</option>
+    </select>
+    <select id="ps-brain" aria-label="Brain" title="Who thinks: Claude (paid), or Skippy Core's coder (local, free). Fixed once a conversation has a message." data-tel="workshop:ps-brain">
+      {% for b in workshop_brains %}<option value="{{ b.id }}"{% if not b.ready %} disabled{% endif %}>{{ b.label }}{% if not b.ready %} (offline){% endif %}</option>{% endfor %}
+    </select>
+    <button type="button" id="ps-convs-btn" data-tel="workshop:ps-convs-btn">Conversations</button>
+    <button type="button" id="ps-copyall" data-tel="chat:copy"{% if 'copy' in (chat_buried or []) %} hidden{% endif %} title="Copy this whole conversation as markdown">Copy chat</button>
+    {# A Discord DM to the Captain when a run ends (portal/notify.py). Off when the portal has no Discord bot. #}
+    <label class="notify"{% if 'notify' in (chat_buried or []) %} hidden{% endif %}><input type="checkbox" id="ps-notify" data-tel="chat:notify"{% if not workshop_notify_ready %} disabled title="The portal has no Discord bot (DISCORD_BOT_TOKEN)"{% endif %}> Discord me when done</label>
+    <div class="hint" id="ps-project-hint" hidden></div>
+    {# New folder: D:\Aaron\development\<name>, a git repo, and the private GitHub repo aaronsrhodes2/<name> (made on skippy-pc) #}
+    <form class="newfolder" id="ps-newfolder" hidden>
+      <input type="text" id="ps-newfolder-name" aria-label="New folder name" placeholder="new-project-name" maxlength="40" autocomplete="off" spellcheck="false">
+      <button type="submit" id="ps-newfolder-go" data-tel="workshop:ps-newfolder-go">Make it</button>
+      <span class="msg" id="ps-newfolder-msg" role="status"></span>
+    </form>
+  </div>
+  <div class="convs" id="ps-convs" hidden>
+    <div class="msg" id="ps-convs-msg" role="status"></div>
+    <div id="ps-convs-list"></div>
+  </div>
+  <div class="wlog" id="ps-log" aria-live="polite"><div id="ps-flow"></div></div>
+  <div class="quiet" id="ps-quiet" role="status" hidden>
+    <div id="ps-quiet-msg"></div>
+    <div class="hint" id="ps-quiet-hint" hidden>You can send a new message now; this one will be left waiting.</div>
+    <div class="qbtns">
+      <button type="button" id="ps-check" data-tel="workshop:ps-check">Check again</button>
+      <button type="button" id="ps-reload" hidden data-tel="workshop:ps-reload">Reload page</button>
+    </div>
+  </div>
+  <form id="ps-form">
+    <div class="vstat" id="ps-vstat" hidden aria-live="polite"></div>
+    <div class="ps-queue" id="ps-queue" hidden></div>
+    <div class="ps-attach" id="ps-attach" hidden></div>
+    <textarea id="ps-text" rows="2" maxlength="8000" placeholder="Message Skippy"></textarea>
+    <div class="actions">
+      <input type="file" id="ps-file" accept="image/*" multiple hidden>
+      <button type="button" class="key vk" id="ps-img" aria-label="Attach an image" title="Attach an image (or paste or drop one)" data-tel="workshop:ps-img"><svg class="g" aria-hidden="true"><use href="#g-image"/></svg></button>
+      <button type="button" class="key vk ear" id="ps-ear" aria-pressed="false" aria-label="Standby: listen for Skippy" title="Standby: listen for Skippy" data-tel="workshop:ps-ear"><svg class="g" aria-hidden="true"><use href="#g-ear"/></svg><i class="lamp"></i></button>
+      <button type="button" class="key vk mic" id="ps-mic" aria-label="Speak your message" title="Speak your message" data-tel="workshop:ps-mic"><svg class="g" aria-hidden="true"><use href="#g-mic"/></svg><i class="lamp"></i></button>
+      <button type="button" class="key vk spk" id="ps-spk" aria-pressed="false" aria-label="Read replies aloud" title="Read replies aloud" data-tel="workshop:ps-spk"><svg class="g" aria-hidden="true"><use href="#g-vol"/></svg><i class="lamp"></i></button>
+      <button type="submit" class="send" id="ps-send" data-tel="workshop:ps-send">Send</button>
+      <button type="button" id="ps-stop" hidden class="danger" data-tel="workshop:ps-stop">Stop</button>
+      <button type="button" id="ps-new" data-tel="workshop:ps-new">New chat</button>
+    </div>
+  </form>
+</div>
+<script>
+  (function () {
+    const root = document.getElementById("private-skippy");
+    const log = root.querySelector("#ps-log"), flow = root.querySelector("#ps-flow"), form = root.querySelector("#ps-form");
+    const text = root.querySelector("#ps-text"), send = root.querySelector("#ps-send");
+    const stopBtn = root.querySelector("#ps-stop"), newBtn = root.querySelector("#ps-new");
+    const strip = root.querySelector("#ps-quiet"), quietMsg = root.querySelector("#ps-quiet-msg");
+    const quietHint = root.querySelector("#ps-quiet-hint"), checkBtn = root.querySelector("#ps-check");
+    const reloadBtn = root.querySelector("#ps-reload");
+    const picker = root.querySelector("#ps-project"), pickHint = root.querySelector("#ps-project-hint");
+    const convsBtn = root.querySelector("#ps-convs-btn"), convsBox = root.querySelector("#ps-convs");
+    const convsMsg = root.querySelector("#ps-convs-msg"), convsList = root.querySelector("#ps-convs-list");
+    const notifyBox = root.querySelector("#ps-notify");
+    const queueBox = root.querySelector("#ps-queue"), attachBox = root.querySelector("#ps-attach"), fileIn = root.querySelector("#ps-file"), imgBtn = root.querySelector("#ps-img");
+    const voice = SkippyVoice.attach({gate: "{{ url_for('chat.voice_gate') }}", mic: root.querySelector("#ps-mic"), ear: root.querySelector("#ps-ear"), speaker: root.querySelector("#ps-spk"),
+      box: text, status: root.querySelector("#ps-vstat"), onSend: () => form.requestSubmit()});          // hands-free: a pause ends it, a countdown sends it
+    const K = {conv: "ps-conv", log: "ps-log", task: "ps-task", project: "ps-project"};
+    const SEND = "{{ url_for('me.workshop_send') }}", EVENTS = "{{ url_for('me.workshop_events') }}",
+          STOP = "{{ url_for('me.workshop_stop') }}", RESYNC = "{{ url_for('me.workshop_resync') }}",
+          HISTORY = "{{ url_for('me.workshop_history') }}", HISTORY_RESULT = "{{ url_for('me.workshop_history_result') }}";
+    const PROJECTS = {{ workshop_projects | tojson }};       // [{id, name, repo, branch}] as skippy-pc lists them
+    const H = {"Content-Type": "application/json", "X-Workshop": "1"};
+
+    // When skippy-pc goes quiet. There is no give-up: the page polls for as long as it is open, only slower.
+    const POLL_MS = 1200;                  // healthy
+    const TIMEOUT_MS = 20000;              // one request never hangs the card (a cold or redeploying portal can sit on one)
+    const LEAVE_AFTER_MS = 30000;          // quiet this long: Send comes back (and leaves the old task behind)
+    const RESYNC_EVERY_MS = 60000;         // "check again" on its own: once on going quiet, then at most this often
+    const pollDelay = (quietMs) => (quietMs < 60000 ? 2000 : quietMs < 300000 ? 5000 : 10000);
+    const BUSY = "Skippy is still working on the last one.";   // the portal's and the reporter's wording for a busy bridge
+    const WAIT_NOTE = "In line: Skippy is finishing another run first.";   // workshop.WAIT_NOTE
+    const spanOf = (s) => (s >= 3600 ? Math.floor(s / 3600) + " h " + Math.floor((s % 3600) / 60) + " min" : Math.max(1, Math.round(s / 60)) + " min");   // "11 h 2 min": how long the run in front has gone
+
+    const store = {
+      get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+      set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+      del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+    };
+    const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : ("c" + Date.now().toString(16) + Math.random().toString(16).slice(2, 10)).replace(/[^A-Za-z0-9-]/g, ""));
+    const PINS = "ps-pins";                        // [{conv, title, project}]: this browser's active conversations
+    let pins = []; try { pins = JSON.parse(store.get(PINS) || "[]"); if (!Array.isArray(pins)) pins = []; } catch (e) { pins = []; }
+    const savePins = () => store.set(PINS, JSON.stringify(pins.slice(0, 30)));
+    function pin(c) { pins = pins.filter(x => x.conv !== c.conv); pins.unshift({conv: c.conv, title: String(c.title || "").slice(0, 60), project: c.project}); savePins(); }
+    function unpin(id) { pins = pins.filter(x => x.conv !== id); savePins(); }
+    const fresh = !store.get(K.conv) && !store.get(K.log);       // a browser that has never opened this chat
+    let conv = store.get(K.conv) || uuid(); store.set(K.conv, conv);
+    let turns = []; try { turns = JSON.parse(store.get(K.log) || "[]"); } catch (e) { turns = []; }
+    const talked = () => turns.some(t => t.role !== "heard");     // a heard line (Hands-off, someone else) is not a message: it fixes nothing
+    const known = (id) => PROJECTS.some(p => p.id === id);
+    const projectName = (id) => { const p = PROJECTS.find(x => x.id === id); return p ? p.name : id; };
+    // The open conversation's project (every conversation before projects was SkippyTel's).
+    let project = store.get(K.project) || "skippytel";
+    if (!known(project)) project = PROJECTS.length ? PROJECTS[0].id : "skippytel";
+    function setProject(id) { project = id; store.set(K.project, id); picker.value = id; }
+    function lockPicker() {                        // one conversation, one repo: the picker is fixed once it has a message
+      picker.disabled = talked();
+      brainPick.disabled = talked();               // the brain too (see BRAINS below)
+      if (talked()) pickHint.hidden = true;
+    }
+    setProject(project);
+    const nf = root.querySelector("#ps-newfolder"), nfName = root.querySelector("#ps-newfolder-name"), nfMsg = root.querySelector("#ps-newfolder-msg");
+    picker.addEventListener("change", () => {
+      if (picker.value === "__new__" && !talked()) { picker.value = project; if (nf) { nf.hidden = false; nfMsg.textContent = ""; nfName.focus(); } return; }
+      if (!talked() && known(picker.value)) setProject(picker.value); else picker.value = project;
+    });
+    // New folder: skippy-pc makes the folder, its git repo and the GitHub repo (or marks GitHub as owed), then this
+    // conversation works in it. A job on skippy-pc, polled like the conversations list.
+    if (nf) nf.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = nfName.value.trim();
+      if (!name) return;
+      nfMsg.textContent = "Making it on skippy-pc…"; root.querySelector("#ps-newfolder-go").disabled = true;
+      try {
+        const r = await call("{{ url_for('me.workshop_new_folder') }}", {method: "POST", headers: H, body: JSON.stringify({name: name})});
+        if (!r.ok) throw new Error(r.data.error || "That didn't go through.");
+        let got = null;
+        for (let i = 0; i < 90 && !got; i++) {
+          await new Promise(res => setTimeout(res, 2000));
+          const q = await call("{{ url_for('me.workshop_new_folder_result') }}?job=" + encodeURIComponent(r.data.job), {headers: H});
+          if (q.data.state === "done") got = q.data.folder;
+          else if (q.data.state === "error" || q.data.state === "unknown") throw new Error(q.data.error || "skippy-pc couldn't make it.");
+        }
+        if (!got) throw new Error("skippy-pc is taking too long: look for the folder in a minute.");
+        PROJECTS.push({id: got.id, name: got.name + " · folder"});
+        const opt = document.createElement("option"); opt.value = got.id; opt.textContent = got.name + " · folder";
+        picker.insertBefore(opt, picker.querySelector('option[value="__new__"]'));
+        setProject(got.id);
+        nfMsg.textContent = got.remote === "created" ? "Made, and on GitHub as " + got.repo + "."
+          : "Made. GitHub is owed (" + (got.why || "not reachable") + "): it is tried again when you start here.";
+        nfName.value = "";
+      } catch (err) { nfMsg.textContent = err.message; }
+      finally { root.querySelector("#ps-newfolder-go").disabled = false; }
+    });
+    // Who thinks: Claude, or Skippy Core's coder. Like the project, fixed once the conversation has a message (each brain's
+    // Claude Code sessions live in its own config folder on skippy-pc, so switching mid-conversation would lose the thread).
+    const BRAINS = {{ workshop_brains | tojson }}, brainPick = root.querySelector("#ps-brain");
+    let brain = store.get("ps-brain") || "core";
+    if (!BRAINS.some(b => b.id === brain && b.ready)) brain = (BRAINS.find(b => b.ready) || {id: "core"}).id;
+    function setBrain(id) { brain = id; store.set("ps-brain", id); brainPick.value = id; }
+    setBrain(brain);
+    brainPick.addEventListener("change", () => { if (!talked() && BRAINS.some(b => b.id === brainPick.value && b.ready)) setBrain(brainPick.value); else brainPick.value = brain; });
+    brainPick.disabled = talked();
+    let running = null;                            // {task, after, turn, quietSince, kind, ...}: the task this page follows
+    let sending = false;                           // a message is on its way to the portal
+
+    function withHeard(heard, message) {
+      if (!heard.length) return message;
+      return "[Heard near me while Hands-off listened, translated into English by Whisper:\n" +
+        heard.map(h => "- (" + (h.name || h.lang) + ") " + h.text).join("\n") + "]\n\n" + (message || "");
+    }
+    const save = () => { store.set(K.log, JSON.stringify(turns.slice(-60))); if (typeof refreshCopyAll === "function") refreshCopyAll(); };
+    let liveClock = null, askBox = null;           // askBox: the answer buttons on screen (they go when anything is sent)
+    // (liveClock: the seconds counter of the turn being worked on)
+    const clock = (t0) => { const s = Math.max(0, Math.floor((Date.now() - t0) / 1000)); return s >= 60 ? Math.floor(s / 60) + "m " + String(s % 60).padStart(2, "0") + "s" : s + "s"; };
+    function el(tag, cls, txt) { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
+    const setText = (node, t) => { if (node.textContent !== t) node.textContent = t; };   // an unchanged note is not re-announced
+    // ── copy as markdown: one prompt, one reply, or the whole conversation ──
+    const turnMd = (t) => t.role === "heard" ? "_Heard (" + (t.name || t.lang) + ", translated):_ " + t.text : t.role === "user" ? t.text : (t.parts || []).filter(x => x.t === "text").map(x => x.text).join("\n\n");
+    function conversationMd() {
+      const title = ((pins.find(x => x.conv === conv) || {}).title) || projectName(project);
+      const out = ["# " + title, ""];
+      turns.forEach(t => {
+        if (t.role === "heard") { out.push(turnMd(t), ""); return; }
+        out.push(t.role === "user" ? "## You" : "## Skippy", "", turnMd(t));
+        const n = t.role === "user" ? 0 : (t.parts || []).filter(x => x.t !== "text" && x.t !== "image" && x.t !== "ship" && x.t !== "chain").length;
+        if (n) out.push("", "_Ran " + n + (n === 1 ? " command" : " commands") + "_");
+        out.push("");
+      });
+      return out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+    }
+    // The portal's one copy script (static/copy.js) copies whatever a button's data-copy says, with its own "Copied" feedback and the
+    // fallbacks for plain http; so a button only has to carry the text, kept current as the turns change.
+    function addCopy(box, turn) {
+      const b = el("button", "cp", "copy"); b.type = "button"; b.setAttribute("data-tel", "workshop:turn-copy"); b.title = "Copy this as markdown";
+      b.setAttribute("data-copy", turnMd(turn));
+      box.appendChild(b);
+    }
+    const copyAll = root.querySelector("#ps-copyall");
+    const refreshCopyAll = () => copyAll.setAttribute("data-copy", conversationMd());
+    const boxes = new WeakMap();                   // turn -> its bubble (kept off the turn, which is saved as JSON)
+    const thumbsOf = new WeakMap();                // turn -> the pictures sent with it (data URLs: not saved, they would fill the browser's storage)
+    function draw(turn) {                          // (re)draw one turn's bubble from its data
+      let box = boxes.get(turn);
+      if (!box) { box = el("div", "turn " + turn.role); boxes.set(turn, box); flow.appendChild(box); }
+      box.replaceChildren();
+      if (turn.role === "heard") {                 // someone near you, in another language, as Whisper translated it
+        addCopy(box, turn);                        // first, floated right like a reply's: at the end the turn's notch clips it
+        box.appendChild(el("div", "who", "heard \u00b7 " + (turn.name || turn.lang) + " \u2192 English"));
+        box.appendChild(el("div", null, turn.text));
+        return;
+      }
+      if (turn.role === "user") {
+        const s = typeof window !== "undefined" && window.SkippyReply ? SkippyReply.split(turn.text) : {quotes: [], rest: turn.text};   // the parts it replies to (static/skippy-reply.js)
+        box.textContent = s.rest;
+        if (s.quotes.length) box.prepend(...s.quotes.map(q => SkippyReply.quoteNode(q, document)));
+        addCopy(box, turn);
+        if (turn.imgs) {                           // thumbnails while this page has them; just a count after a reload
+          const row = el("div", "imgs"), shown = thumbsOf.get(turn) || [];
+          if (shown.length) shown.forEach(u => { const im = el("img"); im.src = u; im.alt = ""; row.appendChild(im); });
+          else row.textContent = "\u25A3 \u00D7 " + turn.imgs;
+          box.appendChild(row);
+        }
+        return;
+      }
+      addCopy(box, turn);                          // at the top, like a prompt's: at the bottom corner the turn's notch clipped it (on a tablet, half of it)
+      const Chain = typeof window !== "undefined" && window.SkippyChain;               // the calls behind this reply (static/skippy-chain.js)
+      const chained = Chain && (turn.parts || []).find(p => p && p.t === "chain");
+      const drawn = chained ? Chain.render(chained, document) : null;
+      if (drawn) box.appendChild(drawn.key);                                           // in the reply's menu, beside the copy key
+      let steps = null, sum = null, names = [], count = 0, todo = null, question = null;     // a run of tool calls folds into one line; tap it for each command in full
+      (turn.parts || []).forEach(p => {
+        if (p.t === "tool" && p.name === "TodoWrite") { todo = p; return; }               // his task list: shown below as a live checklist, not as a step
+        if (p.t === "retry") {                                                         // the model went away: it waits and goes on, never an error
+          steps = null; box.appendChild(el("div", "retry", "Waiting for Skippy, retrying (try " + ((p.attempt || 1) + 1) + (p.why ? ": " + p.why : "") + ")…")); return;
+        }
+        if (p.t === "chain") return;                                                  // the toolchain: drawn once, as the bottom border (below)
+        if (p.t !== "text" && p.t !== "ship" && p.t !== "image") {
+          if (!steps) { steps = el("details", "steps"); sum = el("summary"); steps.appendChild(sum); box.appendChild(steps); names = []; count = 0; }
+          steps.appendChild(el("div", "act", "› " + p.name + (p.detail ? ": " + p.detail : "")));
+          count++; if (names.indexOf(p.name) < 0) names.push(p.name);
+          sum.textContent = "Ran " + count + (count === 1 ? " command" : " commands");
+          return;
+        }
+        steps = null;
+        if (p.t === "text") {                                                          // markdown: code, lists, links (static/skippy-md.js)
+          const ex = SkippyMd.extractQuestion(p.text);
+          if (ex.text) box.appendChild(SkippyMd.render(ex.text, document));
+          if (ex.question) question = ex.question;
+        }
+        else if (p.t === "ship") box.appendChild(shipCard(p));
+        else if (p.t === "picture") box.appendChild(pictureCard(p));
+        else if (p.t === "popup") box.appendChild(pictureCard({id: p.id, prompt: p.name, kind: "popup"}));
+        else box.appendChild(shot(p));
+      });
+      const items = todo ? SkippyMd.parseTodo(todo.detail) : [];
+      if (items.length) {                                                              // the latest task list of this turn, with how far along it is
+        const card = el("div", "todo");
+        card.appendChild(el("div", "th", "Task list " + items.filter(i => i.state === "done").length + "/" + items.length));
+        items.forEach(i => { const row = el("div", "it " + i.state); row.appendChild(el("span", "mk", i.state === "done" ? "\u2713" : i.state === "doing" ? "\u25b6" : "\u25cb")); row.appendChild(el("span", null, i.text)); card.appendChild(row); });
+        box.appendChild(card);
+      }
+      if (question && turns[turns.length - 1] === turn && !(running && running.turn === turn) && !turn.pending) {   // asked, and not answered yet: tap to answer
+        const ask = el("div", "ask");
+        question.options.forEach(label => {
+          const b = el("button", "opt", label); b.type = "button"; b.setAttribute("data-tel", "workshop:option");
+          b.addEventListener("click", () => { if (sending) return; text.value = label; form.requestSubmit(); });
+          ask.appendChild(b);
+        });
+        box.appendChild(ask); askBox = ask;
+      }
+      if (turn.note) box.appendChild(el("div", "note" + (turn.bad ? " bad" : ""), turn.note));
+      if (drawn) { box.appendChild(drawn.list); box.appendChild(drawn.tip); box.appendChild(drawn.strip); }   // the list, its tip, the strip last
+      box.classList.toggle("failed", !!turn.bad);
+      if (turn.t0 && !turn.note && ((running && running.turn === turn) || turn.pending)) {     // still being worked on: say so, with a clock
+        const w = el("div", "working"); w.appendChild(el("span", "dots", "\u2022\u2022\u2022")); w.appendChild(el("span", "w", " Working "));
+        liveClock = el("span", "t", clock(turn.t0)); w.appendChild(liveClock); box.appendChild(w);
+      } else if (!(turn.parts || []).length && !turn.note) box.appendChild(el("div", "act", "…"));
+    }
+    // The log is a plain scrolling transcript: a new turn takes you to the bottom (the latest words), and a conversation you are
+    // reading further up is left where it is while Skippy keeps writing.
+    const scroll = (force) => { if (force || log.scrollHeight - log.scrollTop - log.clientHeight < 160) log.scrollTop = log.scrollHeight; };
+    const scrollNow = () => requestAnimationFrame(() => scroll(true));  // defer: let the DOM settle first
+    const pane = root.closest(".apane");
+    if (pane) pane.addEventListener("pane-shown", () => scroll(true));
+
+    // ── the ship card: Skippy pushed a commit; show it going live (portal/ship.py answers) ─────────────────────
+    // One card per commit for the life of the page (a redraw re-uses it), polled every 10 s until the answer is final.
+    const SHIP = "{{ url_for('me.workshop_ship') }}", SHIP_EVERY_MS = 10000, SHIP_GIVE_UP_MS = 40 * 60000;
+    const ships = {};                              // sha -> {card, final, started}
+    const MARK = {done: "✓", running: "…", queued: "…", waiting: "·", failed: "✗", skipped: "–"};
+    const safeLink = (u) => typeof u === "string" && (u.indexOf("https://github.com/") === 0 || u === "/admin#recovery");
+    function paintShip(s, d) {
+      const c = s.card;
+      c.className = "ship " + (d.tone === "ok" ? "ok" : d.tone === "bad" ? "bad" : "wait");
+      const links = el("div", "links");
+      [["commit", "Commit " + (d.short || "")], ["run", "Deploy run"], ["workflow", "Its deploy workflow"], ["rollback", "Roll back (Admin)"]]
+        .forEach(([k, label]) => {
+          const u = d.links && d.links[k];
+          if (!safeLink(u)) return;
+          const a = el("a", null, label); a.href = u; if (k !== "rollback") { a.target = "_blank"; a.rel = "noopener"; }
+          links.appendChild(a);
+        });
+      const stages = el("div", "stages");
+      (Array.isArray(d.stages) ? d.stages : []).forEach(st => stages.appendChild(el("span", "st " + st.state, (MARK[st.state] || "·") + " " + st.name)));
+      c.replaceChildren(el("div", "head", d.headline || "Pushed."), el("div", "subj", d.subject || ""), stages,
+                        el("div", "note", d.note || ""), links);
+    }
+    async function watchShip(sha, p) {
+      const s = ships[sha];
+      while (!s.final) {
+        let d = null;
+        try {
+          const r = await call(SHIP + "?sha=" + encodeURIComponent(sha), {headers: H});
+          if (r.ok && r.data) d = r.data;
+          else if (r.status === 404) {             // a portal redeployed since: it no longer knows this push. Say so, keep the link.
+            const repo = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(p.repo || "") ? p.repo : "";
+            d = {final: true, tone: "wait", headline: "Pushed " + sha.slice(0, 7) + ".", subject: p.subject,
+                 note: "The portal was redeployed since, so it can't follow this one any more.",
+                 links: repo ? {commit: "https://github.com/" + repo + "/commit/" + sha} : {}, short: sha.slice(0, 7)};
+          }
+        } catch (e) {}
+        if (d) { paintShip(s, d); s.final = !!d.final; }
+        if (s.final) break;
+        if (Date.now() - s.started > SHIP_GIVE_UP_MS) {
+          paintShip(s, {tone: "wait", headline: "Stopped watching after 40 min.", note: "Reload the page to look again.", short: sha.slice(0, 7),
+                        links: {commit: d && d.links ? d.links.commit : ""}});
+          break;
+        }
+        await new Promise(res => setTimeout(res, SHIP_EVERY_MS));
+      }
+    }
+    // A screenshot Skippy attached (served by the portal from memory: it is gone after a portal deploy, so it says so).
+    const IMAGE = "{{ url_for('me.workshop_image') }}";
+    function shot(p) {
+      if (!/^[a-f0-9]{8,32}$/.test(p.task || "") || !Number.isInteger(p.n)) return el("div", "act", "› a screenshot");
+      const src = IMAGE + "?task=" + encodeURIComponent(p.task) + "&n=" + p.n;
+      // Not a picture: a 3D model to rotate, a player, or a download, open in place in the reply (SKIPPY_MODEL / AUDIO / VIDEO / FILE).
+      // Everything is made on skippy-pc and shown here: the browser keeps nothing (the Captain, 2026-10-25).
+      const kind = p.mime === "model/gltf-binary" ? "model" : /^video\//.test(p.mime || "") ? "video"
+                 : p.mime === "audio/midi" || p.mime === "application/zip" ? "file" : /^audio\//.test(p.mime || "") ? "audio" : "";
+      if (kind && window.SkippyArtifacts) {
+        const titles = {model: "3D model", video: "Video", audio: "Sound", file: p.mime === "audio/midi" ? "MIDI file" : "Zip"};
+        const spec = SkippyArtifacts.fromMedia({kind: kind, url: src, title: titles[kind]}); spec.open = true;
+        return SkippyArtifacts.card(spec);
+      }
+      const a = el("a", "shotlink"); a.href = src; a.target = "_blank"; a.rel = "noopener";
+      const img = el("img", "shot"); img.alt = "Screenshot of the change"; img.src = src;
+      img.addEventListener("error", () => a.replaceChildren(el("div", "act", "› the screenshot is gone (the portal restarted since)")));
+      a.appendChild(img);
+      if (typeof window !== "undefined" && window.SkippyAnnotate) {   // tap: mark it up, send it back as a change request (static/skippy-annotate.js)
+        a.title = "Mark it up and send it back";
+        a.addEventListener("click", ev => {
+          ev.preventDefault();
+          SkippyAnnotate.open({src: src, name: p.name || "", onSend: (url, legend, fileName) => {
+            if (window.SkippyCompose && window.SkippyCompose.attach(fileName, url, legend)) return;   // the one chat's composer
+            if (attached.length < MAX_IMAGES) { attached.push({url}); paintAttached(); }              // this card's own
+            text.value = legend + (text.value ? "\n" + text.value : "\n"); text.focus();
+          }});
+        });
+      }
+      return a;
+    }
+    // A picture Skippy asked to have MADE (a SKIPPY_PICTURE line): a patient job (portal/patient.py) whose id the bridge chose, shown
+    // with the chat's own waiting card (_chat.html's waitCard), which turns into the picture when it is drawn, even days later.
+    function pictureCard(p) {
+      if (!/^[0-9a-f]{16}$/.test(p.id || "")) return el("div", "act", "› a picture");
+      // (a SKIPPY_POPUP line's job too: kind "popup", whose card learns what it shows when it's done)
+      const holder = el("div", "act", "› " + (p.kind === "popup" ? "" : "a picture: ") + (p.prompt || "").slice(0, 120));
+      const card = () => SkippyWaitCard({kind: p.kind || "image", job_id: p.id, pending: true, title: p.prompt});
+      const swap = () => { if (window.SkippyWaitCard) holder.replaceWith(card()); };
+      if (window.SkippyWaitCard) return card();
+      setTimeout(swap, 0);                         // (this script runs before the chat's: a replay at load waits for it)
+      return holder;
+    }
+    function shipCard(p) {
+      if (!/^[0-9a-f]{40}$/.test(p.sha || "")) return el("div", "act", "› pushed");
+      if (!ships[p.sha]) {
+        ships[p.sha] = {card: el("div", "ship wait"), final: false, started: Date.now()};
+        paintShip(ships[p.sha], {headline: "Pushed " + p.sha.slice(0, 7) + ". Checking…", subject: p.subject});
+        watchShip(p.sha, p);
+      }
+      return ships[p.sha].card;
+    }
+
+    // ── the quiet link ────────────────────────────────────────────────────────────
+    // job.kind says why: "stalled" (skippy-pc stopped reporting), "offline" (it never picked the task up),
+    // "unknown" (the portal has no record: it was probably just redeployed), "net" (this browser can't reach the
+    // portal), "signin" (the Google session ended: only a reload helps). "" is a healthy link.
+    const span = (s) => (s < 15 ? "a few seconds" : s < 60 ? (Math.floor(s / 15) * 15) + " s" : Math.floor(s / 60) + " min");
+    function quietSeconds(job) {                   // the longer of what this page saw and what the portal says
+      const mine = (Date.now() - job.quietSince) / 1000;
+      const theirs = job.srv ? job.srv.s + (Date.now() - job.srv.at) / 1000 : 0;
+      return Math.max(mine, theirs);
+    }
+    function quietMessage(job) {
+      const t = span(quietSeconds(job)), tail = " It reconnects by itself; this can take a minute after a deploy.";
+      if (job.kind === "signin") return "Your sign-in to the portal ended. Reload this page to sign in again; this chat is kept.";
+      if (job.kind === "net") return "Can't reach the portal (" + t + "): your connection, or it is redeploying. Trying again by itself.";
+      if (job.kind === "offline") return "skippy-pc hasn't picked this up for " + t + ". Is the bridge running there?" + tail;
+      return "No word from skippy-pc for " + t + "." + tail;      // stalled, or the portal lost the task
+    }
+    const quiet = (job) => !!job && job.quietSince != null;
+    const canLeave = (job) => quiet(job) && job.kind !== "signin" && Date.now() - job.quietSince >= LEAVE_AFTER_MS;
+    function ui() {                                // the card's controls, from the state alone (safe to call any time)
+      const job = running, q = quiet(job);
+      send.disabled = sending || (!!job && !!job.kind && !canLeave(job));
+      text.placeholder = job && !job.kind ? "Queue a message: they all go together when Skippy is done" : "Message Skippy";
+      stopBtn.hidden = !job || !!job.stopping;     // Stop stays while a task is followed (even a quiet one: skippy-pc gets it on return)
+      strip.hidden = !q;
+      if (!q) return;
+      strip.classList.toggle("bad", job.kind === "signin");
+      setText(quietMsg, quietMessage(job));
+      quietHint.hidden = !(canLeave(job));
+      reloadBtn.hidden = job.kind !== "signin";
+      checkBtn.disabled = !!job.checking;
+      setText(checkBtn, job.checking ? "Checking…" : "Check again");
+    }
+    setInterval(() => {
+      if (running) ui();
+      const t0 = running && running.turn && running.turn.t0;
+      if (liveClock && t0) setText(liveClock, clock(t0));
+    }, 1000);    // the seconds move on, and Send comes back on time
+
+    function resync(job) {                         // ask skippy-pc to look at this task now (the portal wakes the reporter)
+      job.lastResync = Date.now();
+      call(RESYNC, {method: "POST", headers: H, body: JSON.stringify({task: job.task})}).catch(() => {});
+    }
+    function goQuiet(job, kind, srvS) {
+      const now = Date.now();
+      if (job.quietSince == null) { job.quietSince = now; if (kind !== "signin") resync(job); }
+      else if (kind !== "signin" && now - job.lastResync >= RESYNC_EVERY_MS) resync(job);
+      job.kind = kind; job.srv = srvS == null ? null : {s: srvS, at: now};
+    }
+    function leave(job) {                          // Send was pressed while the link was quiet: stop following that task
+      job.turn.note = "(left waiting)"; job.turn.bad = false; draw(job.turn); save();
+      store.del(K.task); running = null;
+      if (job.wake) job.wake();
+      return job;
+    }
+    function resume(job) {                         // the bridge is still on that task: watch it again
+      delete job.turn.note; job.turn.bad = false; draw(job.turn); save();
+      follow(job);
+    }
+
+    async function call(url, opts) {
+      const ctl = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = ctl ? setTimeout(() => ctl.abort(), TIMEOUT_MS) : null;
+      try {
+        const res = await fetch(url, {credentials: "same-origin", ...(ctl ? {signal: ctl.signal} : {}), ...opts});
+        if (res.redirected) { const e = new Error("Your sign-in expired: reload the page."); e.signin = true; throw e; }
+        if (!(res.headers.get("content-type") || "").includes("json")) throw new Error("The portal didn't answer properly (HTTP " + res.status + ").");
+        return {ok: res.ok, status: res.status, data: await res.json()};
+      } finally { if (timer) clearTimeout(timer); }
+    }
+    function nap(job, ms) {                        // sleep, unless Check again (or leaving) wakes the loop sooner
+      return new Promise(resolve => {
+        if (job.poked) { job.poked = false; resolve(); return; }
+        const done = () => { clearTimeout(timer); job.wake = null; resolve(); };
+        const timer = setTimeout(done, ms);
+        job.wake = done;
+      });
+    }
+
+    async function poll(job) {                     // one look at the task: what to do next, and what the link is like
+      let r = null, why = "net";
+      try { r = await call(EVENTS + "?task=" + encodeURIComponent(job.task) + "&after=" + job.after, {headers: H}); }
+      catch (e) { why = e && e.signin ? "signin" : "net"; }
+      if (running !== job) return {stale: true};   // left, replaced or reset while the request was out
+      if (r && (r.status === 401 || r.status === 403)) why = "signin";
+      const d = r && r.ok && r.data && typeof r.data === "object" ? r.data : null;
+      if (d && d.state !== "unknown") {            // a stalled or offline read is still a read: keep what it carries
+        if (Array.isArray(d.events)) d.events.forEach(e => {
+          if (e && e.t === "image" && Number.isInteger(e.n)) job.turn.parts.push({t: "image", n: e.n, task: job.task, mime: e.mime, name: e.name});
+          else if (e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture" || e.t === "popup" || e.t === "retry" || e.t === "chain")) job.turn.parts.push(e);
+        });
+        if (typeof d.next === "number" && d.next > job.after) job.after = d.next;   // never back: a portal that was just rebuilt holds fewer events than this page has
+        store.set(K.task, JSON.stringify({task: job.task, after: job.after}));
+      }
+      const kind = !d ? why : d.state === "unknown" ? "unknown" : (d.state === "stalled" || d.state === "offline") ? d.state : "";
+      if (kind) goQuiet(job, kind, d && typeof d.quiet_s === "number" ? d.quiet_s : null);
+      else { job.quietSince = null; job.kind = ""; job.srv = null; delete job.turn.note; job.turn.bad = false; }
+      if (d && d.state === "waiting") job.turn.note = WAIT_NOTE + (d.ahead > 0 ? " " + d.ahead + (d.ahead === 1 ? " is" : " are") + " ahead of this." : "")
+        + (typeof d.front_s === "number" && d.front_s >= 120 ? " The one in front has been going for " + spanOf(d.front_s) + "." : "");     // sent while another run goes: it waits its turn (portal/workshop.py)
+      const out = {kind, end: false, resume: null};
+      if (d && (d.state === "done" || d.state === "error")) {
+        out.end = true;
+        if (d.state === "error") { job.turn.note = d.error || "It failed."; job.turn.bad = d.error !== "stopped" && !/^Paused so another chat/.test(d.error || ""); }   // (a pause is no failure: workshop.PAUSED_TEXT)
+        if (d.error === BUSY && job.left) out.resume = job.left;   // the bridge is still on the task this one replaced
+        store.del(K.task);
+      }
+      draw(job.turn); save(); scrollNow();
+      return out;
+    }
+
+    async function follow(job) {                   // poll a task until it ends, riding out portal, reporter and bridge restarts
+      running = job; job.quietSince = null; job.kind = ""; job.srv = null; job.checking = false; job.poked = false; job.lastResync = 0;
+      if (!Array.isArray(job.turn.parts)) job.turn.parts = [];                 // a transcript saved by an older page
+      store.set(K.task, JSON.stringify({task: job.task, after: job.after}));   // a reload before the first answer still finds it
+      ui();
+      let out = {};
+      while (running === job) {
+        const asked = job.checking, was = job.quietSince;
+        try { out = await poll(job); }
+        catch (e) { out = {kind: "net"}; job.quietSince = was; goQuiet(job, "net", null); }   // a bug or an odd answer must never strand the card (and must not restart its 30 s)
+        if (out.stale || running !== job) return;  // another task owns the card now
+        if (asked) job.checking = false;
+        if (out.end) break;
+        ui();
+        await nap(job, out.kind ? pollDelay(Date.now() - job.quietSince) : POLL_MS);
+      }
+      if (running !== job) return;                 // left or reset while it napped: the card is someone else's now
+      running = null; ui(); text.focus(); draw(job.turn); save();       // the working line goes
+      if (out.end && !job.turn.note) drainQueue();                      // the queue goes as one message, unless he stopped it or it failed
+      // Spoken: only the reply's LAST text, the agent's closing report (its prompt makes that one to three sentences). The progress
+      // notes before it ("my clone has uncommitted changes", "let me check…") are for reading, not for the voice (the Captain, 2026-10-24).
+      const texts = job.turn.bad ? [] : (job.turn.parts || []).filter(p => p.t === "text" && String(p.text || "").trim());
+      const said = job.turn.bad ? null : (texts.length ? texts[texts.length - 1].text : "");
+      const hand = typeof window !== "undefined" && window.SkippyAgent && window.SkippyAgent.onReply;
+      if (hand) hand(said);                                              // inside the one chat: its voice speaks it (always in Hands-off)
+      else if (said == null) voice.resume();                             // no answer to speak: in a spoken conversation the turn comes back to him
+      else voice.say(said);                                              // this card alone: aloud, if its speaker key is on
+      if (out.resume) resume(out.resume);
+    }
+
+    // ── the queue: messages sent while Skippy works wait here, and go together, in one message, when the task returns ──
+    const QK = "ps-queue";
+    let queue = []; try { queue = JSON.parse(store.get(QK) || "[]"); if (!Array.isArray(queue)) queue = []; } catch (e) { queue = []; }
+    const saveQueue = () => store.set(QK, JSON.stringify(queue.slice(0, 20)));
+    function paintQueue() {
+      queueBox.hidden = !queue.length;
+      queueBox.replaceChildren(...queue.map((q, i) => {
+        const row = el("div", "qrow"), x = el("button", null, "\u00D7"); x.setAttribute("data-tel", "workshop:queue-remove");
+        x.type = "button"; x.title = "Take this out of the queue"; x.setAttribute("aria-label", "Take this out of the queue");
+        x.addEventListener("click", () => { queue.splice(i, 1); saveQueue(); paintQueue(); });
+        row.append(el("span", "qt", q), x); return row;
+      }));
+    }
+    const gulp = (items) => SkippyQueue.gulp(items);           // static/skippy-queue.js, the same line as green's: repeats taken out
+    const waiting = () => !!running && !running.kind;           // a healthy run: new messages queue instead of being refused
+    function drainQueue() {                                     // the task returned: everything queued goes as ONE message
+      if (!queue.length || sending || running) return;
+      const draft = text.value, all = queue.splice(0);
+      saveQueue(); paintQueue();
+      text.value = gulp(all);
+      form.requestSubmit();
+      text.value = draft;                                       // what he was typing meanwhile is still there
+    }
+    paintQueue();
+
+    // ── pictures: paste (a screenshot from the clipboard), drop, or pick; each is shrunk to a JPEG here and goes with the message ──
+    const MAX_IMAGES = 4, MAX_EDGE = 1800;
+    let attached = [];                             // [{url: a data URL}]
+    function paintAttached() {
+      attachBox.hidden = !attached.length;
+      attachBox.replaceChildren(...attached.map((a, i) => {
+        const chip = el("div", "chip"), im = el("img"), x = el("button", null, "\u00D7"); x.setAttribute("data-tel", "workshop:picture-remove");
+        im.src = a.url; im.alt = ""; x.type = "button"; x.title = "Remove"; x.setAttribute("aria-label", "Remove this image");
+        x.addEventListener("click", () => { attached.splice(i, 1); paintAttached(); });
+        chip.append(im, x); return chip;
+      }));
+    }
+    function shrink(file) {                        // -> a JPEG data URL, at most MAX_EDGE px on a side and about a megabyte
+      return new Promise((ok, no) => {
+        const src = URL.createObjectURL(file), img = new Image();
+        img.onerror = () => { URL.revokeObjectURL(src); no(new Error("not an image")); };
+        img.onload = () => {
+          URL.revokeObjectURL(src);
+          for (const [edge, q] of [[MAX_EDGE, 0.88], [1400, 0.8], [1000, 0.7]]) {
+            const k = Math.min(1, edge / Math.max(img.naturalWidth, img.naturalHeight)), c = document.createElement("canvas");
+            c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+            const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+            const url = c.toDataURL("image/jpeg", q);
+            if (url.length < 1100000) return ok(url);
+          }
+          no(new Error("too big"));
+        };
+        img.src = src;
+      });
+    }
+    async function addImages(files) {
+      for (const f of files) {
+        if (attached.length >= MAX_IMAGES) break;
+        try {
+          const url = await shrink(f);
+          if (attached.reduce((n, a) => n + a.url.length, url.length) > 3100000) break;   // the portal's total for one message (workshop.MAX_IMAGES_B64)
+          attached.push({url});
+        } catch (e) {}
+      }
+      paintAttached(); text.focus();
+    }
+    text.addEventListener("paste", (e) => {
+      const files = [...((e.clipboardData && e.clipboardData.items) || [])].filter(i => i.kind === "file" && /^image\//.test(i.type)).map(i => i.getAsFile()).filter(Boolean);
+      if (files.length) { e.preventDefault(); addImages(files); }        // text pastes are left alone
+    });
+    const hasFiles = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].indexOf("Files") >= 0;
+    form.addEventListener("dragover", (e) => { if (hasFiles(e)) { e.preventDefault(); form.classList.add("drop"); } });
+    form.addEventListener("dragleave", () => form.classList.remove("drop"));
+    form.addEventListener("drop", (e) => {
+      form.classList.remove("drop");
+      const files = [...((e.dataTransfer && e.dataTransfer.files) || [])].filter(f => /^image\//.test(f.type));
+      if (files.length) { e.preventDefault(); addImages(files); }
+    });
+    imgBtn.addEventListener("click", () => fileIn.click());
+    fileIn.addEventListener("change", () => { addImages([...fileIn.files]); fileIn.value = ""; });
+
+    form.addEventListener("submit", async (ev) => {
+      ev.preventDefault();
+      let message = text.value.trim();
+      if ((!message && !attached.length) || sending) return;
+      if (waiting() && message) {
+        if (SkippyQueue.add(queue, message)) { saveQueue(); paintQueue(); }   // queued, not lost; the same words again are one tap that looked unanswered
+        text.value = ""; return;
+      }
+      let gone = null;
+      if (running) { if (!canLeave(running)) return; gone = leave(running); }
+      if (queue.length) { message = gulp([...queue.splice(0), ...(message ? [message] : [])]); saveQueue(); paintQueue(); }
+      showConvs(false);
+      if (askBox) askBox.hidden = true;               // asked and answered (by a tap or by typing)
+      const sent = attached.map(a => a.url); attached = []; paintAttached();
+      const fresh = [];                                          // heard since your last message: it goes with this one, as context
+      for (let i = turns.length - 1; i >= 0 && turns[i].role === "heard"; i--) if (!turns[i].sent) fresh.unshift(turns[i]);
+      const mine = {role: "user", text: message || "(image)"}; if (sent.length) { mine.imgs = sent.length; thumbsOf.set(mine, sent); }
+      turns.push(mine); draw(mine);
+      const reply = {role: "assistant", parts: [], t0: Date.now(), pending: true}; turns.push(reply); draw(reply); scroll(true); lockPicker();
+      if (!pins.some(x => x.conv === conv)) { pin({conv, title: message || "(image)", project}); }      // a conversation you are in is pinned until you unpin it
+      text.value = ""; sending = true; ui();
+      // The message shows as SENDING at once, and one id (client_id) rides with every try: a slow reply or a lost one is retried here
+      // with the same id, and the portal returns the task it already made, so it never queues twice (2026-10-27).
+      const cid = ((crypto && crypto.randomUUID) ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(36).slice(2)).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40).padEnd(8, "0");
+      reply.note = "Sending\u2026"; draw(reply);
+      let r;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try { r = await call(SEND, {method: "POST", headers: H, body: JSON.stringify({conv, message: withHeard(fresh, message), project, brain, images: sent, client_id: cid})}); }
+        catch (e) { r = {ok: false, data: {error: e.message}, lost: !e.signin}; }
+        if (r.ok || !r.lost) break;                                  // an answer (even a refusal) is final; only a lost one is tried again
+        reply.note = "Sending again\u2026"; draw(reply);
+        await new Promise(res => setTimeout(res, 1500 * (attempt + 1)));
+      }
+      sending = false; reply.pending = false; if (r.ok) { reply.note = ""; draw(reply); }
+      if (!r.ok) {
+        reply.note = (r.data && r.data.error) || "That didn't go through."; reply.bad = true; draw(reply); save(); ui(); voice.resume();
+        if (gone && r.status === 409) resume(gone);   // the old task is still alive: don't lose sight of it
+        return;
+      }
+      fresh.forEach(h => { h.sent = true; });
+      save(); follow({task: r.data.task, after: 0, turn: reply, left: gone});
+    });
+    text.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); form.requestSubmit(); } });
+    stopBtn.addEventListener("click", async () => {
+      const job = running;
+      if (!job) return;
+      try { await call(STOP, {method: "POST", headers: H, body: JSON.stringify({task: job.task})}); } catch (e) {}
+      job.stopping = true;                         // (the card may have moved on to another task while that was out: only this job's note changes)
+      if (running === job) { job.turn.note = "Stopping…"; draw(job.turn); }
+      ui();
+    });
+    checkBtn.addEventListener("click", () => {     // look now: ask skippy-pc to resync AND poll the portal this instant
+      const job = running;
+      if (!job || job.checking) return;
+      job.checking = true; resync(job);
+      if (job.wake) job.wake(); else job.poked = true;   // napping: wake it; a poll is out right now: the next one starts at once
+      ui();
+    });
+    reloadBtn.addEventListener("click", () => location.reload());
+    function leaveConversation() {                 // no "are you sure": the task keeps going on skippy-pc either way
+      const job = running; running = null; if (job && job.wake) job.wake();
+      turns = []; save(); store.del(K.task); flow.replaceChildren(); queue = []; saveQueue(); paintQueue(); ui();
+      return true;
+    }
+    newBtn.addEventListener("click", () => {       // a new conversation, and the picker asks which project it is for
+      if (!leaveConversation()) return;
+      conv = uuid(); store.set(K.conv, conv); showConvs(false);
+      lockPicker(); pickHint.hidden = false; picker.focus();
+    });
+
+    // ── Conversations: the history skippy-pc keeps; tap one to read it and carry on in it ─────────────────────
+    let historyAsk = 0;                            // the newest request: an older answer that arrives late is dropped
+    function showConvs(on) {
+      convsBox.hidden = !on; log.hidden = on;
+      if (!on) scroll(true);
+      setText(convsBtn, on ? "Back to chat" : "Conversations");
+      if (!on) historyAsk++;
+    }
+    async function history(body) {                 // ask skippy-pc (via a job), then poll for the answer: about 1-15 s
+      const mine = ++historyAsk;
+      const r = await call(HISTORY, {method: "POST", headers: H, body: JSON.stringify(body)});
+      if (!r.ok || !r.data || !r.data.job) throw new Error((r.data && r.data.error) || "skippy-pc didn't take the request.");
+      for (let i = 0; i < 40; i++) {
+        await new Promise(res => setTimeout(res, 1000));
+        if (mine !== historyAsk) return null;
+        const g = await call(HISTORY_RESULT + "?job=" + encodeURIComponent(r.data.job), {headers: H});
+        const d = g.data || {};
+        if (d.state === "done") return d;
+        if (d.state === "error" || d.state === "unknown") throw new Error(d.error || "skippy-pc couldn't answer.");
+      }
+      throw new Error("skippy-pc didn't answer within 40 s. Is home reporting?");
+    }
+    const ago = (t) => {                           // seconds since the epoch -> "5 min ago"
+      const s = Math.max(0, Date.now() / 1000 - t);
+      return s < 90 ? "just now" : s < 5400 ? Math.round(s / 60) + " min ago" : s < 129600 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago";
+    };
+    async function listConversations() {
+      showConvs(true); setText(convsMsg, "Asking skippy-pc…"); convsMsg.classList.toggle("bad", false); convsList.replaceChildren();
+      const mine = historyAsk + 1;
+      let d;
+      try { d = await history({}); } catch (e) { if (mine === historyAsk) { setText(convsMsg, e.message); convsMsg.classList.toggle("bad", true); } return; }
+      if (!d || mine !== historyAsk) return;
+      const rows = Array.isArray(d.conversations) ? d.conversations : [];
+      setText(convsMsg, rows.length ? "Tap one to read it and carry on." : "No conversations yet.");
+      const byConv = {}; rows.forEach(c => { byConv[c.conv] = c; });
+      const line = (c) => {
+        const b = el("button", "item"); b.type = "button";
+        b.appendChild(el("span", "title", c.title));
+        b.appendChild(el("span", "meta", projectName(c.project) + " · " + c.turns + (c.turns === 1 ? " message" : " messages") +
+                                          " · " + (c.last ? ago(c.last) : "") + (c.state === "running" ? " · working now" : "")));
+        b.addEventListener("click", () => { openConversation(c); });
+        return b;
+      };
+      if (pins.length) convsList.appendChild(el("h4", null, "Active"));
+      pins.forEach(pn => {                         // the ones you are in: tap to switch, \u00D7 when the task is done
+        const c = byConv[pn.conv] || {conv: pn.conv, project: pn.project, title: pn.title, turns: 0, last: 0};
+        const row = el("div", "row" + (pn.conv === conv ? " open" : "")), x = el("button", "unpin", "\u00D7"); x.setAttribute("data-tel", "workshop:unpin");
+        x.type = "button"; x.title = "Unpin: this task is done"; x.setAttribute("aria-label", "Unpin this conversation");
+        x.addEventListener("click", () => { unpin(pn.conv); listConversations(); });
+        const b = line(Object.assign({}, c, {title: c.title || pn.title}));
+        row.append(b, x); convsList.appendChild(row);
+      });
+      const rest = rows.filter(c => !pins.some(pn => pn.conv === c.conv));
+      if (pins.length && rest.length) convsList.appendChild(el("h4", null, "Earlier"));
+      rest.forEach(c => convsList.appendChild(line(c)));
+    }
+    async function openConversation(c) {
+      if (!leaveConversation()) return;
+      setText(convsMsg, "Opening “" + c.title + "”…"); convsMsg.classList.toggle("bad", false);
+      const mine = historyAsk + 1;
+      let d;
+      try { d = await history({conv: c.conv}); } catch (e) { if (mine === historyAsk) { setText(convsMsg, e.message); convsMsg.classList.toggle("bad", true); } return; }
+      if (!d || mine !== historyAsk || !d.conversation) return;
+      const got = d.conversation;
+      conv = got.conv; store.set(K.conv, conv); setProject(known(got.project) ? got.project : project);
+      pin({conv: got.conv, title: c.title || got.title, project: got.project});
+      turns = [];
+      (got.turns || []).forEach(t => {
+        turns.push({role: "user", text: t.message});
+        const reply = {role: "assistant", parts: (t.events || []).filter(e => e && (e.t === "text" || e.t === "tool" || e.t === "ship" || e.t === "picture" || e.t === "popup" || e.t === "retry" || e.t === "chain"))};
+        if (t.state === "error") { reply.note = t.error || "It failed."; reply.bad = t.error !== "stopped"; }
+        reply.task = t.task;
+        turns.push(reply);
+      });
+      save(); flow.replaceChildren(); turns.forEach(draw); lockPicker(); showConvs(false); scrollNow();
+      const last = got.turns && got.turns[got.turns.length - 1];
+      if (last && last.state === "running" && last.task) {       // still being worked on: follow it from the start
+        const reply = turns[turns.length - 1]; reply.parts = []; draw(reply);
+        follow({task: last.task, after: 0, turn: reply});
+      }
+      text.focus();
+    }
+    convsBtn.addEventListener("click", () => { if (convsBox.hidden) listConversations(); else showConvs(false); });
+    notifyBox.addEventListener("change", async () => {   // the server keeps it; a failed save puts the box back
+      const want = !!notifyBox.checked;
+      let r = null;
+      try { r = await call("{{ url_for('me.workshop_notify') }}", {method: "POST", headers: H, body: JSON.stringify({on: want})}); } catch (e) {}
+      if (!r || !r.ok || !r.data || r.data.on !== want) notifyBox.checked = !want;
+    });
+
+    turns.forEach(draw); scrollNow(); lockPicker(); ui(); refreshCopyAll();
+    // A new browser, window or device has no memory of this chat, but skippy-pc does: open the latest conversation there instead of
+    // starting a blank one beside it (the chat used to look like it kept making new chats). New chat is still the explicit way to start one.
+    async function resumeLatest() {
+      try {
+        const d = await history({});
+        const rows = d && Array.isArray(d.conversations) ? d.conversations : [];
+        if (!rows.length || talked() || sending || running) return;      // the Captain already started typing here: leave it
+        await openConversation(rows.slice().sort((a, b) => (b.last || 0) - (a.last || 0))[0]);
+      } catch (e) {}
+    }
+    if (fresh) resumeLatest();
+    // A reload (or a portal deploy) mid-task: pick the task back up where this page left off.
+    const pending = store.get(K.task);
+    const lastReply = [...turns].reverse().find(t => t.role !== "heard");
+    if (pending && lastReply && lastReply.role === "assistant") {
+      try { const t = JSON.parse(pending); if (t && t.task) follow({task: t.task, after: t.after || 0, turn: lastReply}); } catch (e) {}
+    }
+
+    // ── the handle the one chat drives this with (templates/_chat.html: the agent is two of its brains) ──
+    // Everything above is unchanged; the chat's composer, keys and chats sheet call these instead of this card's own.
+    if (typeof window !== "undefined") window.SkippyAgent = {
+      projects: PROJECTS, brains: BRAINS,
+      project: () => project, brain: () => brain, locked: () => talked(), busy: () => !!running || sending,
+      setProject(id) { if (!talked() && known(id)) setProject(id); return project; },
+      setBrain(id) { if (!talked() && BRAINS.some(b => b.id === id && b.ready)) setBrain(id); return brain; },
+      send(message, images) {                       // pictures as data URLs (the chat shrinks them already)
+        attached = (images || []).slice(0, MAX_IMAGES).map(u => ({url: u})); paintAttached();
+        text.value = message || ""; form.requestSubmit();
+      },
+      heard(text, lang, name) {                    // Hands-off heard someone in another language: a line in this transcript
+        const turn = {role: "heard", text: String(text).slice(0, 2000), lang: String(lang || "").slice(0, 8), name: String(name || lang || "").slice(0, 40)};
+        turns.push(turn); draw(turn); save(); scroll(true);
+      },
+      stop() { stopBtn.click(); },
+      // the last few turns as plain words (the quick spoken line's context: /chat/quick)
+      recent(n) { return turns.filter(t => t.role !== "heard").slice(-(n || 6)).map(t => ({role: t.role, text: String(turnMd(t) || "").slice(0, 1500)})); },
+      newChat() { newBtn.click(); },
+      async conversations() {                       // skippy-pc's list, for the chat's sheet: [{conv, title, project, turns, last, state}]
+        const d = await history({});
+        return d && Array.isArray(d.conversations) ? d.conversations : [];
+      },
+      open(c) { return openConversation(c); },
+      conv: () => conv,
+    };
+    if (typeof window !== "undefined" && typeof Event === "function") window.dispatchEvent(new Event("skippy-agent-ready"));   // (the UI tests run this without a window)
+  })();
+</script>

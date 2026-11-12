@@ -1,0 +1,160 @@
+# The room boxes
+
+A Waveshare **ESP32-S3 Smart 86 Box** (Waveshare's name for it in its wiki: ESP32-S3-Touch-LCD-4B) per room, flashed with `skippy-room.yaml`. Each one is a dumb
+terminal: it hears and it plays. Everything that thinks lives on skippy-pc in `hub.py`: the "Skippy" wake word, Whisper, the brain, Skippy's voice,
+the lights and plugs, and Bilby's music. The box only does the things that are faster done on the box itself:
+
+* it cleans and streams its microphones (16 kHz) to the hub while the hub is connected;
+* it plays the URLs the hub sends it from skippy-pc's media server: Skippy's voice as an *announcement* over the music, and Bilby's tracks as
+  *media*. It ducks the music under the voice itself;
+* the two volume keys change the volume at once;
+* a ring on the screen breathes in the colour of what is happening: blue idle, cyan listening, amber thinking, purple speaking, green music,
+  red muted. Under it, the hub writes what is playing or what Skippy just said;
+* a tap on the screen counts as "Skippy" (the hub decides what that means).
+
+## Flash one (skippy-pc, Git Bash)
+
+1. In the vault `.env`: `ROOM_WIFI_SSID` and `ROOM_WIFI_PASSWORD` (a **2.4 GHz** network: the ESP32-S3 has no 5 GHz).
+2. Plug the box into skippy-pc with USB-C, then:
+
+        bash services/satellite/rooms/flash.sh kitchen "Kitchen"
+
+   The first run makes `SATELLITE_ESPHOME_KEY` (the API encryption key, one for all the boxes) and `SATELLITE_ESPHOME_OTA`, and prints them
+   **once**: put both lines in the vault. Later updates use the same command over Wi-Fi.
+3. Tell the hub about it, in the vault `.env`:
+
+        SATELLITE_ROOMS=kitchen=esphome://skippy-kitchen.local,bedroom=esphome://skippy-bedroom.local,den=esphome://skippy-den.local
+        SATELLITE_ROOM_NAMES=kitchen=Kitchen (Skippy),bedroom=Bedroom (Skippy),den=Den (Skippy)      # what Bilby's "Play on" calls them
+
+4. Let the boxes reach skippy-pc's media server: allow inbound TCP **10800** on the private network in Windows Firewall (one time):
+
+        netsh advfirewall firewall add rule name="Skippy media (room boxes)" dir=in action=allow protocol=TCP localport=10800 profile=private
+
+5. Start the hub: `cd services/satellite && ./.venv/Scripts/python hub.py`.
+
+## Bilby's Audio Service on the boxes
+
+Each connected box checks in with the portal as one of the Captain's Connect devices (`POST /home/music/checkin`, with the home token). So every
+Bilby player lists it under **Play on** next to the speaker windows (**All** when there are more than two). Choosing it hands the box the phone's
+queue at the same place, and play, pause, next and previous from any player's remote reach it. The music never passes through the portal: the
+box fetches each track from skippy-pc's media server, which reads it from the local music gate and has ffmpeg turn it into 16 kHz mono FLAC
+(the library's `.m4a` files are AAC, which an ESP32 cannot decode). By voice, in the room: "Skippy, play some Pink Floyd", "Skippy, pause",
+"next", "louder".
+
+## Why these choices
+
+* **ESPHome, not custom firmware.** It already has the codecs, the touch screen, the media player and a voice-assistant client for this exact
+  board (the I2S pins, the expander, and the panel's init sequence come from Matthieu Boulord's MIT-licensed
+  [config for this board](https://github.com/MatthieuBoulord/ESP32-S3-Touch-LCD-4B-ESPHome-Home-Assistant-Voice-Satellite)). The hub talks
+  to the box with `aioesphomeapi`, the same library Home Assistant uses, so no Home Assistant is needed.
+* **Full duplex on one I2S bus.** The microphones and the speaker share their clock pins, so without ESPHome's `full_duplex` the box could not
+  hear "Skippy, pause" while it plays. That option is in ESPHome 2026.11; until that is released, `flash.sh` pins the dev commit that has it
+  (`55a62993`). Then set `ESPHOME_PIN=esphome==2026.11.0`.
+* **16 kHz music.** The voice assistant needs a 16 kHz microphone, and duplex needs the speaker at the same rate. That is roughly AM-radio
+  bandwidth, which is about what the small speaker in the box can reproduce anyway.
+* **The wake word is heard on skippy-pc** (`use_wake_word`: the box streams, the hub's trained `skippy.onnx` listens), because an ESP32 cannot
+  run openWakeWord. An on-box "Skippy" would need a separately trained microWakeWord model: possible later, if the Wi-Fi traffic (32 KB/s per
+  box) ever matters.
+
+## What is proven, and what is not yet
+
+* `esphome config` passes on the pinned ESPHome (2026.11.0-dev): every component, pin and option checks out.
+* The hub side is tested against a simulated box (`tests/test_sat_esphome.py`): Home Assistant's own event order, the follow-up turn,
+  announcements, the tap, Bilby's take, pause, resume and next, the Connect check-ins, and the media server over real HTTP, with a pass the real
+  music gate accepts.
+* **Not yet:** a compiled build and a real box. The firmware's first compile, the panel init, the speaker's loudness and the microphone gain
+  (`mic_gain`, `volume_multiplier`) all get checked on the first box. If the screen stays black, it is the panel init sequence; if it can't hear
+  across the room, raise `mic_gain` (33 dB now) before anything else.
+
+## The streamed face (2026-10-31): skippy-pc draws Skippy, the box only shows him
+
+The box's own LVGL drawing of Skippy (the 50 ms `interval` in `skippy-room.yaml`) only reaches 5 frames/s on the ESP32-S3. So when the hub is connected it draws him
+itself and streams him: `face_render.py` is a line-for-line port of that tick (same expression easing, emotion table, tints, hat physics, effects, ears, thinking
+graphics, rocking, the conversation text) drawing with numpy + OpenCV in about 8 ms a frame, and `face_stream.py` sends the box only the 16x16 tiles that changed,
+deflated, many to a UDP datagram, at 20 frames/s (the tick rate) on port 10803. The box's `components/skippy_stream` inflates them and writes them straight into the
+panel's frame buffer, each frame at its last datagram, so a frame is never half drawn.
+
+* **What the hub knows.** The box publishes its state as the `Face` text sensor (`"<state>,<talking 0/1>"`: it knows when the audio really starts), the hub writes
+  `Mouth`, `Emote` and `Session` itself (`EsphomeLink.set_text` tells the box and the drawing the same thing, mirrored pods included) and adds the conversation lines.
+* **The box owns the screen unless datagrams arrive.** The first valid datagram makes the yaml pause LVGL and let the receiver draw (`Stream live` turns on and the hub
+  sends the whole picture at once); 1.2 s without one (the hub is down, the Wi-Fi is gone) and LVGL resumes, so the box draws its own Skippy, the `offline` face
+  included. The `Streamed face` switch (and `SATELLITE_FACE_STREAM=0` on the hub) turns it off.
+* **Loss.** UDP over a weak Wi-Fi drops datagrams: the box draws what arrived, and the sender resends a rolling slice of the screen every frame (the whole screen every
+  ~6 s) and a keyframe whenever the box says it took over, so a lost tile never stays wrong for long.
+* **Safety.** The receiver checks every field before using it (magic, version, rectangle inside the panel, lengths, exact inflated size), never writes unless LVGL is
+  paused, and decompresses with a heap-held state on an 8 KB task (the first version put the ~11 KB inflate state on a 4 KB stack: the LoadProhibited crash).
+  `tests/test_sat_face_stream.py` runs the same checks against garbage.
+* **Later additions (2026-10-31).** (1) The face is drawn in a **child process** (`RemoteFaceStreamer`, `SATELLITE_FACE_PROC=0` for in-process): the hub's own work when a clip
+  starts made frames late, which showed as the can jumping; the child reads JSON lines on stdin and ends with its input, so killing the hub never leaves a second stream.
+  (2) The can is a **flat cartoon-shaded** image (`avatar/flat_can.py` makes `frames/ball_flat` from the brushed renders; the box's own drawing uses the same files) and
+  **glides** to its sway position every tick (`GLIDE`) instead of jumping. (3) The box writes each streamed frame **right after vsync** (`vsync-synced` in its log), so the
+  scan never catches a write: no shear. (4) The box reports its lost-datagram count (`Stream loss` sensor); while it grows the hub sends at half rate and resends the
+  whole face when the burst ends (`FaceStreamer.note_loss`/`slow_now`); what really cured the bursts was the router's 2.4 GHz channel (1, 20 MHz, not Auto/9).
+  (5) Keys and looks: top key = pod speaker, bottom key = microphone (`Face` sensor: `<state>,<talking>,<mic off>,<speaker off>`); mic off = earplugs, listening with the
+  speaker on = a floating microphone, both off = off duty (fuchsia, music face). The pod volume is locked at `pod_volume` (0.7) at boot. With music on and nothing else
+  (`Face.music_heard`, set through `EsphomeLink.music_heard`, or the pod's own `music` state) he dances now and then in rest mode (streamed face only).
+* **Changing how he looks:** change the yaml drawing (the fallback), then `face_render.py` to match. `tools/face_stream_demo.py` streams by hand (a colour-bar test picture, a
+  scripted run, a throughput test); `tools/box_fps.py` reads the box's own rates; `rooms/shot.py` takes the picture from the panel itself while streaming.
+
+## The garage door (`garage.yaml`, a ratgdo32; staged 2026-11-01, the board is on order)
+
+Chamberlain closed MyQ to third parties in 2023, and the "MyQ-DFC" that skippy-core's Bluetooth sees is only MyQ's setup channel. So the
+door gets a **ratgdo32**: an ESP32 board that speaks the opener's own wall-button protocol, **Security+ 2.0** (the opener's learn button is
+**yellow**). `garage.yaml` is ratgdo's official `v32board.yaml` + `base.yaml`, pinned to tag `v1635` (commit `c11e9347`) instead of `main`,
+with an encrypted API and an OTA password and none of the Home Assistant-only parts. The hub is its Home Assistant: `garage.py` connects with
+aioesphomeapi the way `esphome_link.py` reaches the pods, and puts the door, its light, motion, obstruction and the remotes lockout into the
+house (`house.Combined`). That means voice and the skippy-house MCP get it, with the usual guard rails. The door is invisible unless
+`HASS_SENSITIVE=1`, opening and closing need his spoken yes, a text chat can never do it (`confirm` is dropped there), and it never closes on
+an obstruction.
+
+**Wiring** (ratgdo's Security+ 2.0 instructions, ratcloud.llc/pages/wiring-security-2-0; unplug the opener first). The ratgdo32 comes
+with a three-wire lead. Its wires go to the screw terminals on the back of the opener, the ones the wall button and the safety beam use:
+
+| ratgdo32 wire | opener terminal (LiftMaster) | what it is |
+|---|---|---|
+| **red** (Ctrl) | **red** | the wall button's control line: Security+ 2.0 talks over it |
+| **white** (GND) | **white** | ground |
+| **black** (Obst) | **grey** (the safety beam's terminal; ratgdo's docs call it "black") | the obstruction beam, so the ratgdo sees it directly |
+
+The terminals with the orange push buttons on the ratgdo32 are pass-throughs. The existing wall button and safety-sensor wires can move
+there, or stay on the opener beside the ratgdo's wires (both work). Power is **USB-C** from any 5 V adapter (the opener's ceiling outlet):
+the ratgdo is not powered from the opener. Windows already has the driver for its USB chip (CH9102); don't install a separate one.
+
+**Flash it** (skippy-pc, Git Bash, the board on USB-C):
+
+    bash services/satellite/rooms/flash_garage.sh                 # GARAGE_PORT=COM9 picks the port; later runs update it over Wi-Fi
+    bash services/satellite/rooms/flash_garage.sh --check         # only compiles (proven 2026-11-01: 52% flash, 27% RAM)
+
+It uses its own ESPHome release (`esphome==2026.10.1` in `state/esphome-garage-venv`, not the pods' dev pin). The API key and OTA password
+are `GARAGE_ESPHOME_KEY` / `GARAGE_ESPHOME_OTA` in the vault (already there), and Wi-Fi is `ROOM_WIFI_*` or `HOME_WIFI*`, as for the pods. If
+Wi-Fi fails it opens a `skippy-garage` hotspot (the OTA password) to pick a network. The board's own page `http://skippy-garage.local`
+(user `skippy`, the OTA password) shows the door and has ratgdo's diagnostics.
+
+**It closes itself when he drives away** (`autoclose.py`, the Captain 2026-11-01: he had left it open and driven off). Every 10 s the hub
+reads the car (skippy-core's car reader, TeslaMate's latest values). When the car is driving, is more than 150 m from home (or out of
+TeslaMate's home geofence, `GARAGE_HOME_GEOFENCE`) and stays that way for 20 s, and the door is open, Skippy closes it. That is the one
+exception to the spoken yes, and it can only close: `Garage.close_on_departure()` takes no arguments, and nothing else calls it. Arriving
+home opens nothing. It fires once per departure: the car must be seen home again first. A hub started while the car is away waits for it
+to come home. Home is `SKIPPY_HOME_LATLON`, else where the car spends the night.
+
+* **Closed:** one Discord DM ("Closed the garage door after you left"), and a line in the next homecoming routine.
+* **Couldn't close** (an obstruction before or during the close, the door not closed after 60 s, or the opener not answering): no retry.
+  It is an alert: a DM at once, every time, naming the reason, through the portal's `POST /home/alert` (the home token, `notify.alert`, never
+  rate-limited). Skippy also says it in the house: in the routine room's pod, and from there upstairs on the Enclave
+  (`SATELLITE_ANNOUNCE_OUT`). One reminder DM follows 10 minutes later if the door is still open, unless the car is home again.
+* **Settings** (vault): `GARAGE_AUTOCLOSE` (on by default once `GARAGE_ESPHOME` is set; `0` turns it off), and
+  `GARAGE_AUTOCLOSE_NEAR_M` (150), `_GRACE_S` (20), `_WAIT_S` (60), `_REPEAT_S` (600). Tests: `tests/test_sat_autoclose.py`.
+
+**When it arrives (the checklist):**
+
+1. Wire it: opener unplugged, ratgdo red to red, white to white, black to grey (as above), USB-C power, opener back on.
+2. Flash it: USB-C to skippy-pc, `bash services/satellite/rooms/flash_garage.sh`, then back on its USB power in the garage.
+3. Check it on the opener: on `http://skippy-garage.local`, the Door shows the real state and the Light key switches the opener light.
+   If the door says unknown, press **Sync**, or the yellow learn button once.
+4. Set the IP: in the vault, `GARAGE_ESPHOME=esphome://<its IP>` (pin it in the router; `skippy-garage.local` works too if mDNS is reliable).
+5. Turn on the sensitive things: `HASS_SENSITIVE=1` in the vault (it also unhides locks: every one of them still needs a spoken yes).
+6. Restart the hub: only by its python PIDs, and only after `state/hub.log` shows no woke/heard/said/routine/starter activity for 2 minutes.
+   `tools/hub_run.sh` starts it again by itself. The log says `garage: connected to the ratgdo at ...`.
+7. Say "Skippy, is the garage door open?". Then "open the garage door", which he asks you to confirm out loud.
+8. Try the auto-close once: leave the door open, drive off. Within about half a minute of passing 150 m it closes, and a DM says so. To
+   test it without driving, leave `GARAGE_AUTOCLOSE=0` until then.
