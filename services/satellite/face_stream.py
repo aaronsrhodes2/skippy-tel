@@ -310,7 +310,7 @@ class FaceStreamer(threading.Thread):
             pass                                               # some lost while sending flat out: the link is about full: hold the pace, do not add to it
         elif lost:
             self.loss_until = now + LOSS_HOLD_S                # the air dropped a few while the link had room: repair them
-        elif sent >= 20 and used >= 0.6 * self.rate:           # only a pace that was really used and came through clean is evidence the link carries more
+        elif sent >= 20 and used >= 0.8 * self.rate:           # only a pace that was really used and came through clean is evidence the link carries more
             close = now - self.ceiling_at < CEILING_S and self.rate >= 0.9 * self.ceiling
             self.rate = min(self.rate_max, self.rate + (RATE_STEP / 15 if close else RATE_STEP))   # near where it last overflowed: feel the way up, do not jump
 
