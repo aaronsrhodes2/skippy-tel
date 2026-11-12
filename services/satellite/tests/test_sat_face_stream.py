@@ -204,7 +204,7 @@ def test_session_makes_ears_and_cyan():
     f = fr.Face()
     f.set_state("idle")
     f.set_session(True)
-    assert f.face_rgb == 0x22d3ee
+    assert f.face_rgb == 0x14b8a6
     run(f, 1500)
     assert f.ear > 0.9 and f.ear_fl.opa == 255
 
@@ -310,15 +310,36 @@ def test_keys_change_the_picture_and_back():
     from face_render import Face
     f = Face(); f.set_state("idle")
     base = _settle(f)
-    assert f.mic_cap.opa == 255                                 # listening, speaker on: the floating microphone
+    assert f.mic_cap.opa == 0                                   # at rest: no microphone (it comes out only while he speaks)
     f.set_keys(True, False); plugs = _settle(f, t0=200000)
     assert (plugs != base).any() and f.plug[0].opa == 255 and f.plug[1].opa == 255 and f.mic_cap.opa == 0
     f.set_keys(False, True); quiet = _settle(f, t0=300000)
-    assert f.mic_cap.opa == 0 and f.plug[0].opa == 0 and (quiet != base).any()
+    assert f.mic_cap.opa == 0 and f.plug[0].opa == 0
     f.set_keys(True, True); off = _settle(f, t0=400000)
     assert f.face_rgb == 0xc026d3 and f.mic_cap.opa == 0 and f.plug[0].opa == 255
     f.set_keys(False, False); back = _settle(f, t0=500000)
-    assert f.face_rgb == 0x6a28c9 and f.plug[0].opa == 0 and f.mic_cap.opa == 255 and (off != back).any()
+    assert f.face_rgb == 0x6a28c9 and f.plug[0].opa == 0 and (off != back).any()
+
+
+def test_the_states_are_the_captains_colours_and_props():
+    """Purple asleep, teal listening, yellow recording (pad and pencil), orange working, green speaking (a microphone), teal again for the follow-up window."""
+    from face_render import Face
+    f = Face(); f.set_state("idle")
+    assert f.face_rgb == 0x6a28c9
+    f.set_session(True); f.set_state("listening")
+    assert f.face_rgb == 0x14b8a6
+    f.set_state("recording"); _settle(f)
+    assert f.face_rgb == 0xffd21f and f.pencil.opa == 255 and f.pad.opa == 255 and f.mic_cap.opa == 0
+    f.set_state("thinking"); _settle(f, t0=100000)
+    assert f.face_rgb == 0xff7a1a and f.pencil.opa == 0 and f.mic_cap.opa == 0
+    f.set_state("speaking"); f.talking = True; _settle(f, t0=200000)
+    assert f.face_rgb == 0x84cc16 and f.mic_cap.opa == 255 and f.pencil.opa == 0
+    f.talking = False; f.set_state("idle"); _settle(f, t0=300000)
+    assert f.face_rgb == 0x14b8a6 and f.mic_cap.opa == 0           # the follow-up window: teal, ears out, nothing in his hands
+    f.set_session(False); _settle(f, t0=400000)
+    assert f.face_rgb == 0x6a28c9                                   # then purple again
+    f.set_state("speaking"); f.set_keys(False, True); f.talking = True; _settle(f, t0=500000)
+    assert f.mic_cap.opa == 0                                       # speaker key off: nothing is spoken into the microphone
 
 
 def test_off_duty_never_blue_or_red_and_offline_wins():

@@ -232,7 +232,12 @@ class Face:
         self.ear_fl, self.ear_fr = mk(8, 0x7d8492, 0, True), mk(8, 0x7d8492, 0, True)
         self.ear_ol, self.ear_or = mk(3, 0xe6e9ef, 0, True), mk(3, 0xe6e9ef, 0, True)
         self.plug = [mk(30, 0xff6a00, 0, True), mk(30, 0xff6a00, 0, True)]
-        self.mic_cap, self.mic_arc, self.mic_stem = mk(26, 0xe6e9ef, 0, True), mk(4, 0xe6e9ef, 0, True), mk(4, 0xe6e9ef, 0, True)
+        self.mic_cap, self.mic_arc, self.mic_stem = mk(28, 0xe6e9ef, 0, True), mk(5, 0x64748b, 0, True), mk(9, 0xcbd5e1, 0, True)
+        self.pad_edge, self.pad = mk(76, 0x1e3a8a, 0, False), mk(66, 0xf8fafc, 0, False)                         # a sheet of paper (thick bars: a bar is a rectangle) on a darker backing
+        self.pad_rule = [mk(2, 0x93c5fd, 0, False) for _ in range(4)]
+        self.scribble, self.pencil, self.pencil_tip = mk(3, 0x1e3a8a, 0, True), mk(10, 0xfacc15, 0, True), mk(10, 0x111827, 0, True)
+        self.mouth_c = (240, 300)
+        self._rec_on, self._rec_t0 = False, 0
         self.hat_cast = mk(20, 0x000000, int(255 * 0.55), True)
         self.hc = 0
         self.cloth = [Box(13, 2, 0x1a1f3a, hidden=True) for _ in range(40)]
@@ -266,8 +271,11 @@ class Face:
     # ── inputs ──
     def set_state(self, state: str) -> None:
         """The box's `face` script: the colour of the nimbus, and what the state is."""
-        c = 0x22d3ee if self.in_session else 0x6a28c9
-        table = {"listening": 0x22d3ee, "recording": 0xff3b6b, "thinking": 0xf59e0b, "speaking": 0xb05cff, "music": 0x22c55e, "muted": 0xef4444,
+        c = 0x14b8a6 if self.in_session else 0x6a28c9
+        # The colour is the whole story (the Captain, 2026-11-11): purple = asleep, ready for his name; teal = awake and listening (ears out; also the follow-up window after he spoke);
+        # yellow = his words are being recorded (a pencil writes on paper beside him); orange = working on it, no more words until teal again; lime green = Skippy is speaking
+        # (the music is ducked, he speaks into a microphone); back to teal for the follow-up window, then purple. Music only (nobody talking) is blue, so green means one thing.
+        table = {"listening": 0x14b8a6, "recording": 0xffd21f, "thinking": 0xff7a1a, "speaking": 0x84cc16, "music": 0x3b82f6, "muted": 0xef4444,
                  "offline": 0x475569, "sick": 0xd6c92a}
         if state in table:
             c = table[state]
@@ -584,6 +592,7 @@ class Face:
         my = cy + 52
         MW, MU, ML = self.mw * self.mg, self.mu * self.mg, self.ml * self.mg
         cxm = cx + (pivotY - my) * lt
+        self.mouth_c = (cxm, my)
         sm = self.sm
         mo = []
         for i in range(12):
@@ -654,6 +663,7 @@ class Face:
         self._hat(now, talk, beat, rkv, theta, lt, cx, cy, pivotY, dead)
         self._effects(now, cx, cy)
         self._thinking(now, st)
+        self._pad(now, st)
         self._ears(st, talk, cx, cy, pivotY, lt)
 
     def _hat(self, now, talk, beat, rkv, theta, lt, cx, cy, pivotY, dead) -> None:
@@ -883,16 +893,54 @@ class Face:
             else:
                 self.plug[sd].opa = 0
 
+    def _pad(self, now, st) -> None:
+        """Yellow: his words are for sure being recorded. A sheet of ruled paper beside him and a pencil that writes on it, line after line, for as long as he talks."""
+        rec = st == "recording"
+        if rec and not self._rec_on:
+            self._rec_t0 = now
+        self._rec_on = rec
+        objs = (self.pad_edge, self.pad, *self.pad_rule, self.scribble, self.pencil, self.pencil_tip)
+        if not rec:
+            for o in objs:
+                o.opa = 0
+            return
+        k = (now - self._rec_t0) / 1000.0
+        px, py, w, h = 412, 330, 66, 86
+        self.pad_edge.put([(px, py - h / 2 - 5), (px, py + h / 2 + 5)]); self.pad.put([(px, py - h / 2), (px, py + h / 2)])
+        ys = [py - h / 2 + 18 + i * 17 for i in range(4)]
+        for i, y in enumerate(ys):
+            self.pad_rule[i].put([(px - 28, y), (px + 28, y)])
+        n = int(k * 16) % 4 * 0 + int(k * 16)                      # a point of writing every ~60 ms
+        per = 9
+        pts = []
+        for j in range(n % (per * 4) + 1):
+            line, col = j // per, j % per
+            col = col if line % 2 == 0 else per - 1 - col           # boustrophedon: the pencil comes back along the next rule
+            pts.append((px - 26 + col * 6.5, ys[min(line, 3)] - 3 + (5 if j % 2 else 0)))
+        if len(pts) < 2:
+            pts = [pts[0], (pts[0][0] + 1, pts[0][1])]
+        self.scribble.put(pts)
+        tx, ty = pts[-1]
+        wob = 2.5 * math.sin(k * 18)
+        self.pencil.put([(tx + 5, ty - 5 + wob), (tx + 38, ty - 38 + wob)])
+        self.pencil_tip.put([(tx, ty), (tx + 6, ty - 6 + wob)])
+        for o in objs:
+            o.opa = 255
+
     def _mic(self, st) -> None:
-        """He is listening and the pod's speaker is on: a microphone floats beside him (never over his mouth). Mic off (earplugs) or speaker off: none."""
-        if self.mic_off or self.spk_off or st == "offline":
+        """Green: Skippy is speaking. A microphone floats in front of him, its grille toward his mouth, and he speaks into it (never when nobody speaks)."""
+        speaking = (st == "speaking" or self.talking) and st != "offline" and not self.mic_off and not self.spk_off      # (earplugs in or the speaker key off: nothing is spoken into it)
+        if not speaking:
             for ln in (self.mic_cap, self.mic_arc, self.mic_stem):
                 ln.opa = 0
             return
-        my0, mx0 = 340 + 7 * math.sin(self.ph * 1.3), 425
-        self.mic_cap.put([(mx0, my0 - 16), (mx0, my0 + 6)])
-        self.mic_arc.put([(mx0 + 20 * math.cos(math.pi * i / 9 + math.pi), my0 + 4 - 20 * math.sin(math.pi * i / 9 + math.pi)) for i in range(10)])
-        self.mic_stem.put([(mx0, my0 + 24), (mx0, my0 + 40)])
+        mx, my = self.mouth_c
+        bob = 4 * math.sin(self.ph * 1.7)
+        ax, ay = 0.62, 0.78                                          # the microphone's axis, grille end toward his mouth (up-left), handle down-right
+        tx, ty = mx + 84 + bob * 0.4, my + 6 + bob
+        self.mic_cap.put([(tx, ty), (tx + ax * 36, ty + ay * 36)])
+        self.mic_arc.put([(tx + ax * 24 - ay * 15, ty + ay * 24 + ax * 15), (tx + ax * 24 + ay * 15, ty + ay * 24 - ax * 15)])
+        self.mic_stem.put([(tx + ax * 40, ty + ay * 40), (tx + ax * 96, ty + ay * 96)])
         for ln in (self.mic_cap, self.mic_arc, self.mic_stem):
             ln.opa = 255
 
@@ -931,9 +979,11 @@ class Face:
             top = max(0, -y)
             if y < H and y + L.shape[0] > 0:
                 blit_rgba(c, L[top:min(L.shape[0], H - y)], 0, y + top, 204)
-        for ln in (self.ear_fl, self.ear_fr, self.ear_ol, self.ear_or, *self.plug, self.mic_cap, self.mic_arc, self.mic_stem):
+        for ln in (self.ear_fl, self.ear_fr, self.ear_ol, self.ear_or, *self.plug):
             draw_line(c, ln)
         blit_rgba(c, self._ball(), self.ball_pos[0], self.ball_pos[1], 255)
+        for ln in (self.pad_edge, self.pad, *self.pad_rule, self.scribble, self.pencil, self.pencil_tip, self.mic_stem, self.mic_cap, self.mic_arc):
+            draw_line(c, ln)
         draw_line(c, self.hat_cast)
         for b in self.cloth:
             draw_box(c, b)
