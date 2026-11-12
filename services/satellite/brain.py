@@ -1676,6 +1676,7 @@ class Brain:
         self.actions: list[dict] = []                                 # the tools called for the last reply (the house log reads them): {tool, args, outcome}
         self.guard: tuple = (None, None)                              # what the music claim guard did for the last reply: (reask|retract|None, claim|loose|silent|None)
         self._last = 0.0
+        self.aliases = None                                           # aliases.AliasStore: phrases that missed before and then worked (the hub sets it); None = none
         self.pre_route = None                                         # heard -> tool args for plain commands the model is unreliable at (hub.py: the audiobook); None = the model decides
         self.audio = None                                             # houseaudio.Audio (hub.py): what Bilby plays now, said in the prompt and read by a bare "stop"
         self.news = news                                              # news.News: the `news` tool, "about what?", and the headlines it found last
@@ -2156,6 +2157,8 @@ class Brain:
             tool, routed = "music", music_route(heard, self._house_playing())   # "make it louder", "play the music again" (resume): before the grammar, which would search for "again"; "stop Bilby", "enough" (2026-11-04)
         if not routed and any(t["name"] == "play_music" for t in self.extra_tools):
             tool, routed = "play_music", bilby_route(heard)          # "bilby everywhere": the hub didn't know Bilby was his music (2026-11-01)
+        if not routed and self.aliases is not None:                  # last: a phrase that missed before and then worked runs that call now, no model (aliases.py, learned nightly from the miss ledger)
+            tool, routed = self.aliases.route(heard, {t["name"] for t in self.tools()}) or (tool, None)
         if routed:                                                    # the tool runs first; the model only words the answer, with no tools to forget to call
             self._note("route", tool)
             result = self.run_tool(tool, routed)

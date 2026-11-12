@@ -901,7 +901,8 @@ class Room:
             """The command's record (with the timing) and the timing line: written when the reply's voice is ready, a moment after the reply, so the timing is whole."""
             try:
                 if self.hlog is not None:
-                    self._record("command", words=command, tools=[c["tool"] for c in calls], outcome=outcome, reply=reply, seconds=seconds, guard=guard, timing=t.numbers())
+                    self._record("command", words=command, tools=[c["tool"] for c in calls], outcome=outcome, reply=reply, seconds=seconds, guard=guard, timing=t.numbers(),
+                                 calls=[{"tool": c["tool"], "args": c.get("args") or {}} for c in calls[:4]])        # (the calls' arguments: aliases.py learns a phrase that worked from them)
                     self.hlog.actions(self.name, calls)
                 self.log(f"[{self.name}] {t.line()}")
             except Exception as e:                              # noqa: BLE001 — a log must never cost him his answer
@@ -1943,6 +1944,8 @@ def build_rooms(env: dict):
         brain = Brain(client, brain_model, timers, hass=house, extra=tools, news=news_mod.News(env, log=log), weather=house_weather, car=house_car, physics=house_physics)
         brain.room = name                                        # the primer says which room of house_layout.json he is talking from
         brain.audio = houseaudio.Audio(radio, routines, hlog)    # the prompt says what Bilby plays now (a book too) and what happened lately; a bare "stop" waits for it
+        from aliases import AliasStore                          # noqa: PLC0415 — phrases that missed and then worked run their call at once (aliases.py)
+        brain.aliases = AliasStore(housemem.home_dir(env) / "aliases.json", enabled=env.get("SATELLITE_ALIASES", "on").lower() not in ("off", "0", "no"))
         brain.pre_route = lambda heard: book_voice.pre_route(heard, book_view)   # "next chapter", "back thirty seconds", "read my book": the radio's book, before the model
         room = holder["room"] = Room(name, link, gate, brain, timers, spotter=spotter, local_voice=audio.local_voice_pcm16, log=log,
                                      floor=float(env.get("SATELLITE_FLOOR", "0.012")), filler=filler_bank, debug=env.get("SATELLITE_DEBUG") == "1", mic_gain=float(env.get("SATELLITE_MIC_GAIN", "1.0")), pc_outs=speaker_out.parse_outputs(env, name, log)[1],

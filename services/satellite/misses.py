@@ -195,6 +195,10 @@ def learn(home: Path, today: str | None = None, dry: bool = False, brain=None) -
         d.mkdir(parents=True, exist_ok=True)
         (d / "ledger.json").write_text(json.dumps(ledger, indent=1, ensure_ascii=False), encoding="utf-8")
         (d / "digest.md").write_text(digest(ledger), encoding="utf-8")
+        import aliases                                                   # noqa: PLC0415 — the phrases that missed and then worked become aliases (aliases.py)
+        path = home / "aliases.json"
+        prev = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+        path.write_text(json.dumps(aliases.learn(cmds, acts, brain, sys.modules[__name__], prev, today), indent=1, ensure_ascii=False), encoding="utf-8")
     return ledger
 
 
