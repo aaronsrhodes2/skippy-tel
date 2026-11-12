@@ -123,7 +123,14 @@ CAPS = (
 DENIAL = re.compile(r"\bI (?:cannot|can't|can not(?! only))\b(?! believe| help (?:but|myself|it\b|[a-z]+ing\b)| stress| wait\b| say (?:i'?m|i am|that)\b| imagine| be bothered| waste| blame| complain| express| thank)"
                     r"|\bI(?:'m| am) (?:not able|unable) to\b|\bI (?:do not|don't) have (?:access|the ability|a way|any way|a tool|the tools)\b|\bI lack (?:access|the ability|a way)\b"
                     r"|\bI have no (?:access|way|ability|tools?|control)\b|\b(?:not|isn't|aren't) (?:connected|wired|hooked up)\b|\bno such tool\b|\bno tools? for\b"
-                    r"|\bthis voice (?:cannot|can't|can not)\b|\boutside what I can do\b|\bI (?:could not|couldn't) (?:do (?:that|it|this)|access|reach|control|see)\b", re.I)
+                    r"|\bthis voice (?:cannot|can't|can not)\b|\boutside what I can do\b|\bI (?:could not|couldn't) (?:do (?:that|it|this)|access|reach|control|see)\b"
+                    # the Captain, 2026-11-11: "play on both upstairs and downstairs" was refused with "the house chat doesn't have control of which device Skippy plays on", a tool right there.
+                    # Not only "I cannot": the same refusal in the third person, as a lack, as "not something I can do", as "no way to".
+                    r"|\b(?:I|we|he|she|it|skippy|this (?:voice|chat)|the (?:house|home) (?:chat|voice|hub)) (?:does not|doesn't|do not|don't|did not|didn't) (?:currently |really |actually )?(?:have|get|got) (?:any |direct |full |the |a |that |such )?(?:control|access|ability|way|means|option|power|say|permission)\b"
+                    r"|\b(?:I|we|skippy|this (?:voice|chat)|the (?:house|home) (?:chat|voice|hub)) (?:does not|doesn't|do not|don't) (?:control|choose|pick|decide|manage|handle)\b"
+                    r"|\b(?:can't|cannot|can not|could not|couldn't|won't|will not|isn't able to|is not able to|is unable to|are unable to|aren't able to) (?:control|choose|pick|change|select|switch|move|route)\b(?! (?:it|that) (?:up|down|off|on)\b)"
+                    r"|\bnot something I (?:can|could|am able to|handle|control)\b|\bnothing I can do\b|\bno (?:way|means|control|option|ability) (?:to|of|over|for)\b|\bbeyond (?:me|my (?:reach|control|abilities))\b|\bout of my (?:hands|control|reach)\b"
+                    r"|\b(?:unable|not able) to (?:control|choose|pick|change|select|switch|move|route|play|do)\b", re.I)
 _PLAIN_QUOTES = {0x2019: "'", 0x2018: "'", 0x02BC: "'"}
 
 
