@@ -309,6 +309,9 @@ class _RemoteFace:
     def set_session(self, on: bool) -> None:
         self._o._send("session", bool(on))
 
+    def set_window(self, ms: int) -> None:
+        self._o._send("window", int(ms))
+
     def add_convo(self, who: int, text: str) -> None:
         self._o._send("convo", int(who), str(text))
 
@@ -393,6 +396,8 @@ def _child_main(host: str, port: int, name: str, rate: float) -> None:
                 s.face.emote = msg[1]
             elif kind == "session":
                 s.face.set_session(msg[1])
+            elif kind == "window":
+                s.face.set_window(msg[1])
             elif kind == "convo":
                 s.face.add_convo(msg[1], msg[2])
         except Exception as e:                             # noqa: BLE001 — one bad message must not end the stream

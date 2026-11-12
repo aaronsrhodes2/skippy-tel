@@ -490,3 +490,15 @@ def test_the_can_glides_instead_of_teleporting():
             xs.append(f.ball_pos)
         jump = max(max(abs(a[0] - b[0]), abs(a[1] - b[1])) for a, b in zip(xs, xs[1:]))
         assert jump <= 9, (setup, jump)                        # (stepped, a swing jumped 20+ pixels in one frame)
+
+
+def test_the_teal_fades_to_purple_over_the_listening_window():
+    from face_render import Face
+    f = Face(); f.set_session(True); f.set_state("listening"); f.set_window(8000)
+    f.tick(1000); start = f.face_rgb
+    f.tick(1000 + 4000); mid = f.face_rgb
+    f.tick(1000 + 8000); end = f.face_rgb
+    assert start == 0x14b8a6 and end == 0x6a28c9 and mid not in (start, end)
+    f.set_state("recording"); f.tick(1000 + 9000)
+    assert f.face_rgb == 0xffd21f                                   # the other states keep their own colour
+    f.set_state("idle"); f.set_window(6000); f.tick(20000); assert f.face_rgb == 0x14b8a6    # the follow-up window starts teal again

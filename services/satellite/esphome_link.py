@@ -152,6 +152,12 @@ class EsphomeLink:
             elif name == "session":
                 f.set_session(text == "1")
 
+    def window(self, ms: int) -> None:
+        """A listening window of `ms` just opened: the streamed face fades its teal to purple over it (the box's own drawing, the fallback, keeps its colour)."""
+        f = self.streamer.face if self.streamer is not None else None
+        if f is not None and hasattr(f, "set_window"):
+            f.set_window(ms)
+
     def music_heard(self, heard: bool) -> None:
         """The room has music on and nothing else: he dances to it now and then, in rest mode (the streamed face only)."""
         if self.streamer is not None:

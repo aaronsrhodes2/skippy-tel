@@ -237,6 +237,7 @@ class Face:
         self.pad_rule = [mk(2, 0x93c5fd, 0, False) for _ in range(4)]
         self.scribble, self.pencil, self.pencil_tip = mk(3, 0x1e3a8a, 0, True), mk(10, 0xfacc15, 0, True), mk(10, 0x111827, 0, True)
         self.mouth_c = (240, 300)
+        self.win_len, self.win_t0, self.win_new = 0, 0, False
         self._rec_on, self._rec_t0 = False, 0
         self.hat_cast = mk(20, 0x000000, int(255 * 0.55), True)
         self.hc = 0
@@ -297,8 +298,27 @@ class Face:
             self.mic_off, self.spk_off = mic_off, spk_off
             self.set_state(self.state_now)
 
+    def set_window(self, ms: int) -> None:
+        """A listening window of `ms` has just opened (the hub's wake or the follow-up after an answer): the teal fades to purple over it, so he can see how long he has left.
+        It starts counting at the next tick in which the face is teal (the answer's own state may still be showing)."""
+        self.win_len, self.win_new = max(0, int(ms)), True
+
+    def _fade(self, now: int, st: str) -> None:
+        """Teal (awake and listening: the name just heard, or the follow-up window) drifts to purple across the window; every other state keeps its own colour."""
+        teal = st == "listening" or (st in ("idle", "") and self.in_session)
+        if not teal or not self.win_len:
+            return
+        if self.win_new:
+            self.win_t0, self.win_new = now, False
+        k = min(max((now - self.win_t0) / self.win_len, 0.0), 1.0)
+        a, b = rgb(0x14b8a6), rgb(0x6a28c9)
+        mix = tuple(int(a[i] + (b[i] - a[i]) * k) for i in range(3))
+        self.face_rgb = (mix[0] << 16) | (mix[1] << 8) | mix[2]
+
     def set_session(self, on: bool) -> None:
         self.in_session = on
+        if not on:
+            self.win_len = 0
         if self.state_now in ("idle", ""):
             self.set_state("idle")
 
@@ -351,6 +371,7 @@ class Face:
     def tick(self, now: int) -> None:
         self._ring_tick(now)
         st = self.state_now
+        self._fade(now, st)
         if self.off_duty and st in ("idle", "") and not self.talking:
             st = "music"                                    # off duty: the music face, with a fuchsia tint
         rest = st in ("idle", "", "music") and not self.talking and not self.in_session

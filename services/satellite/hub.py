@@ -486,6 +486,7 @@ class Room:
         self._record("wake", by=by)
         self.mode, self.deadline = LISTENING, self.t + self.listen_ms
         self._window_opened()
+        self._window_face(self.listen_ms)
         if self.buf is None:
             self.buf = list(self.pre)[:-1]                      # "Skippy, lights off" in one breath: keep the whole sentence (this block is added below)
         # How loud he is from where he stands is what the name just was (its loudest 150 ms): the first words of the command need only a share of that to
@@ -994,9 +995,16 @@ class Room:
         self.mode, self.deadline = mode, self.t + window_ms
         if mode in (LISTENING, FOLLOWUP):
             self._window_opened()
+            self._window_face(window_ms)
         if mode == LISTENING:
             self.vad.arm(self._last_voice)                      # only the name was heard so far: the command still starts at the lower bar (not after a reply: its own echo)
         self._session(mode == FOLLOWUP)
+
+    def _window_face(self, ms: int) -> None:
+        """Tell the face how long this window is: its teal fades to purple across it (the Captain, 2026-11-11)."""
+        show = getattr(self.link, "window", None)
+        if show is not None and ms > 0:
+            show(ms)
 
     def _window_opened(self) -> None:
         """A listening window opens: the watchdog's 8 s count from now, not from the box's last audio (the pod saying something stops its
