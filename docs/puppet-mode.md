@@ -49,6 +49,37 @@ twice (or one XOR-parity datagram): about 5 KB/frame, still 5-7 times less than 
 5. **Fallback**: a box without the puppet firmware, or one that reports it cannot keep up, keeps the current tile stream (`FaceStreamer`
    decides by the box's `Stream mode` sensor). Nothing about today's path is removed until puppet mode has been seen on a real pod.
 
+## Props, clips and updates everywhere (the Captain, 2026-11-11)
+
+- **Props**: Skippy gets a library of props (the pencil and pad, the microphone, a hat, glasses, a lightbulb, a coffee cup, a wrench, a
+  magnifier, a flag, whatever he needs for a bit). A prop is a sprite or a few primitives, so it is data: adding one is adding an entry to
+  the library on the hub, not building firmware. A scene just lists it like any other op.
+- **Clips**: pre-programmed animation sequences and body-language responses (nod, shrug, double take, lean in, wave, fall asleep, "aha"), each a
+  keyframe timeline with easing, played by the box at its own frame rate between the hub's scenes, with seeded random variation (timing, amplitude,
+  which of several variants) so he is never identical twice. The hub says "play `shrug`, seed 41" and the box does the rest, so smoothness no longer
+  depends on the link. Use every frame the panel can show.
+- **One avatar, everywhere, always**: the avatar lives only on the hub (sprite library + clip library + the scene logic in `face_render.py`).
+  On connect the hub checks the box's library hash (a text sensor) against its own and sends what differs, so a new prop or a changed look reaches
+  every pod the next time it is awake and connected, with no flashing. Firmware changes only when the rasterizer or the wire format does, and
+  the hub refuses puppet mode for a pod whose firmware version is older than it needs and keeps that pod on tiles (and flashes it). This also
+  ends the duplicate face in `skippy-room.yaml` (the LVGL fallback has to be kept in step by hand today): the fallback becomes a plain
+  "hub unreachable" screen.
+
+## Spike result (2026-11-11, the living pod, `tools/puppet_bench.py`)
+
+The box's own rasterizer (`rooms/components/skippy_puppet`, a first naive version) drew the recorded idle scene (66 ops, 1,997 bytes + the can sprite)
+and the screenshot matches the PC's render of the same frame (`.skippy-shots/puppet-compare.png`): **it looks right**. Differences: the nimbus
+ring (drawn inline by `render()`, not through the three recorded calls: it has to become 16 ops), and 1 px of anti-aliasing at edges.
+
+**Speed: not yet.** Whole scene 236 ms (lines 157, boxes 60, sprite 20; clearing the screen alone is 21 ms: the frame buffer is PSRAM); a 128x96 dirty
+patch 27 ms (boxes 15, lines 8, sprite 3). The budget at 20-30 fps is 33-50 ms per frame. The first version does float math and a PSRAM
+read-modify-write per pixel, so there is a lot of room; the plan to get there:
+1. compose each dirty rectangle in internal RAM (a 128x96x2 scratch = 24 KB) and copy it to the panel once, so PSRAM sees one write, not many reads;
+2. coverage from small tables (squared distance -> 0..255) instead of `sqrtf`, integer blending, skip a polyline's untouched pixels by scanline spans;
+3. merge dirty rectangles per frame from what actually moved (a blink and a mouth move small areas); redraw only ops that touch them;
+4. opaque boxes (`opa == 255`, most of them) skip the read entirely, and a box fully covered by a later opaque box is dropped by the hub.
+Go/no-go: if the typical frame's dirty area redraws in under ~15 ms after 1-3, puppet mode is a go. Until then the tile stream stays.
+
 ## What is proven and what is not
 
 - Proven: the face is ~60-80 primitives, the scene is 2-2.5 KB, and the tile stream costs 8-17 times more. (numbers above)

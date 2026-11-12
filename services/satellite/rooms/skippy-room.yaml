@@ -25,6 +25,10 @@ external_components:
       type: local
       path: components                    # skippy_stream: shows the face skippy-pc draws (the hub's face_stream.py); the drawing below is the fallback
 
+skippy_puppet:                            # SPIKE (docs/puppet-mode.md): draws a recorded draw list on the panel and times it; the `puppet_bench` action runs it
+  id: puppet
+  display: lcd
+
 skippy_stream:
   id: stream
   display: lcd
@@ -163,12 +167,24 @@ api:
             if (state == "speaking" && !id(talking)) id(talk_t0) = millis();
             id(talking) = (state == "speaking");
         - script.execute: pub_face
+    - action: puppet_bench                # SPIKE: stop the hub's stream, draw the recorded scene by the box's own rasterizer, log its timing (log: tag "puppet"), hold it 25 s
+      then:
+        - lambda: 'id(stream)->set_enabled(false);'
+        - delay: 400ms
+        - lambda: |-
+            id(lvgl_comp)->set_paused(true, false);
+            id(puppet)->bench();
+        - delay: 25s
+        - lambda: |-
+            id(puppet)->release();
+            id(lvgl_comp)->set_paused(false, false);
+            id(stream)->set_enabled(true);
     - action: screenshot                  # what the screen shows now, as raw RGB565 posted to `url` (tools/ ... rooms/shot.py asks for it and makes the PNG)
       variables:
         url: string
       then:
         - lambda: |-
-            if (id(stream)->ready()) {                          // the hub is drawing: take the picture from the panel itself
+            if (id(stream)->ready() || id(puppet)->shown()) {   // the hub (or the puppet spike) is drawing: take the picture from the panel itself
               size_t n = 0; uint8_t *fbc = id(stream)->snapshot(&n);
               if (fbc == nullptr) { ESP_LOGE("shot", "panel snapshot failed"); return; }
               esp_http_client_config_t cfg0 = {};
