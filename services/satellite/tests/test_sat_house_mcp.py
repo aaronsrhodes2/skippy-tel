@@ -22,7 +22,8 @@ def call(name, args, house):
 
 def test_it_lists_the_house_tools_and_answers_initialize():
     names = {t["name"] for t in house_mcp.handle({"id": 1, "method": "tools/list"}, lambda: None)["result"]["tools"]}
-    assert names == {"home_devices", "home_state", "home_control"}
+    assert {"home_devices", "home_state", "home_control"} <= names
+    assert {"play_music", "speakers", "music"} <= names                  # the pods' music is reachable from the private Skippy (2026-11-11)
     assert house_mcp.handle({"id": 2, "method": "initialize"}, lambda: None)["result"]["serverInfo"]["name"] == "skippy-house"
     assert house_mcp.handle({"method": "notifications/initialized"}, lambda: None) is None
 
@@ -37,3 +38,18 @@ def test_a_light_is_switched_and_a_lock_never_is_even_with_confirm():
 
 def test_no_house_set_up_is_a_sentence():
     assert "Nothing in the house is set up" in call("home_devices", {}, None)
+
+
+def test_music_tools_go_to_the_radio_not_the_house():
+    sent = []
+
+    def radio(name, args):
+        sent.append((name, args))
+        return "Playing calm music on upstairs and downstairs."
+    msg = {"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": {"name": "play_music", "arguments": {"mood": "calm", "speaker": "both floors"}}}
+    out = house_mcp.handle(msg, lambda: None, radio)["result"]["content"][0]["text"]   # no house set up: music still plays
+    assert out.startswith("Playing calm") and sent == [("play_music", {"mood": "calm", "speaker": "both floors"})]
+
+
+def test_a_radio_that_is_down_is_a_sentence():
+    assert "not answering" in house_mcp.radio_tool("music", {"action": "what"}, url="http://127.0.0.1:9", timeout=2)

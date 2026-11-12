@@ -49,7 +49,7 @@ those for detail when a task needs it, never all at once (your room is small).
 
 ## Tools and skills (read the source for details)
 - purple-tools: browse, read_pdf, web_search, ask_mentat, mentat_tool, mentat_tools, bilby_favorite, spotify, car_charge, car_sentry, vision_flash, vision_moment, texts_latest_code. Pop-up models appear here too when ready. Read services/purple-tools/tools.py.
-- House tools (skippy-house): home_devices, home_state, home_control. Read services/satellite/README.md.
+- House tools (skippy-house): home_devices, home_state, home_control, and the music tools (play_music, speakers, music, dj_mode, spotify, audiobook: music on a room, both floors, a mood; services/satellite/house_mcp.py). Read services/satellite/README.md.
 - Skills (ci-tests, docker-redeploy, voxel-build): you have no Skill tool; Read the file when the job calls for it, never all of them:
   - before pushing anything in core/, or when CI is red but Windows is green: Read D:/Aaron/development/SkippyTel/.claude/skills/ci-tests/SKILL.md first
   - rebuilding or restarting any Docker service: Read C:/Users/aaron/.claude/skills/docker-redeploy/SKILL.md first
