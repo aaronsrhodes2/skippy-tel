@@ -2318,7 +2318,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     def tools_for(user, trace: str = "") -> chat_tools.ChatTools:
         """Green Skippy's tools: the guest chat, the same set for everyone, the Captain included (his call, 2026-10-30: the tool
         list is green's security layer; the house, the car, songs, the VM's restart and logs and Skippy Memory are purple's).
-        Only the Captain's quotas differ: his pictures and pop-ups never run out."""
+        Only the Captain's quotas differ: his pictures and pop-ups never run out. One exception, his call of 2026-11-11: for him alone green has `house_music`,
+        one line of plain words to the house's music (the same brain as the pods); every other house tool stays purple's."""
         email = user["email"]
         return chat_tools.ChatTools(vm, is_admin=False, visible=auth.visible_games(email),
                                     who=email, trace=trace,
