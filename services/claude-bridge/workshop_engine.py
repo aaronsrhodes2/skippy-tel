@@ -556,6 +556,10 @@ def child_env(base=None) -> dict:
     env = {k: v for k, v in (os.environ if base is None else base).items() if k != "SKIPPY_HOME_TOKEN"}
     env["GIT_TERMINAL_PROMPT"] = "0"
     env["GCM_INTERACTIVE"] = "never"
+    # Claude Code kills any Bash command after 10 minutes, background ones too, whatever timeout the model asks for. A full suite
+    # longer than that (sigma-ground's) was relaunched 7-9 times per run in the CodeBench gates run (2026-11-12) and never
+    # finished. purple has no clock to protect (the Captain: "let things run for hours"), so a command may ask for up to 4 hours.
+    env.setdefault("BASH_MAX_TIMEOUT_MS", str(4 * 3600 * 1000))
     # The Captain's long-lived Claude token (`claude setup-token`, a year, kept in the vault): with it, claude never needs a /login at this PC,
     # which is what used to tie him to his desk. Without one, claude falls back to its own stored sign-in, as before.
     token = "".join(vault_value("CLAUDE_CODE_OAUTH_TOKEN", env, ENV_FILES).split())   # a terminal-wrapped paste leaves a space inside; a token has none

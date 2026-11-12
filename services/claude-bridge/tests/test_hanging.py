@@ -69,3 +69,8 @@ def test_the_judge_sees_the_request_and_the_last_words_and_no_core_is_no_opinion
 
 def test_check_without_a_transcript_or_words_has_no_opinion():
     assert hanging.check("", {}) == ""
+
+
+def test_purple_s_commands_may_run_for_hours():
+    import workshop_engine as we
+    assert int(we.child_env({})["BASH_MAX_TIMEOUT_MS"]) >= 3600 * 1000

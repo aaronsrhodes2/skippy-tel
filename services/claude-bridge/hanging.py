@@ -139,7 +139,7 @@ def reason(transcript: str, counts: dict, ask=None, words: str = "", request: st
         counts["background"] = counts.get("background", 0) + 1
         return (f"{len(running)} background command(s) you started are still running ({', '.join(running)}). Nothing will bring you "
                 "back after this turn ends: wait for them now (read each one's output file until it says it finished, or run the "
-                "command again in the foreground with a long enough timeout), then finish the work they were for and report the result.")
+                "command again in the foreground with a timeout long enough for it: up to 4 hours is allowed), then finish the work they were for and report the result.")
     if ask is None:
         return ""
     if not request:
