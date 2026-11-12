@@ -624,13 +624,13 @@ script:
     then:
       - lambda: |-
           // the nimbus and the line above the head say what the box is doing. idle: purple, breathing; listening (your name was heard): cyan;
-          // recording your voice: red; thinking: amber; speaking: Skippy purple; music: green; muted: red; offline: grey
-          uint32_t c = id(in_session) ? 0x22d3ee : 0x6a28c9; const char *t = ""; float en = id(in_session) ? 0.6f : 0.3f;     // a conversation is open and he is waiting: the glow is cyan
-          if (state == "listening") { c = 0x22d3ee; t = "listening"; en = 1.0f; }
-          else if (state == "recording") { c = 0xff3b6b; t = "recording"; en = 1.4f; }
-          else if (state == "thinking") { c = 0xf59e0b; t = "thinking"; en = 1.6f; }
-          else if (state == "speaking") { c = 0xb05cff; t = "speaking"; en = 1.0f; }
-          else if (state == "music") { c = 0x22c55e; t = "playing"; en = 0.6f; }
+          // (the Captain, 2026-11-11) purple asleep; teal listening; yellow recording your voice; orange working; lime green speaking; blue music only; muted: red; offline: grey
+          uint32_t c = id(in_session) ? 0x14b8a6 : 0x6a28c9; const char *t = ""; float en = id(in_session) ? 0.6f : 0.3f;     // a conversation is open and he is waiting: the glow is cyan
+          if (state == "listening") { c = 0x14b8a6; t = "listening"; en = 1.0f; }
+          else if (state == "recording") { c = 0xffd21f; t = "recording"; en = 1.4f; }
+          else if (state == "thinking") { c = 0xff7a1a; t = "thinking"; en = 1.6f; }
+          else if (state == "speaking") { c = 0x84cc16; t = "speaking"; en = 1.0f; }
+          else if (state == "music") { c = 0x3b82f6; t = "playing"; en = 0.6f; }
           else if (state == "muted") { c = 0xef4444; t = "microphone off"; en = 0.2f; }
           else if (state == "offline") { c = 0x475569; t = "hub offline"; en = 0.1f; }
           else if (state == "sick") { c = 0xd6c92a; t = ""; en = 0.4f; }

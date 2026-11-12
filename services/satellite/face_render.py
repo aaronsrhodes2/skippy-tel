@@ -238,6 +238,9 @@ class Face:
         self.scribble, self.pencil, self.pencil_tip = mk(3, 0x1e3a8a, 0, True), mk(10, 0xfacc15, 0, True), mk(10, 0x111827, 0, True)
         self.mouth_c = (240, 300)
         self.win_len, self.win_t0, self.win_new = 0, 0, False
+        self.voice, self._rec_pos, self._rec_last = 0.0, 0.0, 0        # his voice's loudness (0-1) and how far the pencil has written
+        self.sleepy = 0.0                                              # 0-1 over the last moments of the listening window: eyes droop, ears fold, a yawn
+        self._think_t0, self._think_on = 0, False
         self._rec_on, self._rec_t0 = False, 0
         self.hat_cast = mk(20, 0x000000, int(255 * 0.55), True)
         self.hc = 0
@@ -298,6 +301,10 @@ class Face:
             self.mic_off, self.spk_off = mic_off, spk_off
             self.set_state(self.state_now)
 
+    def set_level(self, level: float) -> None:
+        """His voice's loudness from the room's microphone (the hub sends it while a window is open): the pencil's speed."""
+        self.voice = min(max(float(level) / 0.10, 0.0), 1.0)
+
     def set_window(self, ms: int) -> None:
         """A listening window of `ms` has just opened (the hub's wake or the follow-up after an answer): the teal fades to purple over it, so he can see how long he has left.
         It starts counting at the next tick in which the face is teal (the answer's own state may still be showing)."""
@@ -305,12 +312,25 @@ class Face:
 
     def _fade(self, now: int, st: str) -> None:
         """Teal (awake and listening: the name just heard, or the follow-up window) drifts to purple across the window; every other state keeps its own colour."""
+        thinking = st == "thinking"
+        if thinking and not self._think_on:
+            self._think_t0 = now
+        self._think_on = thinking
+        if thinking:                                       # orange deepens the longer he works (20 s to the deepest), so a slow turn looks like work and not a hang
+            k = min((now - self._think_t0) / 20000.0, 1.0)
+            a, b = rgb(0xff7a1a), rgb(0xe8470c)
+            mix = tuple(int(a[i] + (b[i] - a[i]) * k) for i in range(3))
+            self.face_rgb = (mix[0] << 16) | (mix[1] << 8) | mix[2]
         teal = st == "listening" or (st in ("idle", "") and self.in_session)
+        self.sleepy = 0.0
         if not teal or not self.win_len:
             return
         if self.win_new:
             self.win_t0, self.win_new = now, False
         k = min(max((now - self.win_t0) / self.win_len, 0.0), 1.0)
+        left = self.win_len - (now - self.win_t0)
+        if left < 1500:                                    # the last moments: he is nodding off (eyes droop, ears fold, a yawn)
+            self.sleepy = min(max(1.0 - left / 1500.0, 0.0), 1.0)
         a, b = rgb(0x14b8a6), rgb(0x6a28c9)
         mix = tuple(int(a[i] + (b[i] - a[i]) * k) for i in range(3))
         self.face_rgb = (mix[0] << 16) | (mix[1] << 8) | mix[2]
@@ -504,6 +524,11 @@ class Face:
         if sig != self.sent_sig:
             self.sent_sig = sig
             self.rc = (int(self.tr), int(self.tg), int(self.tb), qa)
+        if self.sleepy > 0:                                          # nodding off as the window ends
+            sl = self.sleepy
+            t_eo += (0.2 - t_eo) * sl; t_bh += (-3 - t_bh) * sl; t_sm += (-1 - t_sm) * sl
+            if 0.3 < sl < 0.95:
+                tw, tu, tl, tt = 26, 13, 17, 1                       # the yawn
         # blink and ease
         if now > self.blink_at:
             self.blink_at = now + 2500 + u32() % 3500
@@ -777,7 +802,8 @@ class Face:
         for sd in range(2):
             b = self.blush[sd]
             b.x, b.y, b.opa = int(cx + (62 if sd else -112)), int(cy + 6), int(170 * self.fb_)
-        self.sweat.x, self.sweat.y, self.sweat.opa = int(cx + 96), int(cy - 64 + (now // 120) % 8), int(235 * self.fs_)
+        slow = min(max((now - self._think_t0 - 5000) / 2000.0, 0.0), 1.0) if self._think_on else 0.0     # working for more than 5 s: a bead of sweat (he is still on it)
+        self.sweat.x, self.sweat.y, self.sweat.opa = int(cx + 96), int(cy - 64 + (now // 120) % 8), int(235 * max(self.fs_, slow))
         vs, vx, vy = 1 + 0.25 * math.sin(now / 90.0), cx - 104, cy - 92
         self.vein.put([(clampi(vx), clampi(vy)), (clampi(vx + 18 * vs), clampi(vy + 18 * vs)), (clampi(vx + 9 * vs), clampi(vy + 9 * vs)),
                        (clampi(vx + 18 * vs), clampi(vy)), (clampi(vx), clampi(vy + 18 * vs))])
@@ -876,7 +902,7 @@ class Face:
 
     def _ears(self, st, talk, cx, cy, pivotY, lt) -> None:
         hearing = self.mic_off or st in ("listening", "recording") or (st == "idle" and self.in_session and not talk) or (st == "" and self.in_session)
-        self.ear += ((1.0 if hearing else 0.0) - self.ear) * 0.3
+        self.ear += ((1.0 - 0.55 * self.sleepy if hearing else 0.0) - self.ear) * 0.3      # (nodding off: the ears fold down)
         fo = (self.ear_fl, self.ear_fr, self.ear_ol, self.ear_or)
         self._mic(st)
         if self.ear < 0.06:
@@ -885,7 +911,7 @@ class Face:
             return
         for sd in range(2):
             s2 = 1.0 if sd else -1.0
-            a = (0.95 if sd else 0.45) + 0.12 * math.sin(self.ph * 2.3 + sd * 2.0) + 0.2 * (st == "recording")
+            a = (0.95 if sd else 0.45) + 0.12 * math.sin(self.ph * 2.3 + sd * 2.0) + 0.2 * (st == "recording") + 0.5 * self.sleepy
             rot = s2 * a
             by = cy - 4
             bx = cx + (pivotY - by) * lt + s2 * 104
@@ -918,7 +944,7 @@ class Face:
         """Yellow: his words are for sure being recorded. A sheet of ruled paper beside him and a pencil that writes on it, line after line, for as long as he talks."""
         rec = st == "recording"
         if rec and not self._rec_on:
-            self._rec_t0 = now
+            self._rec_t0, self._rec_pos, self._rec_last = now, 0.0, 0
         self._rec_on = rec
         objs = (self.pad_edge, self.pad, *self.pad_rule, self.scribble, self.pencil, self.pencil_tip)
         if not rec:
@@ -931,7 +957,11 @@ class Face:
         ys = [py - h / 2 + 18 + i * 17 for i in range(4)]
         for i, y in enumerate(ys):
             self.pad_rule[i].put([(px - 28, y), (px + 28, y)])
-        n = int(k * 16) % 4 * 0 + int(k * 16)                      # a point of writing every ~60 ms
+        dt = min(max(now - self._rec_last, 0), 200) if self._rec_last else 0
+        self._rec_last = now
+        self._rec_pos += (3.0 + 30.0 * self.voice) * dt / 1000.0    # the pencil writes as fast as he talks (a pause stalls it): proof the microphone hears him
+        self.voice *= 0.9
+        n = int(self._rec_pos)
         per = 9
         pts = []
         for j in range(n % (per * 4) + 1):

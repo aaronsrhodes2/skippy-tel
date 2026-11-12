@@ -436,6 +436,10 @@ class Room:
         level = rms(block)
         self.pre.append(block)
         self._levels.append(level)
+        if self.mode in (LISTENING, FOLLOWUP) and self.buf is not None:      # his voice's loudness to the face: the pencil writes as fast as he talks
+            show = getattr(self.link, "level", None)
+            if show is not None:
+                show(level)
         if self.mode == IDLE and self.spotter is not None and self.remote_wake and self.spotter.feed(block):
             self._woke(getattr(self.spotter, "name", "skippy"))
         event = self.vad.push(level, self.t)

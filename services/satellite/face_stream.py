@@ -312,6 +312,9 @@ class _RemoteFace:
     def set_window(self, ms: int) -> None:
         self._o._send("window", int(ms))
 
+    def set_level(self, level: float) -> None:
+        self._o._send("level", round(float(level), 4))
+
     def add_convo(self, who: int, text: str) -> None:
         self._o._send("convo", int(who), str(text))
 
@@ -398,6 +401,8 @@ def _child_main(host: str, port: int, name: str, rate: float) -> None:
                 s.face.set_session(msg[1])
             elif kind == "window":
                 s.face.set_window(msg[1])
+            elif kind == "level":
+                s.face.set_level(msg[1])
             elif kind == "convo":
                 s.face.add_convo(msg[1], msg[2])
         except Exception as e:                             # noqa: BLE001 — one bad message must not end the stream

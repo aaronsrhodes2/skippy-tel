@@ -330,8 +330,10 @@ def test_the_states_are_the_captains_colours_and_props():
     assert f.face_rgb == 0x14b8a6
     f.set_state("recording"); _settle(f)
     assert f.face_rgb == 0xffd21f and f.pencil.opa == 255 and f.pad.opa == 255 and f.mic_cap.opa == 0
-    f.set_state("thinking"); _settle(f, t0=100000)
-    assert f.face_rgb == 0xff7a1a and f.pencil.opa == 0 and f.mic_cap.opa == 0
+    f.set_state("thinking"); f.tick(100000)
+    assert f.face_rgb == 0xff7a1a                                   # orange as he starts; it deepens the longer he works
+    _settle(f, t0=100050)
+    assert f.face_rgb != 0xff7a1a and (f.face_rgb >> 16) >= 0xe8 and f.pencil.opa == 0 and f.mic_cap.opa == 0
     f.set_state("speaking"); f.talking = True; _settle(f, t0=200000)
     assert f.face_rgb == 0x84cc16 and f.mic_cap.opa == 255 and f.pencil.opa == 0
     f.talking = False; f.set_state("idle"); _settle(f, t0=300000)
@@ -502,3 +504,19 @@ def test_the_teal_fades_to_purple_over_the_listening_window():
     f.set_state("recording"); f.tick(1000 + 9000)
     assert f.face_rgb == 0xffd21f                                   # the other states keep their own colour
     f.set_state("idle"); f.set_window(6000); f.tick(20000); assert f.face_rgb == 0x14b8a6    # the follow-up window starts teal again
+
+
+def test_the_pencil_follows_his_voice_and_the_last_moments_of_the_window_make_him_sleepy():
+    from face_render import Face
+    quiet, loud = Face(), Face()
+    for f in (quiet, loud):
+        f.set_session(True); f.set_state("recording")
+    for i in range(40):
+        loud.set_level(0.2); loud.tick(i * 50); quiet.tick(i * 50)
+    assert loud._rec_pos > quiet._rec_pos * 3                      # louder: the pencil writes faster
+    f = Face(); f.set_session(True); f.set_state("idle"); f.set_window(6000)
+    f.tick(0); assert f.sleepy == 0.0
+    f.tick(5600); assert 0.5 < f.sleepy < 1.0                      # the last 1.5 s: eyes droop, ears fold, a yawn
+    f.set_state("thinking"); f._think_on = False
+    f.tick(10000); f.tick(17000)
+    assert f.sweat.opa > 0                                         # working for more than 5 s: a bead of sweat

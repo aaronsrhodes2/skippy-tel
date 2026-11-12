@@ -152,6 +152,16 @@ class EsphomeLink:
             elif name == "session":
                 f.set_session(text == "1")
 
+    def level(self, level: float) -> None:
+        """How loud his voice is now (a block of the microphone): the streamed face's pencil writes as fast as he talks. At most ten a second."""
+        now = time.monotonic()
+        if now - getattr(self, "_level_at", 0.0) < 0.1:
+            return
+        self._level_at = now
+        f = self.streamer.face if self.streamer is not None else None
+        if f is not None and hasattr(f, "set_level"):
+            f.set_level(level)
+
     def window(self, ms: int) -> None:
         """A listening window of `ms` just opened: the streamed face fades its teal to purple over it (the box's own drawing, the fallback, keeps its colour)."""
         f = self.streamer.face if self.streamer is not None else None
