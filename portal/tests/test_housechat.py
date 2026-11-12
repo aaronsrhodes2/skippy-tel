@@ -180,3 +180,29 @@ def test_a_slow_hub_clock_is_moved_onto_the_portals_by_the_time_it_reports():
     d = make(clock)                                                  # a hub AHEAD of the portal is moved back, never into the future
     d.sync({"now": clock.now + 30, "events": [{"kind": "said", "room": "office", "at": clock.now + 28, "text": "x"}]})
     assert d.view()["events"][0]["at"] == clock.now - 2
+
+
+def test_ask_waits_for_the_houses_answer_and_says_when_there_is_none():
+    clock = Clock()
+    chat = make(clock)
+    chat.sync({"rooms": ["living"], "events": []})                     # the hub is there
+    waits = []
+
+    def hub_answers(_seconds):                                         # while the page waits, the hub answers on its next sync
+        waits.append(1)
+        chat.sync({"rooms": ["living"], "events": [{"kind": "said", "room": "living", "at": clock.now, "text": "Playing calm music on both floors."}]})
+    assert chat.ask("calm music in both rooms", timeout=30, sleep=hub_answers) == "Playing calm music on both floors."
+    assert chat.commands == [] or chat.commands[-1]["text"] == "calm music in both rooms"      # it went out as a typed say, to be treated as spoken
+    quiet = make(clock)
+    quiet.sync({"rooms": ["living"], "events": []})
+
+    def tick(_seconds):
+        clock.now += 20
+    with pytest.raises(TimeoutError, match="didn't answer"):
+        quiet.ask("play something", timeout=30, sleep=tick)
+
+
+def test_forwarding_off_answers_at_once_instead_of_waiting():
+    chat = make()
+    chat.set_forward(False)
+    assert "Forwarding is off" in chat.ask("play something", timeout=5, sleep=lambda s: None)

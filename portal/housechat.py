@@ -138,6 +138,20 @@ class HouseChat:
                     self.commands = self.commands[-20:]
             return {"seq": self._seq}
 
+    def ask(self, text: str, timeout: float = 30.0, sleep=time.sleep) -> str:
+        """Say something to the house as if spoken (a typed 'say' with the answer in words, not aloud) and wait for what it answers: the music line of the
+        Captain's chat and of the Bilby page use the same brain as the pods. Raises TimeoutError when the hub does not answer in `timeout` seconds."""
+        before = self.view()["seq"]                                    # what answers is whatever the house adds after this (the switch-off note comes at once)
+        self.send("say", text, "*", False)
+        end = self.clock() + timeout
+        while True:
+            replies = [e["text"] for e in self.view(before)["events"] if e["kind"] == "said" or (e["kind"] == "note" and not e.get("typed"))]
+            if replies:
+                return " ".join(replies)[:600]
+            if self.clock() >= end:
+                raise TimeoutError(f"the house didn't answer in {int(timeout)} seconds (is the hub running?)")
+            sleep(1.0)
+
     # ── skippy-pc's hub ──
     def sync(self, body: dict) -> dict:
         now = self.clock()

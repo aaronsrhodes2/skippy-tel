@@ -2328,6 +2328,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                                     home_car=home if home.can("car") else None,
                                     home_music=PatientJobs(email) if home.can("make_music") else None,
                                     home_image=PatientJobs(email) if home.can("make_image") or home.can("make_image_hq") else None,
+                                    house_say=app.extensions["housechat"].ask if auth.is_admin(email) and "housechat" in app.extensions else None,   # the Captain's one music line (his call, 2026-11-11)
                                     image_tiers=tuple(k for k in ("make_image", "make_image_hq") if home.can(k)),
                                     popups=[e for n, e in popups.load().items() if e["chat"] and home.can(n)],
                                     home_popup=PatientJobs(email), popup_payload=popup_payload,

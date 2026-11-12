@@ -77,3 +77,20 @@ def test_home_sends_a_house_job_and_returns_its_sentence():
     home.finish(jobs[0]["id"], {"result": {"text": "kitchen under 1 (off)"}})
     t.join(5)
     assert out["text"] == "kitchen under 1 (off)"
+
+
+def test_house_music_is_one_line_to_the_house_for_whoever_app_py_gives_it_to():
+    said = []
+    tools = chat_tools.ChatTools(None, is_admin=False, house_say=lambda text: said.append(text) or "Playing calm music on both floors.")
+    assert "house_music" in tools.available() and "house_music" in {t["name"] for t in tools.schemas()}
+    assert "Playing calm" in tools.run("house_music", {"request": "calm music in both rooms"})
+    assert said == ["calm music in both rooms"]
+    with pytest.raises(chat_tools.ToolError):
+        tools.run("house_music", {"request": "  "})
+    assert "house_music" not in chat_tools.ChatTools(None, is_admin=False).available()         # no line given (a guest's chat): not offered, and refused
+    with pytest.raises(chat_tools.ToolError):
+        chat_tools.ChatTools(None, is_admin=False).run("house_music", {"request": "play"})
+    def silent(_text):
+        raise TimeoutError("the house didn't answer in 30 seconds")
+    with pytest.raises(chat_tools.ToolError, match="didn't answer"):
+        chat_tools.ChatTools(None, is_admin=False, house_say=silent).run("house_music", {"request": "play"})

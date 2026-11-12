@@ -164,7 +164,7 @@ def test_the_agents_endpoints_need_the_header_even_for_the_captain(world):
 
 # ── the public chat: no write, no execute, whatever the page says ──
 ALLOWED_PUBLIC_TOOLS = {"server_status", "start_game", "stop_server", "ask_mentat", "now_playing"}
-ADMIN_TOOLS = {"restart_server", "server_logs", "make_music", "music_result"}
+ADMIN_TOOLS = {"restart_server", "server_logs", "make_music", "music_result", "house_music"}      # house_music: the Captain's one music line (2026-11-11); a friend never gets it (asserted below)
 
 
 def test_the_public_chats_tools_are_only_the_portals_own_and_never_a_shell_a_file_or_a_deploy():

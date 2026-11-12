@@ -521,7 +521,7 @@ def test_chat_tools_match_dashboard_rights(env):
     names, _ = _tools_for(client, skippy, FRIEND)
     assert names == {"server_status", "start_game", "stop_server", "now_playing"}   # core users have Bilby
     names, _ = _tools_for(client, skippy, ADMIN)
-    assert names == {"server_status", "start_game", "stop_server", "now_playing"}   # green is the guest chat, the Captain's too
+    assert names == {"server_status", "start_game", "stop_server", "now_playing", "house_music"}   # green is the guest chat, the Captain's too, plus his one music line (2026-11-11)
     _, run = _tools_for(client, skippy, FRIEND)
     with pytest.raises(Exception, match="isn't available"):
         run("restart_server", {})                       # not offered, and refused if tried anyway

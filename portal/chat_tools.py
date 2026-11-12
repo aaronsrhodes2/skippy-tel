@@ -196,6 +196,15 @@ _NOW_PLAYING = {
     "input_schema": {"type": "object", "properties": {}, "additionalProperties": False},
 }
 
+_HOUSE_MUSIC = {
+    "name": "house_music",
+    "description": "Ask the house about its MUSIC, in plain words, the way he would say it to Skippy at a pod: play or change what is on (a mood, an artist, a genre, "
+                   "'something calmer', 'the next one'), pause, skip, volume, or where it plays ('upstairs', 'both rooms', 'everywhere'). The house plays ONE stream "
+                   "(Bilby's station) on whichever speakers are switched on; this asks the same brain the pods use and returns what it answered. Music only: lights "
+                   "and the rest of the house are not here.",
+    "input_schema": {"type": "object", "properties": {"request": {"type": "string", "description": "What he wants, in his own words."}}, "required": ["request"]},
+}
+
 _CAR_STATUS = {
     "name": "car_status",
     "description": "The Captain's Tesla, a Model 3 named T3-P0, as TeslaMate last saw it at home: state (asleep, online, driving, charging), battery %, "
@@ -315,7 +324,7 @@ class ChatTools:
     def __init__(self, vm, is_admin: bool, visible: list[str] | None = None, who: str = "",
                  music=None, home_mentat=None, home_music=None, home_image=None, image_allow=None, trace: str = "",
                  image_tiers: tuple = ("make_image",), popups=None, home_popup=None, popup_payload=None, popup_allow=None,
-                 home_house=None, home_car=None):
+                 home_house=None, home_car=None, house_say=None):
         self.vm, self.is_admin, self.who = vm, is_admin, who
         self.trace = trace                    # this chat turn's id: Mentat keeps it with the research record
         self.visible = list(GAMES) if visible is None else list(visible)   # games this person may see
@@ -341,6 +350,7 @@ class ChatTools:
         self.files: list = []
         self.home_house = home_house if tool_policy.allowed("house", is_admin) else None   # the lights: the Captain's alone
         self.home_car = home_car if tool_policy.allowed("car", is_admin) else None         # his Tesla, where it is included: his alone
+        self.house_say = house_say                          # the one line to the house's music the Captain's green chat has (his call, 2026-11-11): app.py passes it for him only
 
     def available(self) -> list[str]:
         names = [n for n in self.names if n != "start_game" or self.visible]
@@ -358,6 +368,8 @@ class ChatTools:
             names += list(HOUSE_NAMES)
         if self.home_car:
             names.append("car_status")
+        if self.house_say:
+            names.append("house_music")
         return names
 
     def badges(self) -> dict[str, list[dict]]:
@@ -392,6 +404,8 @@ class ChatTools:
             out += HOUSE_TOOLS
         if self.home_car:
             out.append(_CAR_STATUS)
+        if self.house_say:
+            out.append(_HOUSE_MUSIC)
         return out
 
     def run(self, name: str, args: dict) -> str:
@@ -463,6 +477,15 @@ class ChatTools:
         try:
             return {"answer": self.home_house.house_tool(tool, args)}
         except (TimeoutError, RuntimeError) as exc:
+            raise ToolError(f"The house didn't answer: {exc}. Say so plainly.") from exc
+
+    def _house_music(self, args) -> dict:
+        request = str((args or {}).get("request") or "").strip()
+        if not request:
+            raise ToolError("house_music needs what he wants, in words.")
+        try:
+            return {"answer": self.house_say(request)}
+        except (TimeoutError, RuntimeError, ValueError) as exc:
             raise ToolError(f"The house didn't answer: {exc}. Say so plainly.") from exc
 
     def _home_devices(self, args) -> dict:
