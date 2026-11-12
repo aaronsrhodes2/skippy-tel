@@ -925,8 +925,28 @@
     function drainQueue() { if (queue.length && !busy && !agentOn()) { const all = queue.splice(0); paintQueue(); ask(SkippyQueue.gulp(all)); } }
     paintQueue();
 
+    // Words that move the stage (static/skippy-nav.js): "new chat", "my chats", "apps", "open Bilby" do what the keys do, with no model. The most-tapped
+    // controls were all navigation, and navigation is short to say. Said ones are counted as say:<what> (not as taps), so the tidy sees requests replace taps.
+    let navTry = true;
+    function runNav(hit) {
+      const said = (id) => { try { navigator.sendBeacon("{{ url_for('telemetry_tap') }}", new Blob([JSON.stringify({e: "say:" + id, p: location.pathname})], {type: "application/json"})); } catch (err) { /* nothing counted */ } };
+      if (hit.kind === "new") { said("new"); newChat(); return true; }
+      if (hit.kind === "sheet") { said(hit.name); if (openSheet !== hit.name) { showSheet(hit.name); if (hit.name === "chats") paintChats(); if (hit.name === "apps") loadApps(); } return true; }
+      if (hit.kind === "open") { said("open-" + hit.tile.id); location.href = hit.tile.href; return true; }
+      return false;
+    }
     form.addEventListener("submit", (event) => {
       event.preventDefault();
+      const raw = msg.value.trim();
+      if (navTry && !pending_quotes.length && !pending_files.length && window.SkippyNav && SkippyNav.maybe(raw)) {
+        msg.value = ""; grow();
+        loadApps().then(() => {                                       // the tiles are what "open Bilby" is matched against
+          const hit = SkippyNav.match(raw, appTiles);
+          if (hit && runNav(hit)) return;
+          navTry = false; msg.value = raw; grow(); form.requestSubmit(); navTry = true;       // not a navigation request after all: it goes to Skippy as typed
+        });
+        return;
+      }
       let text = msg.value.trim();
       if (!text && !pending_quotes.length) return;
       if (pending_quotes.length) { text = SkippyReply.compose(pending_quotes.splice(0), text); paintQuotes(); }   // the quotes ride at its start
@@ -1170,10 +1190,11 @@
 
     // ── Apps: the launcher's tiles as a tray (one key on a phone; on a wide screen a slim row under the box, always there) ──
     const tray = root.querySelector(".app-tray"), appRow = form.querySelector(".app-row");
-    let appsLoaded = null;
+    let appsLoaded = null, appTiles = [];
     function loadApps() {
       if (appsLoaded) return appsLoaded;
       appsLoaded = fetch("{{ url_for('app_tiles') }}").then(r => r.json()).then(d => {
+        appTiles = d.tiles;
         const tile = (t, slim) => {
           const a = document.createElement("a"); a.href = t.href; a.className = slim ? "key app-slim" : "app-tile"; a.title = t.label;
           a.setAttribute("aria-label", t.label); a.dataset.tel = "tray:" + t.id;
