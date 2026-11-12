@@ -97,6 +97,15 @@ Not started: the Captain redirected to the music UI (2026-11-11). **The cheaper 
 (option 3 in the first analysis: on loss keep the frame rate and resend exactly the lost tiles, instead of halving the rate), and puppet mode
 stays parked here with the spike firmware on the living pod (opt-in; the tile stream is untouched).
 
+## Spike result, round 3 (2026-11-12: per-row reach for outlines, ellipse spans, opaque fills, both cores)
+
+Whole scene 140 -> 124 ms on one core, **77 ms on two**; a 480x96 band (46k px, about an average frame of the real animation) 41.6 -> **27.5 ms** on
+two cores; a 128x96 patch 14.4 -> 12.6 ms (two cores barely help a small patch: one strip). The cost is now almost all in the three 41-point
+outlines (17 + 11 + 9 ms of the main core's share of a whole redraw: a 20 px wide ring at opacity 140 and two thin ones, each ~500x300 px) and the
+can sprite (8 ms). **Go/no-go: not yet** (target under 15-20 ms for a typical frame; an average frame is ~27 ms, a speaking one ~40 ms). Next:
+make the big rings cached sprites (RGB565 + alpha spans, blitted at an offset: a blit is ~0.2 us per ink pixel against ~0.6 us for the float capsule
+maths) if they move as whole shapes, or draw wide lines by scanline spans (solid core filled, only the two edge pixels computed).
+
 ## What is proven and what is not
 
 - Proven: the face is ~60-80 primitives, the scene is 2-2.5 KB, and the tile stream costs 8-17 times more. (numbers above)
