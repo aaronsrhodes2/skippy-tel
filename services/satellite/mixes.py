@@ -74,9 +74,9 @@ _GENRE_FILLER = r"(?:(?:some|any|more|good|great|loud|the|my|his|real|proper) )*
 
 # What he says about a feeling -> the mood tags that fit (music-collection/stage8l_mood_tags.py writes them into Traktor's collection; dj.mood_index reads them).
 MOOD_WORDS: dict[str, set[str]] = {
-    "relaxing": {"calm", "dreamy", "tender"}, "relaxed": {"calm", "dreamy", "tender"}, "chill": {"calm", "dreamy", "tender"}, "mellow": {"calm", "tender"},
-    "calm": {"calm", "dreamy"}, "calming": {"calm", "dreamy"}, "peaceful": {"calm", "dreamy"}, "soothing": {"calm", "tender"}, "sleepy": {"calm", "dreamy"},
-    "quiet": {"calm"}, "soft": {"calm", "tender"}, "gentle": {"calm", "tender"}, "dreamy": {"dreamy"},
+    "relaxing": {"calm", "dreamy"}, "relaxed": {"calm", "dreamy"}, "chill": {"calm", "dreamy"}, "mellow": {"calm", "dreamy"},
+    "calm": {"calm", "dreamy"}, "calming": {"calm", "dreamy"}, "peaceful": {"calm", "dreamy"}, "soothing": {"calm", "dreamy"}, "sleepy": {"calm", "dreamy"},
+    "quiet": {"calm"}, "soft": {"calm", "dreamy"}, "gentle": {"calm", "dreamy"}, "dreamy": {"dreamy"},
     "sad": {"melancholy"}, "melancholy": {"melancholy"}, "melancholic": {"melancholy"}, "gloomy": {"melancholy", "dark"}, "wistful": {"melancholy", "tender"},
     "dark": {"dark"}, "moody": {"dark", "melancholy"}, "brooding": {"dark", "melancholy"},
     "happy": {"uplifting"}, "upbeat": {"uplifting", "party"}, "uplifting": {"uplifting"}, "cheerful": {"uplifting"}, "feel good": {"uplifting"}, "positive": {"uplifting"},
