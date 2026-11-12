@@ -46,6 +46,11 @@ def everything(tel) -> str:
     return json.dumps(tel.since(tel.boot, 0, 500)["events"])
 
 
+def without_intents(tel) -> str:
+    """Everything recorded except the Captain's own `intent` events (his requests, kept for tools/intent_report.py since 2026-11-11, his alone)."""
+    return json.dumps([e for e in tel.since(tel.boot, 0, 500)["events"] if e["kind"] != "intent"])
+
+
 # ── the recorder ────────────────────────────────────────────────────────────────
 
 def test_events_are_numbered_and_carry_who_and_when():
@@ -365,7 +370,8 @@ def test_nothing_said_in_the_public_chat_is_recorded_unless_the_person_ticks_all
                  {"message": "dragon, truthy", "save": "yes"}):                          # only a real true counts
         assert client.post("/chat/send", json={**body, "history": []}).status_code == 200
     assert events(tel, "chat") == [] and events(tel, "action") == []
-    assert "dragon" not in everything(tel) and "server_status" not in everything(tel)
+    assert "dragon" not in without_intents(tel) and "server_status" not in without_intents(tel)    # no chat event, no tool, no reply: only the Captain's own request line
+    assert [e["detail"]["text"] for e in events(tel, "intent")] == ["my secret plan involves a dragon", "dragon again", "dragon, truthy"]
     privacy = client.get("/privacy").data.decode()                                         # the switch lives on the privacy page now
     assert "Allow us to save your questions" in privacy and 'id="allow-save"' in privacy and " checked" not in privacy.split('id="allow-save"')[1][:40]
     chat_page = client.get("/chat").data.decode()
@@ -412,7 +418,7 @@ def test_a_chat_that_failed_is_an_action_that_failed_and_keeps_no_text():
     assert client.post("/chat/send", json={"message": "secret plans"}).status_code == 502
     (act,) = events(tel, "action")
     assert act["name"] == "chat.send" and act["detail"]["ok"] is False and events(tel, "chat") == []
-    assert "secret plans" not in everything(tel)
+    assert "secret plans" not in without_intents(tel)                      # a failed chat keeps no text of its own (the Captain's request line is the separate intent event)
 
 
 # ── the tap beacon ────────────────────────────────────────────────────────────────
@@ -702,3 +708,18 @@ def test_home_keeps_the_summary_it_was_sent_and_nothing_else_of_the_wrong_type()
     assert home.site_activity() is None
     home.accept({"status": {}, "site_activity": {"people": 2}})
     assert home.site_activity() == {"people": 2}
+
+
+def test_only_the_captains_own_requests_are_kept_as_intents_and_a_stranger_is_never_recorded():
+    app, client, tel, _ = make()
+    with app.test_request_context("/chat/send", method="POST"):
+        from flask import session
+        session["user"] = {"email": ADMIN, "name": "A", "picture": None}
+        telemetry_web.record_intent("house-ask", "calm music in both rooms")
+    (ev,) = events(tel, "intent")
+    assert ev["name"] == "house-ask" and ev["detail"]["text"] == "calm music in both rooms" and ev["detail"]["words"] == 5 and ev["role"] == "admin"
+    with app.test_request_context("/chat/send", method="POST"):
+        from flask import session
+        session["user"] = {"email": "stranger@example.com", "name": "S", "picture": None}
+        assert telemetry_web.record_intent("chat", "my secret plan") is None
+    assert len(events(tel, "intent")) == 1 and "secret plan" not in everything(tel)

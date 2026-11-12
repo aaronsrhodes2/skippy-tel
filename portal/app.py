@@ -1766,6 +1766,7 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         if not again:
             print(json.dumps({"event": "workshop", "user": me(), "task": task, "chars": len(message), "images": len(body.get("images") or [])}), flush=True)  # never the text
         return jsonify(task=task, again=again)
+            telemetry_web.record_intent("agent", message)          # the Captain's own request (this route is his alone)
 
     @mine.get("/workshop/events")
     @workshop_call
@@ -2692,6 +2693,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         p, mine = prompts.claim(pid, user["email"])
         if not mine:                                          # answered already, or another request is on it: wait for that one
             if p.state != "answered":
+        if mine and admin:
+            telemetry_web.record_intent("chat", message)       # the Captain's own request, for tools/intent_report.py
                 p.done.wait(prompts_mod.RETRY_FOR_S)
             if p.result is not None:
                 payload, status = p.result

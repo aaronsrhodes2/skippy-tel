@@ -113,6 +113,21 @@ def load_agent(cutoff: float) -> list[dict]:
     return out
 
 
+def load_intents(cutoff: float) -> list[dict]:
+    """The Captain's own requests the portal records since 2026-11-11 (telemetry kind 'intent': the chat, the agent, the Bilby ask line)."""
+    db = sqlite3.connect(DB)
+    out = []
+    for ts, name, detail in db.execute("select ts, name, detail from site_events where kind='intent' and ts>=? order by ts", (cutoff,)):
+        try:
+            text = json.loads(detail).get("text", "")
+        except ValueError:
+            continue
+        if text:
+            lt = time.localtime(ts)
+            out.append({"text": f"{text}", "day": time.strftime("%Y-%m-%d", lt), "hour": lt.tm_hour, "source": name})
+    return out
+
+
 def taps(cutoff: float, top: int) -> None:
     db = sqlite3.connect(DB)
     rows = db.execute("select name, count(*), count(distinct date(ts,'unixepoch')) from site_events where kind='ui' and role='admin' and ts>=? "
@@ -139,7 +154,8 @@ def main() -> None:
     print(f"last {a.days} days")
     taps(cutoff, a.top)
     show("voice to the pods", load_voice(cutoff), a.top)
-    show("typed or said to the private Skippy", load_agent(cutoff), a.top)
+    show("typed or said to the private Skippy (saved conversations)", load_agent(cutoff), a.top)
+    show("typed to the portal since intent logging began (chat, agent, Bilby ask)", load_intents(cutoff), a.top)
 
 
 if __name__ == "__main__":

@@ -159,6 +159,21 @@ def record_chat(message: str, reply: str, model: str, calls, forced: str | None 
         return None
 
 
+def record_intent(source: str, text: str):
+    """The Captain's own request, for the intent report (tools/intent_report.py): what he asks for, how often, how long it is to say (his call, 2026-11-11,
+    behind a chat-first UI). His alone: only an admin's words, only their first 200 characters; nobody else's request is kept this way."""
+    tel = current_app.extensions["telemetry"]
+    try:
+        person = who() if tel.enabled else None
+        if not person or person[1] != "admin":
+            return None
+        text = str(text or "").strip()
+        return tel.record("intent", source, *person, text=text[:200], words=len(text.split()))
+    except Exception:   # noqa: BLE001 — recording must never break the chat
+        log.warning("telemetry: intent not recorded", exc_info=True)
+        return None
+
+
 def record_gap(detail: dict):
     """A physics question Mentat couldn't model (an auto-filed bug for the Captain to fix in sigma-ground). Always
     recorded: `detail` carries what the caller decided is fit to keep (the question only for the Captain or someone who

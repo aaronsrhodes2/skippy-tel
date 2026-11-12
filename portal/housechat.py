@@ -184,6 +184,9 @@ def register(app, auth, home, me, store) -> HouseChat:
     def home_chat_send():
         body = request.get_json(silent=True) or {}
         try:
+            if body.get("mode") == "say":
+                import telemetry_web                                   # noqa: PLC0415 — the Captain's typed request to the house, for the intent report
+                telemetry_web.record_intent("house-ask", body.get("text"))
             return jsonify(chat.send(str(body.get("mode") or ""), body.get("text"), str(body.get("room") or ""), body.get("speak") is not False))
         except ValueError as exc:
             return jsonify(error=str(exc)), 400

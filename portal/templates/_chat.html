@@ -929,7 +929,7 @@
     // controls were all navigation, and navigation is short to say. Said ones are counted as say:<what> (not as taps), so the tidy sees requests replace taps.
     let navTry = true;
     function runNav(hit) {
-      const said = (id) => { try { navigator.sendBeacon("{{ url_for('telemetry_tap') }}", new Blob([JSON.stringify({e: "say:" + id, p: location.pathname})], {type: "application/json"})); } catch (err) { /* nothing counted */ } };
+      const said = (id) => { {% if telemetry_on %} try { navigator.sendBeacon("{{ url_for('telemetry_tap') }}", new Blob([JSON.stringify({e: "say:" + id, p: location.pathname})], {type: "application/json"})); } catch (err) { /* nothing counted */ }{% endif %} };
       if (hit.kind === "new") { said("new"); newChat(); return true; }
       if (hit.kind === "sheet") { said(hit.name); if (openSheet !== hit.name) { showSheet(hit.name); if (hit.name === "chats") paintChats(); if (hit.name === "apps") loadApps(); } return true; }
       if (hit.kind === "open") { said("open-" + hit.tile.id); location.href = hit.tile.href; return true; }
