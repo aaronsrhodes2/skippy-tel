@@ -13,8 +13,6 @@ echo $$ > "$PIDFILE"
 trap 'rm -f "$PIDFILE"' EXIT
 delay=3
 export PYTHONIOENCODING=utf-8:replace PYTHONUTF8=1
-# Spotify is off in Bilby (the Captain, 2026-11-11: a Spotify song made the Tesla jump to its own Spotify app, then "License Error"): the radio plays his library alone.
-export SKIPPY_SPOTIFY=off
 while true; do
   started=$(date +%s)
   services/satellite/.venv/Scripts/python -u services/satellite/radio.py >> state/radio.log 2>&1
