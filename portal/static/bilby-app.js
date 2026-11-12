@@ -882,13 +882,14 @@
   function showSpotify() {
     // The house plays ONE stream and every device is a remote for it (the Captain, 2026-11-11: "they all show different songs ... it's all one stream"): the bar
     // shows what the house is playing unless THIS browser is itself making the sound ("Play here"). A saved queue that is merely sitting here no longer wins.
-    const st = stereoDev(), mine = isPlaying() || (rec.on && S.want), d = mine || !st || !st.state.playing ? null : st;
+    // Paused or playing, the house's song is THE song: a paused house used to hand the bar back to each browser's own last song, so every device showed a different one.
+    const st = stereoDev(), mine = isPlaying() || (rec.on && S.want), d = mine || !st || !(st.state.title || st.state.track) ? null : st;
     const was = S.barStereo; S.barStereo = !!d;
     const badge = $("#b-spot");
     if (badge) badge.hidden = !d || !isSpotify(d.state.track);
     if (!d) { if (was) showTrack(); return; }                  // the house went quiet (or this browser took over): the bar goes back to this browser's own song
     $("#b-title").textContent = d.state.title || (isSpotify(d.state.track) ? "Spotify" : "Playing");
-    $("#b-sub").textContent = [d.state.artist, d.name].filter(Boolean).join(" · ");
+    $("#b-sub").textContent = [d.state.artist, d.name, d.state.playing ? "" : "paused"].filter(Boolean).join(" · ");
     const i = S.lib && d.state.track ? S.lib.byPath.get(d.state.track) : undefined, ht = i !== undefined ? S.lib.T[i] : null;
     setCover($("#b-cover"), ht ? ht.ap : "", 48);
     root.dataset.has = "1";
