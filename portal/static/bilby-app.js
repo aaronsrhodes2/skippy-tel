@@ -1067,7 +1067,7 @@
       const mkb = (r, label, icon) => { const b = el("button", "key"); b.type = "button"; b.dataset.r = r; b.innerHTML = ico(icon); b.setAttribute("aria-label", label); b.title = label; return b; };
       acts.append(mkb("s-prev", "Previous", "prev"), mkb("s-play", "Play", "play"), mkb("s-next", "Next", "next"), mkb("s-mix", "Mix his songs into each other, like a DJ", "mix"));
       txt.append(kind, h, who, meta); e.append(txt, acts);
-      e._r = { kind, h, who, meta, play: acts.children[1], mix: acts.children[3] };
+      e._r = { kind, h, who, meta, prev: acts.children[0], play: acts.children[1], mix: acts.children[3] };
       return e;
     },
     bind(e, r) {
@@ -1087,7 +1087,8 @@
       }
       setIcon(x.play, v.playing ? "pause" : "play"); x.play.setAttribute("aria-label", v.playing ? "Pause" : "Play");
       const m = r.dev.state.mix;
-      x.mix.hidden = !m; x.mix.setAttribute("aria-pressed", m && m.on ? "true" : "false");
+      const remote = !!$("#ask");                                       // the Captain's remote: play/pause and next only (the rest is one tap away in the library)
+      x.prev.hidden = remote; x.mix.hidden = !m || remote; x.mix.setAttribute("aria-pressed", m && m.on ? "true" : "false");
       x.mix.setAttribute("aria-label", m && m.on ? "Mixing: on" : "Mixing: off");
     },
   };
@@ -1307,7 +1308,7 @@
         const up = sv.items.slice(sv.idx + 1);               // the hero is what plays now; the rows are only what comes next
         head("next", up.length ? String(up.length) : "");
         if (!up.length) msg("Nothing is queued after this.", "next");
-        up.forEach(it => rows.push({ type: "srow", h: g.rowH, it }));
+        up.slice(0, $("#ask") ? 3 : up.length).forEach(it => rows.push({ type: "srow", h: g.rowH, it }));      // the remote shows the next three; the whole queue is in the library view
         break;
       }
       case "genre": {
@@ -1428,8 +1429,9 @@
 
   // — routing: views are #hash routes; sheets are history entries, so the back button closes them —
   function parseHash() {
-    const [name, id] = location.hash.replace(/^#\/?/, "").split("/");
-    const n = VIEWS.includes(name) ? name : "home";
+    const raw = location.hash.replace(/^#\/?/, ""), [name, id] = raw.split("/");
+    // the Captain's page opens on the house stereo (a remote for the one stream: song, play/pause, next, speakers, the ask line); the library is one key away (#home)
+    const n = VIEWS.includes(name) ? name : (raw === "" && $("#ask") ? "stereo" : "home");
     const num = id === undefined || id === "" ? undefined : parseInt(id, 10);
     return { name: n, id: Number.isFinite(num) ? num : undefined };
   }
@@ -1449,6 +1451,7 @@
   }
   function onRoute(back) {
     S.route = parseHash();
+    root.dataset.route = S.route.name;                       // (the stereo view hides the local player's keys: bilby-player.css)
     S.hashShown = location.hash;
     S.fresh = !back;
     if (S.search) clearSearch(true);
@@ -1982,6 +1985,7 @@
   // both rooms" and "something heavier" work here the way they do by voice. The answer is read back from the Home chat's events and shown as one line.
   const askForm = $("#ask");
   if (askForm) {
+    root.dataset.ask = "1";
     const said = $("#ask-said"), input = $("#ask-in");
     const show = (text, warn) => { said.textContent = text; said.dataset.warn = warn ? "1" : "0"; said.hidden = !text; };
     askForm.addEventListener("submit", async ev => {

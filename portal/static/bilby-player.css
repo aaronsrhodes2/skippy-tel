@@ -195,6 +195,15 @@
 
 /* the Captain's line to Skippy for music (portal/housechat.py's typed "say"): a search-like box, a send key, and the answer as one line under it */
 .ask { flex: none; display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-.ask .search { flex: 1 1 auto; min-width: 0; }
+.ask .search { flex: 1 1 auto; }
 .ask-said { flex: none; margin: 2px 2px 0; font: 12px var(--mono); color: var(--cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ask-said[data-warn="1"] { color: var(--amber); }
+
+/* the Captain's remote (the house stereo view): the one stream's song, play/pause, next, its speakers and the ask line. The local player's own bar and keys are for
+   the library view (#home), where this browser plays for itself. */
+#bp[data-ask="1"][data-route="stereo"] .bp-bar,
+#bp[data-ask="1"][data-route="stereo"] .keybar .key[data-act="shuffle"],
+#bp[data-ask="1"][data-route="stereo"] .keybar .key[data-act="repeat"],
+#bp[data-ask="1"][data-route="stereo"] .keybar .key[data-act="dj"],
+#bp[data-ask="1"][data-route="stereo"] .keybar .key[data-act="queue"],
+#bp[data-ask="1"][data-route="stereo"] .keybar .key[data-act="help"] { display: none; }

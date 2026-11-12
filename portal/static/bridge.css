@@ -402,10 +402,10 @@ body.game-art::after { content: ""; position: fixed; inset: 0; z-index: 0; point
 /* ── the top row: back, search, sort, jump to a letter ─────────────────────────────────────────────────────────── */
 .bp-top { flex: none; display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; }
 .bp-top .key { height: 40px; }
-.bp-top .search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 6px 0 10px; background: var(--panel); border: 1px solid var(--dim-green-hi); }
-.bp-top .search:focus-within { border-color: var(--accent); }
-.bp-top .search > .g { flex: none; width: 18px; height: 18px; color: var(--muted); }
-.bp-top .search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: var(--white); font-size: 16px; outline: none; }
+.bp-top .search, .ask .search { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 6px 0 10px; background: var(--panel); border: 1px solid var(--dim-green-hi); }
+.bp-top .search:focus-within, .ask .search:focus-within { border-color: var(--accent); }
+.bp-top .search > .g, .ask .search > .g { flex: none; width: 18px; height: 18px; color: var(--muted); }
+.bp-top .search input, .ask .search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: var(--white); font-size: 16px; outline: none; }
 .bp-top .search input::-webkit-search-cancel-button { display: none; }
 .bp-top .search .clear { flex: none; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 .bp-top .search .clear .g { width: 16px; height: 16px; }
