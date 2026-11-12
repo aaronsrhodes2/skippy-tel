@@ -279,7 +279,7 @@
   const STALL_MS = 20000;
   let stallTimer = 0;
   const unstall = () => { clearTimeout(stallTimer); stallTimer = 0; };
-  au.addEventListener("waiting", () => { if (!stallTimer) stallTimer = setTimeout(() => { stallTimer = 0; if (!au.paused && au.readyState < 3) resumeOnFunnel(); }, STALL_MS); });
+  au.addEventListener("waiting", () => { clearTimeout(stallTimer); stallTimer = 0; if (!au.paused && au.readyState < 3) resumeOnFunnel(); });
   ["playing", "pause", "emptied", "ended", "error"].forEach(ev => au.addEventListener(ev, unstall));
   au.addEventListener("timeupdate", () => {
     $("#now-bar i").style.width = au.duration ? (100 * au.currentTime / au.duration).toFixed(2) + "%" : "0";

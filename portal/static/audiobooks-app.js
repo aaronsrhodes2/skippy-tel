@@ -372,7 +372,7 @@
   const STALL_MS = 20000;
   let stallTimer = 0;
   const unstall = () => { clearTimeout(stallTimer); stallTimer = 0; };
-  au.addEventListener("waiting", () => { if (!stallTimer) stallTimer = setTimeout(() => { stallTimer = 0; if (!au.paused && au.readyState < 3) resumeOnFunnel(); }, STALL_MS); });
+  au.addEventListener("waiting", () => { clearTimeout(stallTimer); stallTimer = 0; if (!au.paused && au.readyState < 3) resumeOnFunnel(); });
   ["playing", "pause", "emptied", "ended", "error"].forEach(ev => au.addEventListener(ev, unstall));
   document.addEventListener("visibilitychange", () => { if (document.hidden) savePlace(true); else { refreshPlaces(); pollRooms(); } });
   window.addEventListener("pagehide", () => savePlace(true));
