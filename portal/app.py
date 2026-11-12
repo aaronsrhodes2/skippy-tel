@@ -1764,9 +1764,9 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         if not again:
+            telemetry_web.record_intent("agent", message)          # the Captain's own request (this route is his alone)
             print(json.dumps({"event": "workshop", "user": me(), "task": task, "chars": len(message), "images": len(body.get("images") or [])}), flush=True)  # never the text
         return jsonify(task=task, again=again)
-            telemetry_web.record_intent("agent", message)          # the Captain's own request (this route is his alone)
 
     @mine.get("/workshop/events")
     @workshop_call
@@ -2691,10 +2691,10 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
                 return jsonify(error=f"That's {CHAT_PER_HOUR} messages this hour; Skippy needs a breather. "
                                      "Try again in a bit."), 429
         p, mine = prompts.claim(pid, user["email"])
-        if not mine:                                          # answered already, or another request is on it: wait for that one
-            if p.state != "answered":
         if mine and admin:
             telemetry_web.record_intent("chat", message)       # the Captain's own request, for tools/intent_report.py
+        if not mine:                                          # answered already, or another request is on it: wait for that one
+            if p.state != "answered":
                 p.done.wait(prompts_mod.RETRY_FOR_S)
             if p.result is not None:
                 payload, status = p.result
