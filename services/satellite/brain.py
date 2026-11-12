@@ -778,9 +778,9 @@ def bilby_route(heard: str) -> dict | None:
 
 
 # "it" is what already plays: "play it on the upstairs stereo" moves the music (`play`: an idle station starts the library there), it is no search for a song called "it".
-_MOVE = re.compile(r"^(?:(?P<start>play|put|start)\s+(?:it|this|that|these|those)(?:\s+(?:back|over))?"
+_MOVE = re.compile(r"^(?:(?P<start>play|put|start)(?:\s+(?:it|this|that|these|those)(?:\s+(?:back|over))?)?"
                    r"|(?:(?P<put>put)|move|send|switch|take|bring|shift|route|have|get)\s+(?:it|this|that|these|those|the music|the songs?|the tunes)(?:\s+(?:back|over))?"
-                   r"|(?:switch|go|change|move)(?:\s+(?:back|over))?(?:\s+to)?)$")
+                   r"|(?:switch|go|change|move)(?:\s+(?:back|over))?(?:\s+to)?)(?:\s+and)?(?:\s+(?:too|as well|also))?$")
 
 
 def speakers_route(heard: str) -> dict | None:
