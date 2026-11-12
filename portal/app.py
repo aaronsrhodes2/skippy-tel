@@ -1230,7 +1230,8 @@ def create_app(settings: dict | None = None, vm=None, skippy=None, mentat=None, 
     @auth.portal_required("audio")
     def player_page():
         return render_template("music.html", rooms=player_mod.ROOMS,
-                               fav_url=url_for("music.favorites_add") if auth.is_admin(me()) else "")   # the favorite key: the Captain's list only
+                               fav_url=url_for("music.favorites_add") if auth.is_admin(me()) else "",   # the favorite key: the Captain's list only
+                               ask=auth.is_admin(me()))                                                   # the line to Skippy for music: his alone (the Home chat is his)
 
     @listen.get("/manifest.webmanifest")
     def player_manifest():

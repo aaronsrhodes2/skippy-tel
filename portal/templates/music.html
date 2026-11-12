@@ -115,6 +115,18 @@
     <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
   </div>
 
+  {# The Captain's line to Skippy for music (the same brain as the pods: a typed "say" in the Home chat): "calm music in both rooms", "something heavier", "skip this" #}
+  {% if ask %}
+  <form class="ask" id="ask" autocomplete="off" data-send-url="{{ url_for('housechat.home_chat_send') }}" data-events-url="{{ url_for('housechat.home_chat_events') }}">
+    <div class="search">
+      <svg class="g" aria-hidden="true"><use href="#g-talk"/></svg>
+      <input type="text" id="ask-in" placeholder="Ask for music" maxlength="300" autocapitalize="off" spellcheck="false" enterkeyhint="send" aria-label="Ask Skippy for music" data-tel="music:ask-in">
+    </div>
+    <button type="submit" class="key" id="ask-go" aria-label="Send" title="Send" data-tel="music:ask-send"><svg class="g" aria-hidden="true"><use href="#g-send"/></svg></button>
+  </form>
+  <div class="ask-said" id="ask-said" role="status" aria-live="polite" hidden></div>
+  {% endif %}
+
   <div class="bp-bar" id="bar" role="region" aria-label="Player">
     <div class="b-line" aria-hidden="true"><i id="b-prog"></i></div>
     <button type="button" class="b-now" data-act="np" aria-label="Open Now Playing">

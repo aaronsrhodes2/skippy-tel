@@ -1978,6 +1978,34 @@
       case "?": e.preventDefault(); openKeys(); break;
     }
   });
+  // ═══ Ask: a line to Skippy for music (the Captain only). The same brain as the pods: a typed "say" in the Home chat (portal/housechat.py), so "calm music in
+  // both rooms" and "something heavier" work here the way they do by voice. The answer is read back from the Home chat's events and shown as one line.
+  const askForm = $("#ask");
+  if (askForm) {
+    const said = $("#ask-said"), input = $("#ask-in");
+    const show = (text, warn) => { said.textContent = text; said.dataset.warn = warn ? "1" : "0"; said.hidden = !text; };
+    askForm.addEventListener("submit", async ev => {
+      ev.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = ""; show("…");
+      try {
+        const r = await post(askForm.dataset.sendUrl, { mode: "say", text, room: "*", speak: false });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(d.error || r.status);
+        for (let i = 0; i < 45; i++) {                                // the hub answers in a few seconds; give it 45
+          await new Promise(res => setTimeout(res, 1000));
+          const er = await fetch(askForm.dataset.eventsUrl + "?after=" + d.seq, { credentials: "same-origin", cache: "no-store" });
+          const ev = await er.json().catch(() => ({ events: [] }));
+          const evs = ev.events || [];
+          const reply = evs.filter(e => e.kind === "said" || (e.kind === "note" && !e.typed)).map(e => e.text).join(" ");
+          if (reply) { show(reply.slice(0, 220), evs.some(e => e.kind === "note")); return; }
+        }
+        show("Skippy hasn't answered. Is the house hub running?", true);
+      } catch (e) { show("Couldn't ask (" + e.message + ")", true); }
+    });
+  }
+
   // ★ the song playing here goes on the Captain's favorites list, for DJing later (portal/favorites.py; the key shows for him only)
   async function favorite() {
     const t = curTrack();

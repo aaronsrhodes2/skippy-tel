@@ -192,3 +192,9 @@
 .menu .s-head { margin-bottom: 4px; }
 
 @media (max-height: 640px) { dialog.keys .why { display: none; } }
+
+/* the Captain's line to Skippy for music (portal/housechat.py's typed "say"): a search-like box, a send key, and the answer as one line under it */
+.ask { flex: none; display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.ask .search { flex: 1 1 auto; min-width: 0; }
+.ask-said { flex: none; margin: 2px 2px 0; font: 12px var(--mono); color: var(--cyan); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-said[data-warn="1"] { color: var(--amber); }
