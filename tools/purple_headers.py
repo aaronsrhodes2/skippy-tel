@@ -199,7 +199,7 @@ those for detail when a task needs it, never all at once (your room is small).
 
 ## Tools and skills (read the source for details)
 - purple-tools: {purple}. Pop-up models appear here too when ready. Read services/purple-tools/tools.py.
-- House tools (skippy-house): {house}. Read services/satellite/README.md.
+- House tools (skippy-house): {house}, and the music tools (play_music, speakers, music, dj_mode, spotify, audiobook: music on a room, both floors, a mood; services/satellite/house_mcp.py). Read services/satellite/README.md.
 - Skills ({skills}): you have no Skill tool; Read the file when the job calls for it, never all of them:
 {skill_lines}
 - Pictures: a `SKIPPY_PICTURE: <description>` line; never run the image studio by hand. On-demand models: docs/popups.md.
