@@ -456,30 +456,71 @@ def test_the_box_caps_switch_the_stream_to_deflated_and_resend_the_face():
 
 
 def test_a_full_link_slows_the_pace_and_a_clean_one_lets_it_creep_back():
-    from face_stream import FaceStreamer, RATE_START, RATE_MIN, RATE_STEP
+    from face_stream import FaceStreamer, RATE_START, RATE_MIN, RATE_STEP, CEILING_S
     s = FaceStreamer("127.0.0.1", send=lambda d: None)
-    assert s.rate == RATE_START and s.rate_max == 900_000.0      # it starts well under the ceiling: the link says how much it carries
+    assert s.rate == RATE_START and s.rate_max == 900_000.0      # it starts well under the most it may send: the link says how much it carries
+
+    def second(t, lost_total, share_of_pace=1.0, dg=500):
+        s.sent_dg += dg
+        s.sent_bytes += int(s.rate * share_of_pace)
+        s.note_loss(lost_total, now=t)
     s.note_loss(0, now=1.0)
-    s.sent_dg += 500
-    s.note_loss(280, now=2.0)                                    # 280 lost beside 500 sent: the link is full
-    assert s.rate < RATE_START * 0.7 and not s.slow_now(2.1)     # slower, and no resending into a full link
-    for i in range(40):
-        s.sent_dg += 500
-        s.note_loss(280 * (i + 2), now=3.0 + i)
-    assert s.rate == RATE_MIN                                    # it never goes under the floor
+    second(2.0, 280)                                             # 280 lost beside 500 sent: the link is full
+    assert s.rate <= RATE_START * 0.7 and not s.slow_now(2.1)    # slower, and no resending into a full link
+    assert s.ceiling == RATE_START                               # where it overflowed is remembered
     r = s.rate
-    s.sent_dg += 200
-    s.note_loss(280 * 41, now=50.0)                              # a clean second
+    second(3.0, 560)                                             # the next report still shows the old overflow: no second cut for it
+    assert s.rate == r
+    for i in range(40):
+        second(4.0 + i, 280 * (i + 3))
+    assert s.rate == RATE_MIN                                    # it never goes under the floor
+    lost, r = 280 * 42, s.rate
+    second(44.0, lost)                                           # a clean second at the full pace, right under where it last overflowed: feel the way up
+    assert s.rate == r + RATE_STEP / 15
+    r = s.rate
+    second(45.0, lost, share_of_pace=0.3)                        # a clean second well under the pace (an idle face) proves nothing: the pace stays
+    assert s.rate == r
+    second(46.0, lost + 6, share_of_pace=0.3, dg=200)            # a few lost while the link had room: the air: same pace, repair them
+    assert s.rate == r and s.slow_now(46.1)
+    s.note_loss(lost + 6, now=50.0)                              # nothing sent, nothing lost: no verdict
+    assert s.rate == r and not s.slow_now(50.1)
+    second(51.0, lost + 16, share_of_pace=1.0, dg=200)           # 5% lost while sending flat out: the link is about full: hold, and do not resend into it
+    assert s.rate == r and not s.slow_now(51.1)
+    s.note_loss(lost + 16, now=51.0 + CEILING_S)                 # (a quiet report, so the next second is measured over one second)
+    second(52.0 + CEILING_S, lost + 16)                          # long after: the ceiling is forgotten, a clean second takes a full step
     assert s.rate == r + RATE_STEP
-    s.sent_dg += 200
-    s.note_loss(280 * 41 + 6, now=51.0)                          # 6 of 206: the air, not the link: same pace, repair them
-    assert s.rate == r + RATE_STEP and s.slow_now(51.1)
-    s.note_loss(280 * 41 + 6, now=52.0)                          # nothing sent, nothing lost: no verdict
-    assert s.rate == r + RATE_STEP
-    for i in range(200):
-        s.sent_dg += 200
-        s.note_loss(280 * 41 + 6, now=60.0 + i)
+    for i in range(300):
+        second(53.0 + CEILING_S + i, lost + 16)
     assert s.rate == s.rate_max
+
+
+def test_the_allowance_keeps_the_average_at_the_pace_without_waiting():
+    from face_stream import FaceStreamer, BURST_S
+    s = FaceStreamer("127.0.0.1", send=lambda d: None)
+    s.rate = 200_000.0
+    sent, t = 0, 100.0
+    assert s.can_send(t)                                         # the first frame goes at once
+    for _ in range(200):                                         # ten seconds of ticks, every frame costing 14 KB (a speaking face: 280 KB/s asked)
+        t += 0.05
+        if s.can_send(t):
+            s.tokens -= 14_000
+            sent += 14_000
+    assert 190_000 * 10 <= sent <= 200_000 * 10 + 2 * 14_000     # the average is the pace: about 14 of every 20 frames went
+    for _ in range(100):                                         # an idle face asks for less than the pace: nothing is held, and the allowance does not pile up
+        t += 0.05
+        assert s.can_send(t)
+        s.tokens -= 5_000
+    assert s.tokens <= s.rate * BURST_S
+
+
+def test_a_pace_far_above_what_was_really_sent_drops_to_it_at_once():
+    from face_stream import FaceStreamer
+    s = FaceStreamer("127.0.0.1", send=lambda d: None)
+    s.rate = 880_000.0                                           # an idle face left the pace high
+    s.note_loss(0, now=1.0)
+    s.sent_dg += 200; s.sent_bytes += 270_000                    # he starts to speak: 270 KB in the second, and the link drops a fifth of it
+    s.note_loss(40, now=2.0)
+    assert s.ceiling == 270_000 and 200_000 < s.rate < 270_000   # under what was really sent, not 880 KB/s minus a bit
 
 
 def test_loss_counter_wraps_and_a_reboot_does_not_look_like_loss():

@@ -17,6 +17,7 @@ itself (a lost one still costs only its own tiles), which is about 2.7 times few
 from __future__ import annotations
 
 import json
+import queue
 import socket
 import struct
 import sys
@@ -40,7 +41,10 @@ LOSS_HOLD_S = 3.0                                  # how long after the last los
 RESEND_FRAMES = 3                                  # while losing: the tiles of this many past frames go again with each new one
 LOSS_REFRESH_TILES = 16                            # and this many more of the round-robin refresh
 RATE_START, RATE_MIN, RATE_STEP = 300_000.0, 100_000.0, 15_000.0   # the pace (bytes a second): where it starts, its floor, how fast it creeps back up
-HEAVY_LOSS, LIGHT_LOSS = 0.08, 0.01                # share of datagrams lost in a second: over HEAVY the link is full (slow down); up to LIGHT the pace may rise
+BURST_S = 0.1                                      # the allowance may save up this much of the pace (one frame goes out in a burst, the average holds)
+CEILING_S = 600.0                                  # how long the pace remembers where the link last overflowed
+MILD_LOSS = 0.03
+HEAVY_LOSS, LIGHT_LOSS = 0.08, 0.01              # share of datagrams lost in a second: over HEAVY the link is full (slow down); up to LIGHT the pace may rise
 ZRAW_MAX = 11000                                  # the most raw record bytes in one deflated datagram (the box inflates into 12 KB)
 ZLEVEL = 6
 
@@ -243,6 +247,11 @@ class FaceStreamer(threading.Thread):
         self.rate_max = rate                               # bytes a second at most; `rate` is the pace now, steered by the box's loss reports (note_loss)
         self.rate = min(rate, RATE_START)
         self.sent_dg, self._sent_mark = 0, 0
+        self.sent_bytes, self._bytes_mark, self._t_mark = 0, 0, 0.0
+        self._cut_until = 0.0
+        self.tokens, self._tok_t = 0.0, 0.0                # the allowance (bytes) the pace has saved up, and when it was last topped up
+        self._out: queue.Queue = queue.Queue()             # datagrams on their way out, sent evenly by a thread of their own (_sender)
+        self.ceiling, self.ceiling_at = rate, -1e9        # the bytes a second at which the link last overflowed, and when (forgotten after CEILING_S)
         self.face = Face()
         self.enc = Encoder()
         self.stop_flag = threading.Event()
@@ -272,8 +281,10 @@ class FaceStreamer(threading.Thread):
     def note_loss(self, total: int, now: float | None = None) -> None:
         """The box's loss counter, about once a second. Measured 2026-11-12 on the living pod: the link carries about 250 datagrams a second and everything
         sent beyond that is simply lost (280 lost for 240 received), so loss is mostly OUR sending too much, and sending more to repair it makes it worse.
-        So the share lost since the last report steers the pace: a lot lost (over HEAVY_LOSS) means the link is full: send slower and do not resend; a
-        little lost is the air: keep the pace and send the recent tiles again for LOSS_HOLD_S; nothing lost: creep the pace back up."""
+        So the share lost since the last report steers the pace. A lot lost (over HEAVY_LOSS): the link is full: go a little under what was really sent,
+        remember that as the ceiling, do not resend (once per overflow). Some lost (over MILD_LOSS) while sending flat out: hold. A little lost while
+        there was room is the air: keep the pace and send the recent tiles again for LOSS_HOLD_S. A clean second at a pace that was really used: creep
+        up (slowly once near the remembered ceiling, so the stream sits just under what the link carries instead of overflowing it every few seconds)."""
         now = time.monotonic() if now is None else now
         sent = self.sent_dg - self._sent_mark
         self._sent_mark = self.sent_dg
@@ -281,17 +292,37 @@ class FaceStreamer(threading.Thread):
         if self.loss_total is not None and total != self.loss_total and (total - self.loss_total) % 4294967296 < 2147483648:
             lost = (total - self.loss_total) % 4294967296
         self.loss_total = total
-        share = lost / max(1, lost + sent) if sent >= 20 else (1.0 if lost and not sent else 0.0)
+        share = min(1.0, lost / sent) if sent >= 20 else (1.0 if lost and not sent else 0.0)
+        used = (self.sent_bytes - self._bytes_mark) / max(0.2, now - self._t_mark) if self._t_mark else 0.0     # bytes a second really sent since the last report
+        self._bytes_mark, self._t_mark = self.sent_bytes, now
         if sent < 20 and not lost:
             return                                             # nothing much was sent: no verdict on the link
         self.stats["lost"] = self.stats.get("lost", 0) + lost
-        if lost and (sent < 20 or share <= HEAVY_LOSS):
-            self.loss_until = now + LOSS_HOLD_S                # the air dropped a few: repair them
-        if sent >= 20 and share > HEAVY_LOSS:
-            self.rate = max(RATE_MIN, self.rate * max(0.6, 1.0 - share))
-            self.loss_until = 0.0                              # the link is full: resending would only fill it more
-        elif sent >= 20 and share <= LIGHT_LOSS:
-            self.rate = min(self.rate_max, self.rate + RATE_STEP)
+        near = used >= 0.75 * self.rate                        # the stream was sending about as fast as its pace allows
+        if sent >= 20 and share > HEAVY_LOSS:                  # the link is full: what was really sent is its ceiling; go a little under it, do not resend into it
+            if now >= self._cut_until:                         # (one cut per overflow: the next report still shows losses from before the cut took hold)
+                base = max(RATE_MIN, min(self.rate, used) if used > 0 else self.rate)
+                self.ceiling, self.ceiling_at = base, now
+                self.rate = max(RATE_MIN, base * max(0.7, 1.0 - share) * 0.95)
+                self._cut_until = now + 1.5
+            self.loss_until = 0.0
+        elif lost and share > MILD_LOSS and near:
+            pass                                               # some lost while sending flat out: the link is about full: hold the pace, do not add to it
+        elif lost:
+            self.loss_until = now + LOSS_HOLD_S                # the air dropped a few while the link had room: repair them
+        elif sent >= 20 and used >= 0.6 * self.rate:           # only a pace that was really used and came through clean is evidence the link carries more
+            close = now - self.ceiling_at < CEILING_S and self.rate >= 0.9 * self.ceiling
+            self.rate = min(self.rate_max, self.rate + (RATE_STEP / 15 if close else RATE_STEP))   # near where it last overflowed: feel the way up, do not jump
+
+    def can_send(self, now: float) -> bool:
+        """Top up the allowance by the pace and say whether a frame may go now. A frame is sent in one quick burst and its bytes are taken off the
+        allowance; while that is under zero the tick sends nothing (the next frame carries what changed since). So the average stays at the pace
+        without the loop ever waiting on it: waiting made every frame late by the time its bytes took (13 frames a second when the link had room for
+        18). The datagrams themselves leave evenly, from a thread of their own (_sender): sent in bursts, the same bytes lost three times as many."""
+        dt = min(0.5, now - self._tok_t) if self._tok_t else 0.05
+        self._tok_t = now
+        self.tokens = min(self.rate * BURST_S, self.tokens + self.rate * dt)
+        return self.tokens > 0
 
     def slow_now(self, now: float) -> bool:
         """True while the air is dropping datagrams: the encoder resends recent tiles and refreshes faster (the frame rate is NOT cut). The first call after the
@@ -336,6 +367,7 @@ class FaceStreamer(threading.Thread):
             ctypes.windll.winmm.timeBeginPeriod(1)             # sleeps of a millisecond, not fifteen
         except Exception:                                      # noqa: BLE001 — not Windows
             pass
+        threading.Thread(target=self._sender, daemon=True, name=f"face-send-{self.label}").start()
         t_start = time.monotonic()
         next_tick = t_start
         last_send = 0.0
@@ -355,6 +387,9 @@ class FaceStreamer(threading.Thread):
             t0 = time.perf_counter()
             try:
                 self.face.tick(self.now_ms())
+                if not self.can_send(now):                     # the link's allowance is spent: this tick's picture is skipped, the next one carries the change
+                    self.stats["held"] = self.stats.get("held", 0) + 1
+                    continue
                 img = to565(self.face.render())
                 while keys and now - t_start >= keys[0]:
                     keys.pop(0)
@@ -369,29 +404,38 @@ class FaceStreamer(threading.Thread):
             if only_header and now - last_send < HEARTBEAT_S:
                 continue
             last_send = now
-            self._send_paced(dg)
+            self.tokens -= sum(len(d) for d in dg)
+            for d in dg:
+                self._out.put(d)
             self.stats["frames"] += 1
             if now - last_log >= 10:
                 s = self.stats
                 self.log(f"[{self.label}] face stream: {s['frames'] / (now - last_log):.1f} frames/s, {s['bytes'] / 1024 / (now - last_log):.0f} KB/s, "
                          f"render {s['render_ms'] / max(1, s['frames']):.1f} ms, late {s['late']}, "
-                         f"lost {s.get('lost', 0)} of {s.get('dg', 0)} datagrams, pace {self.rate / 1024:.0f} KB/s")
-                self.stats.update(frames=0, bytes=0, render_ms=0.0, late=0, lost=0, dg=0)
+                         f"lost {s.get('lost', 0)} of {s.get('dg', 0)} datagrams, pace {self.rate / 1024:.0f} KB/s, {s.get('held', 0)} ticks held")
+                self.stats.update(frames=0, bytes=0, render_ms=0.0, late=0, lost=0, dg=0, held=0)
                 last_log = now
 
-    def _send_paced(self, datagrams: list[bytes]) -> None:
+    def _sender(self) -> None:
+        """Sends the queued datagrams evenly, a little faster than the pace (so the queue, never more than about a frame, always drains): the link
+        to a pod drops bursts it would have carried as a steady flow."""
         t = time.perf_counter()
-        for d in datagrams:
+        while not self.stop_flag.is_set():
+            try:
+                d = self._out.get(timeout=0.2)
+            except queue.Empty:
+                continue
             try:
                 self.send(d)
             except OSError:
-                return
+                continue
             self.stats["bytes"] += len(d)
             self.stats["dg"] = self.stats.get("dg", 0) + 1
             self.sent_dg += 1
-            t += len(d) / self.rate
+            self.sent_bytes += len(d)
+            t = max(t, time.perf_counter() - 0.01) + len(d) / (self.rate * 1.2)
             wait = t - time.perf_counter()
-            if wait > 0.002:
+            if wait > 0.001:
                 time.sleep(wait)
 
 

@@ -114,7 +114,13 @@ second (~300 KB/s) and the hub was sending 500+**; half were lost (280 lost for 
 The face needs 16 KB a frame idle and 36 KB speaking as tiles, i.e. 320-720 KB/s at 20 frames a second: over the link exactly when he "draws a lot".
 Two changes in `face_stream.py` + `skippy_stream` (no puppet): **deflated datagrams** (`tools/face_codec_probe.py`: 5.4 KB idle, 13.6 KB speaking; palette,
 motion and smaller tiles gained under 1.5x, deflate 2.7x; 0.76 ms to inflate a datagram on the box) and **a pace steered by the box's loss counter**.
-Result on the living pod, idle: 20.0 whole frames a second, 0 missing, 0 partial, 130 KB/s. Puppet mode stays what it was: the way to clips, props and
+Result on the living pod, idle: 20.0 whole frames a second, 0 missing, 0 partial, 130 KB/s. Speaking: 12-15 whole frames a second, clean in most
+5 s windows (before: 3-11 with half the datagrams lost). The link itself is the limit there: `tools/face_link_probe.py` (junk datagrams beside the live
+stream, counted by the box) shows it carries about 230-250 KB/s whatever the datagram size, and a speaking face is 14 KB a frame. What did NOT
+help (all measured offline on the real animation): palettes, motion vectors, 8 px or tight tiles, byte planes, row/left/previous-frame prediction
+(all within 10% of plain deflate), a per-frame byte budget that puts the faintest tiles off (a standing shortfall just builds a backlog of stale tiles),
+bursts (three times the loss). What would: one bit less colour a channel (RGB444: 11.6 KB a speaking frame, about 20 frames a second on this link) at
+the price of a slight tint on dark tones (`.skippy-shots/colour-565-vs-444.png`): the Captain's call, not built. Puppet mode stays what it was: the way to clips, props and
 tweening, not needed for a clean, smooth face; its blocker is still the box's drawing speed.
 
 ## What is proven and what is not

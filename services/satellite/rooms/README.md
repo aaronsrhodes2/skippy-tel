@@ -92,7 +92,10 @@ panel's frame buffer, each frame at its last datagram, so a frame is never half 
   (2026-11-12, measured: the link to the living pod carries about 250 datagrams a second and everything beyond is lost, so "loss" was mostly the hub sending
   too much: 280 lost for 240 received). Over 8% lost = the link is full: the pace (bytes a second) drops and nothing is resent; a little lost = the air: the
   last three frames' tiles go again; nothing lost: the pace creeps back up. And a box that says it can (`Stream caps` bit 0) gets **deflated datagrams**
-  (each datagram by itself, about 2.7 times fewer bytes): the living pod went from 3-11 whole frames a second to a steady 20 with nothing missing. The whole
+  (each datagram by itself, about 2.7 times fewer bytes): the living pod went from 3-11 whole frames a second to a steady 20 with nothing missing (idle,
+  listening, thinking), and to 12-15 clean ones while he speaks (a speaking face is 14 KB a frame, 270 KB/s at 20 frames a second, and that link carries
+  about 230: `tools/face_link_probe.py` measures a link). The pace is an allowance (`can_send`): a tick the link cannot afford sends nothing and the next
+  frame carries the change, and the datagrams leave evenly from a thread of their own (in bursts the same bytes lost three times as many). The whole
   face is resent when a burst ends (`FaceStreamer.note_loss`/`slow_now`); what really cured the bursts was the router's 2.4 GHz channel (1, 20 MHz, not Auto/9).
   (5) Keys and looks: top key = pod speaker, bottom key = microphone (`Face` sensor: `<state>,<talking>,<mic off>,<speaker off>`); mic off = earplugs, listening with the
   speaker on = a floating microphone, both off = off duty (fuchsia, music face). The pod volume is locked at `pod_volume` (0.7) at boot. With music on and nothing else
