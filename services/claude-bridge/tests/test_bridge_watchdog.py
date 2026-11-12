@@ -165,4 +165,6 @@ def test_the_engines_own_git_calls_never_wait_for_a_person_either(shop, monkeypa
 
 def test_child_env_sets_the_two_variables_and_drops_the_key():
     env = engine.child_env({"PATH": "/bin", "SKIPPY_HOME_TOKEN": "secret", "GIT_TERMINAL_PROMPT": "1"})
-    assert env == {"PATH": "/bin", "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
+    env.pop("CLAUDE_CODE_OAUTH_TOKEN", None)                                 # (only where the vault holds one: not what this test is about)
+    assert env == {"PATH": "/bin", "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never",
+                   "BASH_MAX_TIMEOUT_MS": str(4 * 3600 * 1000)}              # (7ae71a08: a command may run for 4 hours)
