@@ -153,6 +153,50 @@ def parse_nml(nml_path: str, marker: str = "corrected_music") -> dict[str, Track
     return out
 
 
+def mood_index(nml_path: str, state: Path = STATE, marker: str = "corrected_music") -> dict[str, list[str]]:
+    """Each track's feeling tags (calm, dark, tender ...) by catalog path, from the "♪calm ♪tender" part of its COMMENT2 in Traktor's collection
+    (music-collection/stage8l_mood_tags.py writes them). Cached beside the Traktor index, re-read only when the collection file changes."""
+    import xml.etree.ElementTree as ET                             # noqa: PLC0415
+    try:
+        mtime = os.path.getmtime(nml_path)
+    except OSError:
+        return {}
+    idx = Path(state) / "mood-index.json"
+    try:
+        data = json.loads(idx.read_text(encoding="utf-8"))
+        if data.get("mtime") == mtime and data.get("nml") == nml_path:
+            return data["moods"]
+    except (OSError, ValueError, KeyError):
+        pass
+    note = "♪"
+    out: dict[str, list[str]] = {}
+    for _ev, e in ET.iterparse(nml_path, events=("end",)):
+        if e.tag != "ENTRY":
+            continue
+        try:
+            loc, info = e.find("LOCATION"), e.find("INFO")
+            c2 = (info.get("COMMENT2") or "") if info is not None else ""
+            if loc is None or note not in c2:
+                continue
+            folder = (loc.get("DIR") or "").replace("/:", "/")
+            cut = folder.find(f"/{marker}/")
+            if cut < 0:
+                continue
+            tags = [t[1:] for seg in c2.split(" | ") if seg.strip().startswith(note) for t in seg.split() if t.startswith(note)]
+            if tags:
+                out[_nfc(folder[cut + len(marker) + 2:] + (loc.get("FILE") or ""))] = tags
+        finally:
+            e.clear()
+    try:
+        Path(state).mkdir(parents=True, exist_ok=True)
+        tmp = idx.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"mtime": mtime, "nml": nml_path, "moods": out}), encoding="utf-8")
+        os.replace(tmp, idx)
+    except OSError:
+        pass
+    return out
+
+
 class Library:
     """Track facts by catalog path: Traktor's first, else a cached librosa analysis (made on first ask)."""
 

@@ -72,6 +72,29 @@ TAIL_WORDS = re.compile(r"\b(?:(?:right |just )?now|today|tonight|tomorrow|later
 _GENRE_FILLER = r"(?:(?:some|any|more|good|great|loud|the|my|his|real|proper) )*"
 
 
+# What he says about a feeling -> the mood tags that fit (music-collection/stage8l_mood_tags.py writes them into Traktor's collection; dj.mood_index reads them).
+MOOD_WORDS: dict[str, set[str]] = {
+    "relaxing": {"calm", "dreamy", "tender"}, "relaxed": {"calm", "dreamy", "tender"}, "chill": {"calm", "dreamy", "tender"}, "mellow": {"calm", "tender"},
+    "calm": {"calm", "dreamy"}, "calming": {"calm", "dreamy"}, "peaceful": {"calm", "dreamy"}, "soothing": {"calm", "tender"}, "sleepy": {"calm", "dreamy"},
+    "quiet": {"calm"}, "soft": {"calm", "tender"}, "gentle": {"calm", "tender"}, "dreamy": {"dreamy"},
+    "sad": {"melancholy"}, "melancholy": {"melancholy"}, "melancholic": {"melancholy"}, "gloomy": {"melancholy", "dark"}, "wistful": {"melancholy", "tender"},
+    "dark": {"dark"}, "moody": {"dark", "melancholy"}, "brooding": {"dark", "melancholy"},
+    "happy": {"uplifting"}, "upbeat": {"uplifting", "party"}, "uplifting": {"uplifting"}, "cheerful": {"uplifting"}, "feel good": {"uplifting"}, "positive": {"uplifting"},
+    "energetic": {"energetic"}, "high energy": {"energetic"}, "pumped": {"energetic"}, "workout": {"energetic"}, "hype": {"energetic", "party"},
+    "angry": {"angry"}, "aggressive": {"angry", "energetic"}, "intense": {"angry", "energetic"},
+    "romantic": {"tender"}, "tender": {"tender"}, "sweet": {"tender"}, "love": {"tender"},
+    "party": {"party"}, "dance": {"party", "energetic"}, "danceable": {"party", "energetic"},
+}
+_MOOD_ALT = "|".join(sorted((re.escape(w) for w in MOOD_WORDS), key=len, reverse=True))
+
+
+def mood_phrase(text: str) -> str | None:
+    """The feeling `text` is, when it is nothing but one ("something relaxing", "some chill music for Khan", "sad songs"); None otherwise."""
+    t = " ".join(re.findall(r"[a-z0-9&'-]+", (text or "").lower()))
+    m = re.fullmatch(rf"{_GENRE_FILLER}(?:something |anything |stuff |music )?(?:that is |thats |that's )?({_MOOD_ALT})(?: music| songs| tracks| stuff| vibes?| tunes)?(?: for [a-z ]+)?", t)
+    return m.group(1) if m else None
+
+
 def genre_phrase(text: str) -> str | None:
     """The genre `text` is, when it is nothing but one ("heavy metal", "some loud metal music", "goth songs"); None otherwise. A bare genre is a genre before it is a title
     search: "heavy metal" found 3 songs by title (Pantera's "Heavy Metal Rules") against 1,941 tagged metal, "metal" 191 against 1,941 (2026-11-04)."""
@@ -271,7 +294,7 @@ def _field_match(text: str, said: str) -> bool:
 
 
 def resolve(args: dict, catalog: dict, favorites: list[str] | None = None, spotify=None, playlists: dict | None = None,
-            rnd=None, max_n: int = QUEUE_MAX, tired: set[str] | None = None, played=None) -> tuple[list[str], str, bool]:
+            rnd=None, max_n: int = QUEUE_MAX, tired: set[str] | None = None, played=None, moods: dict | None = None) -> tuple[list[str], str, bool]:
     """(queue, a note to say, ordered) for play_music's grammar arguments: mode, genre, playlist, artist, album, song, new, shuffle.
 
     `spotify`: an object with mix() -> {liked, suggested} and playlist(name) -> {tracks, playlist} (spotify.Client), or None. `ordered`: the queue
@@ -340,6 +363,10 @@ def resolve(args: dict, catalog: dict, favorites: list[str] | None = None, spoti
     if args.get("genre"):
         g = str(args["genre"])
         tests.append((f"{g}", lambda it, g=g: genre_match(genre(it), g)))
+    if args.get("mood"):
+        mw = str(args["mood"]).lower()
+        want = MOOD_WORDS.get(mw) or {mw}
+        tests.append((f"{mw}", lambda it, want=want: bool(want & set((moods or {}).get(it, ())))))
     if args.get("artist"):
         a = str(args["artist"])
         tests.append((f"by {a}", lambda it, a=a: _field_match(fields(it)[1], a)))

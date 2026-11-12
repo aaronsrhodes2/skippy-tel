@@ -19,7 +19,7 @@ import asyncio
 import random
 import re
 
-GRAMMAR_KEYS = ("mode", "genre", "playlist", "artist", "album", "song", "new")
+GRAMMAR_KEYS = ("mode", "genre", "mood", "playlist", "artist", "album", "song", "new")
 STEREO_LEVELS = 10
 POD = "pod:"                                      # a pod's own speaker as one of the station's speakers: "pod:<hub room>"
 
@@ -184,7 +184,8 @@ async def grammar_queue(args: dict, house, favorites) -> tuple[list[str], str, b
     def work():
         favs, tired, played = favorites.pool() if favorites is not None else ([], set(), set())   # his pool, what he is tired of, what he heard
         lists = mixes.traktor_playlists(env.get("BILBY_TRAKTOR_NML", dj.DEFAULT_NML), dj.STATE) if args.get("playlist") else {}
-        return mixes.resolve(args, catalog, favs if args.get("mode") else [], spot, lists, tired=tired, played=played)
+        moods = dj.mood_index(env.get("BILBY_TRAKTOR_NML", dj.DEFAULT_NML), dj.STATE) if args.get("mood") else None
+        return mixes.resolve(args, catalog, favs if args.get("mode") else [], spot, lists, tired=tired, played=played, moods=moods)
     return await asyncio.to_thread(work)
 
 
@@ -217,8 +218,12 @@ async def find(args: dict, house, favorites) -> tuple[list[str], str, bool, bool
     clean, place = clean_what(getattr(house, "env", None) or {}, what)                # a place and a time said inside the words ("heavy metal on enclave")
     if place and clean and isinstance(args, dict) and not args.get("speaker"):
         args["speaker"] = place                                 # it plays there (play_music reads the speaker after this)
+    mood = mixes.mood_phrase(clean)
+    if mood:                                                    # "something relaxing", "some sad songs": the feeling tags in Traktor's collection (a mood nobody tagged falls back to the shuffle, said in the note)
+        found, note, _ordered = await grammar_queue({**(args or {}), "mood": mood, "shuffle": True}, house, favorites)
+        return found, note, True, True, f"Nothing in his library feels {mood}."
     genre = mixes.genre_phrase(clean)
-    if genre:                                                   # "heavy metal", "some loud metal": a genre before it is a title search (3 songs by title, 1,941 by tag)
+    if genre:                                                 # "heavy metal", "some loud metal": a genre before it is a title search (3 songs by title, 1,941 by tag)
         found, note, _ordered = await grammar_queue({**(args or {}), "genre": genre, "shuffle": True}, house, favorites)
         return found, note, True, True, f"Nothing in his library matches {genre!r}."
     found = music_mod.search(await house.media.catalog(), what)
