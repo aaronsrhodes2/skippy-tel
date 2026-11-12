@@ -136,6 +136,8 @@ class EsphomeLink:
                 self.keys["face"] = e.key
             elif kind == "SensorInfo" and oid == "stream_loss":
                 self.keys["stream_loss"] = e.key
+            elif kind == "SensorInfo" and oid == "stream_caps":
+                self.keys["stream_caps"] = e.key
             elif kind == "SwitchInfo" and oid == "microphone":
                 self.keys["mic"] = e.key
 
@@ -189,6 +191,8 @@ class EsphomeLink:
         else:
             self.streamer = FaceStreamer(ip, log=self.log, name=label)
         self.streamer.start()
+        if getattr(self, "_stream_caps", 0):                      # the box said what it reads before the stream existed
+            self.streamer.set_caps(self._stream_caps)
 
     def stop_stream(self) -> None:
         if self.streamer is not None:
@@ -259,6 +263,11 @@ class EsphomeLink:
         elif kind == "SensorState" and state.key == self.keys.get("stream_loss") and self.streamer is not None:
             if not getattr(state, "missing_state", False):
                 self.streamer.note_loss(int(state.state))
+        elif kind == "SensorState" and state.key == self.keys.get("stream_caps"):
+            if not getattr(state, "missing_state", False):
+                self._stream_caps = int(state.state)            # (kept: the state can arrive before the streamer exists)
+                if self.streamer is not None:
+                    self.streamer.set_caps(self._stream_caps)
         elif kind == "TextSensorState" and state.key == self.keys.get("face") and self.streamer is not None:
             f = (str(state.state).split(",") + ["0", "0", "0"])[:4]          # "<state>,<talking>,<mic off>,<speaker off>" (older firmware sends two fields)
             self._box_face = (f[0], f[1] == "1", f[2] == "1", f[3] == "1")

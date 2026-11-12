@@ -10,6 +10,7 @@ namespace skippy_stream {
 
 static const int W = 480, H = 480, MAX_TILE = 64;
 static const size_t STAGE_BYTES = 64 * 1024;       // one frame's compressed records, held until its last datagram arrives and then drawn together (no half-drawn frames)
+static const size_t ZBUF_BYTES = 12 * 1024;        // the most one deflated datagram may inflate to (the hub keeps under 11000)
 static const int NBUF = 6;                           // frames in flight: the receiving task fills one while the drawing task draws another
 
 class SkippyStream : public Component {
@@ -47,6 +48,8 @@ class SkippyStream : public Component {
   uint16_t *fb_{nullptr};                            // the panel's frame buffer, written directly (draw_pixels_at is far slower); nullptr: use the display API
   volatile uint32_t inflate_us_{0}, blit_us_{0};
   void *inflater_{nullptr};
+  uint8_t *zbuf_{nullptr};
+  volatile uint32_t unzip_us_{0}, unzips_{0};
   QueueHandle_t free_q_{nullptr}, ready_q_{nullptr};
   int cur_{-1};                                      // the buffer being filled (an index), -1: none yet
   size_t stage_len_{0};
@@ -64,6 +67,7 @@ class SkippyStream : public Component {
   void draw_loop_();
   void finish_();                                    // hand the buffer being filled to the drawing task
   void draw_(const uint8_t *data, size_t len);
+  void records_(const uint8_t *p, const uint8_t *end);     // draw the tile records in [p, end)
   void accept_(const uint8_t *buf, int n);
 };
 

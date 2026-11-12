@@ -1,7 +1,8 @@
 """Streams Skippy's face to a room box: the hub draws it (face_render.py) and sends the box only the tiles that changed (rooms/components/skippy_stream).
 
 Wire format v2 (little-endian), one frame = one or more UDP datagrams of at most MAX_DATAGRAM bytes:
-    'K', 2, flags (bit 0: the last datagram of the frame), frame u16, seq u16 (counts every datagram: the box counts the gaps), then records
+    'K', 2, flags (bit 0: the last datagram of the frame; bit 1: the records that follow are raw-deflated, this datagram by itself), frame u16,
+    seq u16 (counts every datagram: the box counts the gaps), then records
     x u16, y u16, w u8, h u8, n u16, data:  n & 0x8000: raw, w*h*2 bytes follow (n & 0x7fff == w*h*2), RGB565 big-endian words (the panel's own order);
                                             n & 0x4000: solid, 2 bytes follow (n & 0x3fff == 2): one word for the whole tile (no inflating on the box);
                                             n & 0x2000: runs, (count u8, word u16 big-endian) triples covering exactly w*h words, used when it is under half the raw size;
@@ -9,6 +10,8 @@ Wire format v2 (little-endian), one frame = one or more UDP datagrams of at most
 The box keeps a frame's records until its last datagram and draws them together; if a datagram is lost it draws what it has, so the sender also resends a
 rolling slice of the screen every frame (a lost tile heals in a few seconds) and a full keyframe whenever the box says it took the screen over.
 A frame is sent at least every HEARTBEAT_S even when nothing changed (the box hands the screen back to its own drawing 1.2 s after the last datagram).
+A box whose firmware says it can (`Stream caps` bit 0) gets deflated datagrams (2026-11-12): tiles go raw or solid and each datagram is deflated by
+itself (a lost one still costs only its own tiles), which is about 2.7 times fewer bytes and datagrams for the same frames (tools/face_codec_probe.py).
 `decode_datagram` is the same validation the box does, kept here so the format is tested without a box.
 """
 from __future__ import annotations
@@ -36,6 +39,10 @@ STREAM_PORT = 10803
 LOSS_HOLD_S = 3.0                                  # how long after the last lost datagram the stream resends (at full rate: the Captain, 2026-11-12, wants the frame rate kept)
 RESEND_FRAMES = 3                                  # while losing: the tiles of this many past frames go again with each new one
 LOSS_REFRESH_TILES = 16                            # and this many more of the round-robin refresh
+RATE_START, RATE_MIN, RATE_STEP = 300_000.0, 100_000.0, 15_000.0   # the pace (bytes a second): where it starts, its floor, how fast it creeps back up
+HEAVY_LOSS, LIGHT_LOSS = 0.08, 0.01                # share of datagrams lost in a second: over HEAVY the link is full (slow down); up to LIGHT the pace may rise
+ZRAW_MAX = 11000                                  # the most raw record bytes in one deflated datagram (the box inflates into 12 KB)
+ZLEVEL = 6
 
 
 def deflate(raw: bytes) -> bytes:
@@ -71,6 +78,8 @@ class Encoder:
         self.seq = 0
         self.recent: deque = deque(maxlen=RESEND_FRAMES)   # the tiles each of the last few frames carried (a lost datagram is one of these)
         self.resend = False                                # the air is dropping datagrams: send those again, and refresh faster
+        self.zip = False                                   # the box reads deflated datagrams (its `Stream caps`)
+        self.zper = 0.35                                   # deflated bytes per raw byte, lately (how many records to try in one datagram)
 
     def keyframe(self, n: int = 1) -> None:
         self.keyframes = max(self.keyframes, n)
@@ -101,6 +110,23 @@ class Encoder:
             h = bytearray(b"K\x02\x00" + struct.pack("<HH", self.frame, self.seq))
             self.seq = (self.seq + 1) & 0xFFFF
             return h
+        if self.zip:
+            recs = []
+            for ty, tx in zip(*np.nonzero(mask)):
+                raw = np.ascontiguousarray(be[ty * TH:(ty + 1) * TH, tx * TW:(tx + 1) * TW]).tobytes()
+                n, data = (0x4000 | 2, raw[:2]) if solid[ty, tx] else (0x8000 | len(raw), raw)      # deflate does better on raw pixels than on runs
+                recs.append(struct.pack("<HHBBH", tx * TW, ty * TH, TW, TH, n) + data)
+            for body in self._zchunks(recs):
+                h = header()
+                h[2] |= 2
+                out.append(h + body)
+            if not out:
+                out.append(header())
+            out[-1][2] |= 1
+            ys, xs = np.nonzero(mask)
+            for ty, tx in zip(ys, xs):
+                self.sent[ty * TH:(ty + 1) * TH, tx * TW:(tx + 1) * TW] = cur565[ty * TH:(ty + 1) * TH, tx * TW:(tx + 1) * TW]
+            return [bytes(d) for d in out]
         cur = header()
         for ty, tx in zip(*np.nonzero(mask)):
             tile = be[ty * TH:(ty + 1) * TH, tx * TW:(tx + 1) * TW]
@@ -126,6 +152,30 @@ class Encoder:
         return [bytes(d) for d in out]
 
 
+    def _zchunks(self, recs: list[bytes]) -> list[bytes]:
+        """The records as deflated bodies, each fitting one datagram and inflating to at most ZRAW_MAX: as many records as the recent ratio says will
+        fit, fewer when they do not."""
+        cap = MAX_DATAGRAM - 7
+        out, i = [], 0
+        while i < len(recs):
+            budget = min(ZRAW_MAX, int(cap / max(self.zper, 0.02) * 0.85))
+            j, size = i, 0
+            while j < len(recs) and (j == i or size + len(recs[j]) <= budget):
+                size += len(recs[j])
+                j += 1
+            while True:
+                raw = b"".join(recs[i:j])
+                c = zlib.compressobj(ZLEVEL, zlib.DEFLATED, -15)
+                body = c.compress(raw) + c.flush()
+                if len(body) <= cap or j - i == 1:
+                    break
+                j = i + max(1, (j - i) * 2 // 3)
+            self.zper = 0.8 * self.zper + 0.2 * len(body) / max(1, len(raw))
+            out.append(body)
+            i = j
+        return out
+
+
 def decode_datagram(buf: bytes, fb: np.ndarray, stage: list | None = None) -> dict:
     """What the box does with one datagram, on `fb` (H x W uint16 holding the screen's words as the sender wrote them). Returns counts; never raises."""
     res = {"tiles": 0, "bad": 0, "last": False}
@@ -133,6 +183,16 @@ def decode_datagram(buf: bytes, fb: np.ndarray, stage: list | None = None) -> di
         res["bad"] += 1
         return res
     res["last"] = bool(buf[2] & 1)
+    if buf[2] & 2:                                                # a deflated datagram: inflate it (to at most what the box holds), then the same records
+        try:
+            d = zlib.decompressobj(-15)
+            body = d.decompress(buf[7:], 12 * 1024 + 1)
+            if len(body) > 12 * 1024 or not d.eof:
+                raise zlib.error("too big or cut short")
+        except zlib.error:
+            res["bad"] += 1
+            return res
+        buf = buf[:7] + body
     p, end = 7, len(buf)
     while end - p >= 8:
         x, y, w, h, n = struct.unpack_from("<HHBBH", buf, p)
@@ -179,7 +239,10 @@ class FaceStreamer(threading.Thread):
 
     def __init__(self, host: str, log=print, name: str = "", port: int = STREAM_PORT, rate: float = 900_000.0, send=None):
         super().__init__(daemon=True, name=f"face-stream-{name}")
-        self.host, self.port, self.log, self.label, self.rate = host, port, log, name, rate
+        self.host, self.port, self.log, self.label = host, port, log, name
+        self.rate_max = rate                               # bytes a second at most; `rate` is the pace now, steered by the box's loss reports (note_loss)
+        self.rate = min(rate, RATE_START)
+        self.sent_dg, self._sent_mark = 0, 0
         self.face = Face()
         self.enc = Encoder()
         self.stop_flag = threading.Event()
@@ -207,11 +270,28 @@ class FaceStreamer(threading.Thread):
         f.talking = talking
 
     def note_loss(self, total: int, now: float | None = None) -> None:
-        """The box's loss counter grew: the Wi-Fi is dropping datagrams. Slow down for LOSS_HOLD_S after the last loss."""
+        """The box's loss counter, about once a second. Measured 2026-11-12 on the living pod: the link carries about 250 datagrams a second and everything
+        sent beyond that is simply lost (280 lost for 240 received), so loss is mostly OUR sending too much, and sending more to repair it makes it worse.
+        So the share lost since the last report steers the pace: a lot lost (over HEAVY_LOSS) means the link is full: send slower and do not resend; a
+        little lost is the air: keep the pace and send the recent tiles again for LOSS_HOLD_S; nothing lost: creep the pace back up."""
         now = time.monotonic() if now is None else now
+        sent = self.sent_dg - self._sent_mark
+        self._sent_mark = self.sent_dg
+        lost = 0
         if self.loss_total is not None and total != self.loss_total and (total - self.loss_total) % 4294967296 < 2147483648:
-            self.loss_until = now + LOSS_HOLD_S
+            lost = (total - self.loss_total) % 4294967296
         self.loss_total = total
+        share = lost / max(1, lost + sent) if sent >= 20 else (1.0 if lost and not sent else 0.0)
+        if sent < 20 and not lost:
+            return                                             # nothing much was sent: no verdict on the link
+        self.stats["lost"] = self.stats.get("lost", 0) + lost
+        if lost and (sent < 20 or share <= HEAVY_LOSS):
+            self.loss_until = now + LOSS_HOLD_S                # the air dropped a few: repair them
+        if sent >= 20 and share > HEAVY_LOSS:
+            self.rate = max(RATE_MIN, self.rate * max(0.6, 1.0 - share))
+            self.loss_until = 0.0                              # the link is full: resending would only fill it more
+        elif sent >= 20 and share <= LIGHT_LOSS:
+            self.rate = min(self.rate_max, self.rate + RATE_STEP)
 
     def slow_now(self, now: float) -> bool:
         """True while the air is dropping datagrams: the encoder resends recent tiles and refreshes faster (the frame rate is NOT cut). The first call after the
@@ -227,6 +307,14 @@ class FaceStreamer(threading.Thread):
     def set_music(self, heard: bool) -> None:
         """The room has music on and nothing else (the hub knows): in rest mode he dances to it now and then."""
         self.face.music_heard = bool(heard)
+
+    def set_caps(self, caps: int) -> None:
+        """What the box's firmware can read (its `Stream caps` sensor): bit 0 = deflated datagrams. The whole face goes again in the new form."""
+        z = bool(int(caps) & 1)
+        if z != self.enc.zip:
+            self.enc.zip = z
+            self.enc.keyframe(1)
+            self.log(f"[{self.label}] face stream: {'deflated' if z else 'plain'} datagrams")
 
     def set_live(self, live: bool) -> None:
         """The box says it has taken the screen over: send it the whole picture now."""
@@ -286,8 +374,9 @@ class FaceStreamer(threading.Thread):
             if now - last_log >= 10:
                 s = self.stats
                 self.log(f"[{self.label}] face stream: {s['frames'] / (now - last_log):.1f} frames/s, {s['bytes'] / 1024 / (now - last_log):.0f} KB/s, "
-                         f"render {s['render_ms'] / max(1, s['frames']):.1f} ms, late {s['late']}")
-                self.stats.update(frames=0, bytes=0, render_ms=0.0, late=0)
+                         f"render {s['render_ms'] / max(1, s['frames']):.1f} ms, late {s['late']}, "
+                         f"lost {s.get('lost', 0)} of {s.get('dg', 0)} datagrams, pace {self.rate / 1024:.0f} KB/s")
+                self.stats.update(frames=0, bytes=0, render_ms=0.0, late=0, lost=0, dg=0)
                 last_log = now
 
     def _send_paced(self, datagrams: list[bytes]) -> None:
@@ -298,6 +387,8 @@ class FaceStreamer(threading.Thread):
             except OSError:
                 return
             self.stats["bytes"] += len(d)
+            self.stats["dg"] = self.stats.get("dg", 0) + 1
+            self.sent_dg += 1
             t += len(d) / self.rate
             wait = t - time.perf_counter()
             if wait > 0.002:
@@ -375,6 +466,9 @@ class RemoteFaceStreamer:
     def note_loss(self, total: int) -> None:
         self._send("loss", int(total))
 
+    def set_caps(self, caps: int) -> None:
+        self._send("caps", int(caps))
+
     def stop(self) -> None:
         if self.proc is None:
             return
@@ -401,6 +495,8 @@ def _child_main(host: str, port: int, name: str, rate: float) -> None:
                 s.set_live(msg[1])
             elif kind == "loss":
                 s.note_loss(msg[1])
+            elif kind == "caps":
+                s.set_caps(msg[1])
             elif kind == "music":
                 s.set_music(msg[1])
             elif kind == "mouth":

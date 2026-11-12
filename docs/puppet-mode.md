@@ -106,6 +106,17 @@ can sprite (8 ms). **Go/no-go: not yet** (target under 15-20 ms for a typical fr
 make the big rings cached sprites (RGB565 + alpha spans, blitted at an offset: a blit is ~0.2 us per ink pixel against ~0.6 us for the float capsule
 maths) if they move as whole shapes, or draw wide lines by scanline spans (solid core filled, only the two edge pixels computed).
 
+## What fixed the pixelation and the choppiness instead (2026-11-12): a lighter tile stream that paces itself
+
+Round 4 of the rasterizer (solid middles filled, per-row touched spans, an integer skip per segment) did not beat round 3 (band 26.5 ms), so it was
+not kept. The measurement that mattered was on the stream itself (`tools/face_probe.py`): **the link to the living pod carries about 250 datagrams a
+second (~300 KB/s) and the hub was sending 500+**; half were lost (280 lost for 240 received), which is the stale blocks and the 3-11 whole frames a second.
+The face needs 16 KB a frame idle and 36 KB speaking as tiles, i.e. 320-720 KB/s at 20 frames a second: over the link exactly when he "draws a lot".
+Two changes in `face_stream.py` + `skippy_stream` (no puppet): **deflated datagrams** (`tools/face_codec_probe.py`: 5.4 KB idle, 13.6 KB speaking; palette,
+motion and smaller tiles gained under 1.5x, deflate 2.7x; 0.76 ms to inflate a datagram on the box) and **a pace steered by the box's loss counter**.
+Result on the living pod, idle: 20.0 whole frames a second, 0 missing, 0 partial, 130 KB/s. Puppet mode stays what it was: the way to clips, props and
+tweening, not needed for a clean, smooth face; its blocker is still the box's drawing speed.
+
 ## What is proven and what is not
 
 - Proven: the face is ~60-80 primitives, the scene is 2-2.5 KB, and the tile stream costs 8-17 times more. (numbers above)

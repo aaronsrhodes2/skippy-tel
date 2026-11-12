@@ -88,8 +88,12 @@ panel's frame buffer, each frame at its last datagram, so a frame is never half 
   starts made frames late, which showed as the can jumping; the child reads JSON lines on stdin and ends with its input, so killing the hub never leaves a second stream.
   (2) The can is a **flat cartoon-shaded** image (`avatar/flat_can.py` makes `frames/ball_flat` from the brushed renders; the box's own drawing uses the same files) and
   **glides** to its sway position every tick (`GLIDE`) instead of jumping. (3) The box writes each streamed frame **right after vsync** (`vsync-synced` in its log), so the
-  scan never catches a write: no shear. (4) The box reports its lost-datagram count (`Stream loss` sensor); while it grows the hub keeps the frame rate (2026-11-12: it used to halve it), sends the last
-  three frames' tiles again and refreshes faster, then resends the whole face when the burst ends (`FaceStreamer.note_loss`/`slow_now`); what really cured the bursts was the router's 2.4 GHz channel (1, 20 MHz, not Auto/9).
+  scan never catches a write: no shear. (4) The box reports its lost-datagram count (`Stream loss` sensor); the hub reads it as the share of datagrams lost each second
+  (2026-11-12, measured: the link to the living pod carries about 250 datagrams a second and everything beyond is lost, so "loss" was mostly the hub sending
+  too much: 280 lost for 240 received). Over 8% lost = the link is full: the pace (bytes a second) drops and nothing is resent; a little lost = the air: the
+  last three frames' tiles go again; nothing lost: the pace creeps back up. And a box that says it can (`Stream caps` bit 0) gets **deflated datagrams**
+  (each datagram by itself, about 2.7 times fewer bytes): the living pod went from 3-11 whole frames a second to a steady 20 with nothing missing. The whole
+  face is resent when a burst ends (`FaceStreamer.note_loss`/`slow_now`); what really cured the bursts was the router's 2.4 GHz channel (1, 20 MHz, not Auto/9).
   (5) Keys and looks: top key = pod speaker, bottom key = microphone (`Face` sensor: `<state>,<talking>,<mic off>,<speaker off>`); mic off = earplugs, listening with the
   speaker on = a floating microphone, both off = off duty (fuchsia, music face). The pod volume is locked at `pod_volume` (0.7) at boot. With music on and nothing else
   (`Face.music_heard`, set through `EsphomeLink.music_heard`, or the pod's own `music` state) he dances now and then in rest mode (streamed face only).

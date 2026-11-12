@@ -34,7 +34,9 @@ void SkippyStream::setup() {
   this->pix_ = (uint8_t *) heap_caps_malloc(MAX_TILE * MAX_TILE * 2, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   this->rx_ = (uint8_t *) heap_caps_malloc(1600, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   this->inflater_ = heap_caps_malloc(sizeof(tinfl_decompressor), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);   // ~11 KB: it overflowed the old 4 KB task stack
-  if (!ok || !this->pix_ || !this->rx_ || !this->inflater_) { ESP_LOGE(TAG, "no memory"); this->mark_failed(); return; }
+  this->zbuf_ = (uint8_t *) heap_caps_malloc(ZBUF_BYTES, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);            // one datagram's records, inflated
+  if (this->zbuf_ == nullptr) this->zbuf_ = (uint8_t *) heap_caps_malloc(ZBUF_BYTES, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  if (!ok || !this->pix_ || !this->rx_ || !this->inflater_ || !this->zbuf_) { ESP_LOGE(TAG, "no memory"); this->mark_failed(); return; }
   this->sock_ = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
   if (this->sock_ < 0) { ESP_LOGE(TAG, "no socket"); this->mark_failed(); return; }
   int rcvbuf = 32768;
@@ -95,16 +97,19 @@ void SkippyStream::accept_(const uint8_t *buf, int n) {
   }
   this->cur_frame_ = frame;
   this->have_frame_ = true;
-  size_t body = n - HEAD;
-  if (this->cur_ >= 0 && this->stage_len_ + body > STAGE_BYTES) this->finish_();    // (a frame this big is a keyframe: draw it in pieces rather than drop it)
+  size_t body = n - HEAD, need = body + 2;               // staged as: u16 length (bit 15: the body is deflated), then the body
+  if (this->cur_ >= 0 && this->stage_len_ + need > STAGE_BYTES) this->finish_();    // (a frame this big is a keyframe: draw it in pieces rather than drop it)
   if (this->cur_ < 0) {
     Item it;
     if (xQueueReceive(this->free_q_, &it, 0) != pdTRUE) { this->dropped_++; return; }   // the drawing task is far behind: this part of the frame is lost, the refresh heals it
     this->cur_ = it.idx;
     this->stage_len_ = 0;
   }
-  memcpy(this->bufs_[this->cur_] + this->stage_len_, buf + HEAD, body);
-  this->stage_len_ += body;
+  uint8_t *d = this->bufs_[this->cur_] + this->stage_len_;
+  uint16_t hdr = (uint16_t) (body | ((flags & 2) ? 0x8000 : 0));
+  d[0] = hdr & 0xff; d[1] = hdr >> 8;
+  memcpy(d + 2, buf + HEAD, body);
+  this->stage_len_ += need;
   if (flags & 1) { this->finish_(); this->have_frame_ = false; this->frames_++; }
 }
 
@@ -129,10 +134,38 @@ void SkippyStream::draw_loop_() {
   }
 }
 
+// A frame as it was staged: each datagram's body behind a u16 length. A deflated body (wire flag 2: the hub sends them to a box that says it can read
+// them, `Stream caps`) is inflated whole into zbuf_ first; either way what is left is the records.
 void SkippyStream::draw_(const uint8_t *data, size_t len) {
   xSemaphoreTake(this->lock_, portMAX_DELAY);
   if (this->ready_) {
     const uint8_t *p = data, *end = data + len;
+    auto *dec = (tinfl_decompressor *) this->inflater_;
+    while (end - p >= 2) {
+      uint16_t hdr = p[0] | (p[1] << 8);
+      size_t n = hdr & 0x7fff;
+      p += 2;
+      if (n > (size_t) (end - p)) { this->bad_++; break; }
+      if (hdr & 0x8000) {
+        int64_t t0 = esp_timer_get_time();
+        tinfl_init(dec);
+        size_t in_n = n, out_n = ZBUF_BYTES;
+        tinfl_status st = tinfl_decompress(dec, p, &in_n, this->zbuf_, this->zbuf_, &out_n, TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF);
+        this->unzip_us_ += (uint32_t) (esp_timer_get_time() - t0);
+        this->unzips_++;
+        if (st == TINFL_STATUS_DONE) this->records_(this->zbuf_, this->zbuf_ + out_n);
+        else this->bad_++;
+      } else {
+        this->records_(p, p + n);
+      }
+      p += n;
+    }
+  }
+  xSemaphoreGive(this->lock_);
+}
+
+void SkippyStream::records_(const uint8_t *p, const uint8_t *end) {
+  {
     auto *dec = (tinfl_decompressor *) this->inflater_;
     while (end - p >= 8) {                                // a record: x y (u16), w h (u8), n (u16), data
       int x = p[0] | (p[1] << 8), y = p[2] | (p[3] << 8), w = p[4], h = p[5];
@@ -178,7 +211,6 @@ void SkippyStream::draw_(const uint8_t *data, size_t len) {
       p += rlen;
     }
   }
-  xSemaphoreGive(this->lock_);
 }
 
 void SkippyStream::loop() {
@@ -199,9 +231,10 @@ void SkippyStream::loop() {
     }
   }
   if (this->ready_ && millis() - this->last_log_ > 5000) {
-    ESP_LOGI(TAG, "%.1f frames/s, %u dgrams/s, %u tiles/s (inflate %u us, blit %u us per tile), missing %u, partial frames %u, dropped %u, bad %u, vsync-synced %u/%u", this->frames_ / 5.0f, (unsigned) (this->dgrams_ / 5),
-             (unsigned) (this->tiles_ / 5), (unsigned) (this->inflate_us_ / (this->tiles_ + 1)), (unsigned) (this->blit_us_ / (this->tiles_ + 1)), (unsigned) this->missing_, (unsigned) this->lost_, (unsigned) this->dropped_, (unsigned) this->bad_, (unsigned) this->synced_, (unsigned) (this->synced_ + this->unsynced_));
-    this->frames_ = this->tiles_ = this->dgrams_ = this->missing_ = this->lost_ = this->dropped_ = this->inflate_us_ = this->blit_us_ = this->synced_ = this->unsynced_ = 0;
+    ESP_LOGI(TAG, "%.1f frames/s, %u dgrams/s, %u tiles/s (inflate %u us, blit %u us per tile), missing %u, partial frames %u, dropped %u, bad %u, vsync-synced %u/%u, unzip %u us per datagram (%u)", this->frames_ / 5.0f, (unsigned) (this->dgrams_ / 5),
+             (unsigned) (this->tiles_ / 5), (unsigned) (this->inflate_us_ / (this->tiles_ + 1)), (unsigned) (this->blit_us_ / (this->tiles_ + 1)), (unsigned) this->missing_, (unsigned) this->lost_, (unsigned) this->dropped_, (unsigned) this->bad_, (unsigned) this->synced_, (unsigned) (this->synced_ + this->unsynced_),
+             (unsigned) (this->unzip_us_ / (this->unzips_ + 1)), (unsigned) this->unzips_);
+    this->frames_ = this->tiles_ = this->dgrams_ = this->missing_ = this->lost_ = this->dropped_ = this->inflate_us_ = this->blit_us_ = this->synced_ = this->unsynced_ = this->unzip_us_ = this->unzips_ = 0;
     this->last_log_ = millis();
   }
 }

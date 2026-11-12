@@ -402,6 +402,86 @@ def test_while_losing_the_stream_keeps_its_rate_and_sends_recent_tiles_again():
     assert tiles(lossy) > tiles(calm) and LOSS_REFRESH_TILES > 0
 
 
+def test_deflated_datagrams_draw_the_same_face_in_far_fewer_bytes():
+    import numpy as np
+    from face_stream import Encoder, MAX_DATAGRAM, decode_datagram
+    from face_render import Face, to565
+    face = Face(); face.set_state("speaking"); face.talking = True
+    frames = []
+    for i in range(40):
+        face.tick(10_000 + i * 50)
+        frames.append(to565(face.render()))
+    def run(zipped):
+        e = Encoder(); e.zip = zipped
+        fb = np.zeros_like(frames[0]); total = 0; count = 0
+        for f in frames:
+            for d in e.encode(f):
+                assert len(d) <= MAX_DATAGRAM
+                assert bool(d[2] & 2) == (zipped and len(d) > 7)
+                res = decode_datagram(d, fb)
+                assert res["bad"] == 0
+                total += len(d); count += 1
+            assert np.array_equal(fb, f)                         # the box's picture is exactly the frame, every frame
+        return total, count
+    plain, n_plain = run(False)
+    small, n_small = run(True)
+    assert small * 2 < plain and n_small * 2 < n_plain           # (measured: about 2.7 times fewer bytes and datagrams)
+
+
+def test_a_bad_deflated_datagram_draws_nothing_and_never_raises():
+    import numpy as np
+    from face_stream import decode_datagram
+    from face_render import W, H
+    fb = np.zeros((H, W), np.uint16)
+    assert decode_datagram(b"K\x02\x03\x01\x00\x01\x00" + b"\xff\xfe\xfd not deflate", fb)["bad"] == 1
+    import zlib
+    c = zlib.compressobj(6, zlib.DEFLATED, -15)
+    bomb = c.compress(b"\x00" * 200_000) + c.flush()             # inflates past what the box holds
+    assert decode_datagram(b"K\x02\x03\x01\x00\x01\x00" + bomb, fb)["bad"] == 1 and not fb.any()
+
+
+def test_the_box_caps_switch_the_stream_to_deflated_and_resend_the_face():
+    from face_stream import FaceStreamer
+    said = []
+    s = FaceStreamer("127.0.0.1", send=lambda d: None, log=said.append)
+    assert not s.enc.zip
+    s.enc.keyframes = 0
+    s.set_caps(1)
+    assert s.enc.zip and s.enc.keyframes == 1 and "deflated" in said[-1]
+    s.enc.keyframes = 0
+    s.set_caps(1)
+    assert s.enc.keyframes == 0                                  # nothing changed: nothing resent
+    s.set_caps(0)
+    assert not s.enc.zip
+
+
+def test_a_full_link_slows_the_pace_and_a_clean_one_lets_it_creep_back():
+    from face_stream import FaceStreamer, RATE_START, RATE_MIN, RATE_STEP
+    s = FaceStreamer("127.0.0.1", send=lambda d: None)
+    assert s.rate == RATE_START and s.rate_max == 900_000.0      # it starts well under the ceiling: the link says how much it carries
+    s.note_loss(0, now=1.0)
+    s.sent_dg += 500
+    s.note_loss(280, now=2.0)                                    # 280 lost beside 500 sent: the link is full
+    assert s.rate < RATE_START * 0.7 and not s.slow_now(2.1)     # slower, and no resending into a full link
+    for i in range(40):
+        s.sent_dg += 500
+        s.note_loss(280 * (i + 2), now=3.0 + i)
+    assert s.rate == RATE_MIN                                    # it never goes under the floor
+    r = s.rate
+    s.sent_dg += 200
+    s.note_loss(280 * 41, now=50.0)                              # a clean second
+    assert s.rate == r + RATE_STEP
+    s.sent_dg += 200
+    s.note_loss(280 * 41 + 6, now=51.0)                          # 6 of 206: the air, not the link: same pace, repair them
+    assert s.rate == r + RATE_STEP and s.slow_now(51.1)
+    s.note_loss(280 * 41 + 6, now=52.0)                          # nothing sent, nothing lost: no verdict
+    assert s.rate == r + RATE_STEP
+    for i in range(200):
+        s.sent_dg += 200
+        s.note_loss(280 * 41 + 6, now=60.0 + i)
+    assert s.rate == s.rate_max
+
+
 def test_loss_counter_wraps_and_a_reboot_does_not_look_like_loss():
     from face_stream import FaceStreamer
     s = FaceStreamer("127.0.0.1", send=lambda d: None)
