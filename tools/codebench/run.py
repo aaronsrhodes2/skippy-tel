@@ -167,6 +167,8 @@ def ending(log: Path) -> dict:
         except ValueError:
             continue
         if e.get("type") == "result":
+            if e.get("is_error") and not results and int(e.get("num_turns") or 0) <= 1:
+                return {"void": str(e.get("result") or "an API error")[:200]}   # refused at once (out of credit): no run, play it again
             results += 1
             final = str(e.get("result") or "")
             turns += int(e.get("num_turns") or 0)
@@ -192,11 +194,27 @@ def play(task: dict, player: str, tag: str, timeout_min: int, gates: bool) -> di
         except subprocess.TimeoutExpired:
             p.kill()
             code = "timeout"
+    end = ending(log)
+    if "void" in end:
+        return {"task": task["id"], "player": player, "tag": tag, "void": end["void"]}
     row = {"task": task["id"], "repo": task["repo"], "player": player, "tag": tag, "exit": code,
-           "minutes": round((time.time() - t0) / 60, 1), **ending(log), **score(task, work)}
+           "minutes": round((time.time() - t0) / 60, 1), **end, **score(task, work)}
+    row["ending"] = judged(task, row["last_words"])
+    if row["ending"]:                                           # Core's judge (hanging.judge, purple's own stop gate) over the regex
+        row["on_its_own"] = row["ending"] == "done"
     if code == "timeout":                                       # cut off while working (no answer yet), or while waiting on a
         row["on_its_own"] = row["on_its_own"] and row["results"] > 0     # background shell after one: that answer still stands
     return row
+
+
+def judged(task: dict, words: str) -> str:
+    """How the run's last words end (done / promise / ask), by the same Core judge purple's stop gate uses; '' when Core can't say."""
+    import hanging
+    try:
+        ask = hanging.core_asker()
+    except Exception:                                           # noqa: BLE001 — no Core: the regex's on_its_own stands
+        return ""
+    return hanging.judge(task["request"], words, ask) if ask else ""
 
 
 def main(argv=None) -> int:
@@ -222,10 +240,13 @@ def main(argv=None) -> int:
 
     def one(task, player):
         row = play(task, player, a.tag, a.timeout, a.gates)
+        if "void" in row:                                       # not written: the next run of this tag plays it again
+            print(json.dumps(row), flush=True)
+            return
         with lock, open(results, "a", encoding="utf-8") as f:
             f.write(json.dumps(row) + "\n")
         print(json.dumps({k: row[k] for k in ("task", "player", "resolved", "fail_to_pass", "pass_to_pass", "on_its_own",
-                                              "minutes", "work_minutes", "turns", "output_tokens")}), flush=True)
+                                              "minutes", "work_minutes", "turns", "output_tokens", "ending")}), flush=True)
 
     for task in tasks:
         todo = [p for p in a.players.split(",") if (task["id"], p) not in done]

@@ -6,7 +6,8 @@ the file named by SKIPPY_FINISH_STATE before it starts claude: the folder, the p
 run's), HEAD then, and how many times it has been sent back. When the agent tries to end its turn, run_state.loose_ends says what
 is unfinished (uncommitted, unpushed, a portal change not live yet); if anything is, the turn is blocked with those facts, up to
 run_state.GATE_LIMIT times, so a run can never end with "everything's done" and the work still in the folder. Before that, the
-project's own work check (work_check.py: its checker, a look at what was made, its budget) gets its say, with its own limits. The SDK engine
+project's own work check (work_check.py: its checker, a look at what was made, its budget) gets its say, with its own limits, and
+before both, hanging.py: a turn may not end while its background commands still run, on a promise, or (once) on a question. The SDK engine
 has the same gate as a callback (sdk_engine.StopGate).
 
 No state file, or an unreadable one: no opinion (exit 0, nothing printed).
@@ -19,6 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import run_state  # noqa: E402
+import hanging  # noqa: E402
 import work_check  # noqa: E402
 
 
@@ -30,6 +32,10 @@ def main() -> int:
             state = json.load(f)
     except (OSError, ValueError):
         return 0
+    hang = hanging.check(str(event.get("transcript_path") or ""), state.setdefault("hanging", {}),
+                         words=str(event.get("last_assistant_message") or ""))
+    if hang:                                       # waiting on a background command, a promise, or a question: not an ending
+        return _block(path, state, hang)
     if state.get("started"):
         memo = state.setdefault("work", {})
         reason = work_check.unfinished(str(state.get("clone") or ""), float(state["started"]), memo,
