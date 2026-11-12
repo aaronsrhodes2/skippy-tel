@@ -19,7 +19,11 @@ def test_mood_phrase_is_only_a_feeling():
     assert mixes.mood_phrase("relaxing music") == "relaxing"
     assert mixes.mood_phrase("some chill music for Khan") == "chill"
     assert mixes.mood_phrase("sad songs") == "sad"
-    assert mixes.mood_phrase("heavy metal") is None and mixes.mood_phrase("Pink Floyd") is None and mixes.mood_phrase("dark ambient") is None
+    assert mixes.mood_phrase("heavy metal") is None and mixes.mood_phrase("Pink Floyd") is None and mixes.mood_phrase("dark side of the moon") is None
+    vocab = {"industrial", "instrumental", "night", "90s", "key-2m"}
+    assert mixes.mood_phrase("dark industrial music", vocab) == "dark industrial"
+    assert mixes.mood_phrase("a calm instrumental", vocab) == "calm instrumental" and mixes.mood_phrase("driving 90s songs", {"driving", "90s"}) == "driving 90s"
+    assert mixes.mood_phrase("night", vocab) is None             # a lone cloud word is more likely a title
 
 
 def test_mood_index_reads_the_tag_segment_and_caches(tmp_path):
@@ -36,5 +40,8 @@ def test_resolve_keeps_only_tracks_that_feel_it_and_says_so_when_none_do():
     moods = {"Art/Alb/a.mp3": ["calm", "tender"], "Art/Alb/b.mp3": ["angry"]}
     q, note, _o = mixes.resolve({"mood": "relaxing", "shuffle": True}, catalog, moods=moods)
     assert q == ["Art/Alb/a.mp3"] and not note
+    moods["Art/Alb/c.mp3"] = ["calm", "instrumental"]
+    q, note, _o = mixes.resolve({"mood": "calm instrumental", "shuffle": True}, catalog, moods=moods)
+    assert q == ["Art/Alb/c.mp3"]                               # every word he said has to fit
     q, note, _o = mixes.resolve({"mood": "party", "shuffle": True}, catalog, moods=moods)
     assert len(q) == 3 and "party" in note                      # nobody tagged it: the closest is the shuffle, said in the note

@@ -88,11 +88,24 @@ MOOD_WORDS: dict[str, set[str]] = {
 _MOOD_ALT = "|".join(sorted((re.escape(w) for w in MOOD_WORDS), key=len, reverse=True))
 
 
-def mood_phrase(text: str) -> str | None:
-    """The feeling `text` is, when it is nothing but one ("something relaxing", "some chill music for Khan", "sad songs"); None otherwise."""
+def mood_phrase(text: str, vocab=frozenset()) -> str | None:
+    """The descriptive words `text` is, when it is nothing but those ("something relaxing", "dark industrial music", "calm instrumental", "driving 90s"); None otherwise.
+    A word is a feeling word (MOOD_WORDS) or a word of the collection's cloud (`vocab`: dj.mood_vocab). A lone cloud word that is no feeling word ("night") is more
+    likely a title than a request, so at least one feeling word, or two cloud words, are needed."""
     t = " ".join(re.findall(r"[a-z0-9&'-]+", (text or "").lower()))
-    m = re.fullmatch(rf"{_GENRE_FILLER}(?:something |anything |stuff |music )?(?:that is |thats |that's )?({_MOOD_ALT})(?: music| songs| tracks| stuff| vibes?| tunes)?(?: for [a-z ]+)?", t)
-    return m.group(1) if m else None
+    t = re.sub(rf"^{_GENRE_FILLER}(?:an? |something |anything |stuff |music )?(?:that is |thats |that.s )?", "", t)
+    t = re.sub(r"(?: music| songs| tracks| stuff| vibes?| tunes)?(?: for [a-z ]+)?$", "", t)
+    known = set(MOOD_WORDS) | set(vocab)
+    words, rest = [], t
+    while rest:                                                 # longest known words first: "feel good", "high energy", "key-2m"
+        hit = next((w for w in sorted(known, key=len, reverse=True) if rest == w or rest.startswith(w + " ")), None)
+        if not hit:
+            return None
+        words.append(hit)
+        rest = rest[len(hit):].strip()
+    if not words or not (any(w in MOOD_WORDS for w in words) or len(words) >= 2):
+        return None
+    return " ".join(words)
 
 
 def genre_phrase(text: str) -> str | None:
@@ -365,8 +378,8 @@ def resolve(args: dict, catalog: dict, favorites: list[str] | None = None, spoti
         tests.append((f"{g}", lambda it, g=g: genre_match(genre(it), g)))
     if args.get("mood"):
         mw = str(args["mood"]).lower()
-        want = MOOD_WORDS.get(mw) or {mw}
-        tests.append((f"{mw}", lambda it, want=want: bool(want & set((moods or {}).get(it, ())))))
+        wants = [MOOD_WORDS.get(w) or {w} for w in re.findall(r"[a-z0-9&'-]+", mw)]   # each word he said, as the tags that satisfy it (a synonym set)
+        tests.append((f"{mw}", lambda it, wants=wants: all(w & set((moods or {}).get(it, ())) for w in wants)))
     if args.get("artist"):
         a = str(args["artist"])
         tests.append((f"by {a}", lambda it, a=a: _field_match(fields(it)[1], a)))

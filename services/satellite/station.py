@@ -218,14 +218,16 @@ async def find(args: dict, house, favorites) -> tuple[list[str], str, bool, bool
     clean, place = clean_what(getattr(house, "env", None) or {}, what)                # a place and a time said inside the words ("heavy metal on enclave")
     if place and clean and isinstance(args, dict) and not args.get("speaker"):
         args["speaker"] = place                                 # it plays there (play_music reads the speaker after this)
-    mood = mixes.mood_phrase(clean)
-    if mood:                                                    # "something relaxing", "some sad songs": the feeling tags in Traktor's collection (a mood nobody tagged falls back to the shuffle, said in the note)
-        found, note, _ordered = await grammar_queue({**(args or {}), "mood": mood, "shuffle": True}, house, favorites)
-        return found, note, True, True, f"Nothing in his library feels {mood}."
     genre = mixes.genre_phrase(clean)
     if genre:                                                 # "heavy metal", "some loud metal": a genre before it is a title search (3 songs by title, 1,941 by tag)
         found, note, _ordered = await grammar_queue({**(args or {}), "genre": genre, "shuffle": True}, house, favorites)
         return found, note, True, True, f"Nothing in his library matches {genre!r}."
+    import dj                                                   # noqa: PLC0415
+    vocab = await asyncio.to_thread(lambda: dj.mood_vocab(dj.mood_index((getattr(house, "env", None) or {}).get("BILBY_TRAKTOR_NML", dj.DEFAULT_NML), dj.STATE)))
+    mood = mixes.mood_phrase(clean, vocab)
+    if mood:                                                    # "something relaxing", "dark industrial", "calm instrumental": the word cloud in Traktor's collection (nobody matches: the shuffle, said in the note)
+        found, note, _ordered = await grammar_queue({**(args or {}), "mood": mood, "shuffle": True}, house, favorites)
+        return found, note, True, True, f"Nothing in his library is {mood}."
     found = music_mod.search(await house.media.catalog(), what)
     if not found and what.strip():                              # not a name: maybe without the place and the time, maybe a genre ("polka"); else the closest is the shuffle, said in one line
         if place and not clean and isinstance(args, dict) and not args.get("speaker"):

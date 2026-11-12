@@ -197,6 +197,11 @@ def mood_index(nml_path: str, state: Path = STATE, marker: str = "corrected_musi
     return out
 
 
+def mood_vocab(moods: dict) -> frozenset:
+    """Every descriptive word the collection's cloud uses (from mood_index), so a request made of them can be recognised."""
+    return frozenset(w for ws in moods.values() for w in ws)
+
+
 class Library:
     """Track facts by catalog path: Traktor's first, else a cached librosa analysis (made on first ask)."""
 

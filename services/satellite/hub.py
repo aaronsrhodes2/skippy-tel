@@ -2014,7 +2014,7 @@ MUSIC_TOOLS = [
                                                                 "description": "discovery: all his songs, his favorites about one in four, and Spotify suggestions; "
                                                                                "favorites ('favorite music', 'my library'): his favorites and Spotify liked songs"},
                                                        "genre": {"type": "string", "description": "e.g. 'goth', 'darkwave', 'industrial'"},
-                                                       "mood": {"type": "string", "description": "a feeling: 'relaxing', 'sad', 'dark', 'happy', 'energetic', 'angry', 'romantic', 'party' (tags in Traktor's collection)"},
+                                                       "mood": {"type": "string", "description": "descriptive words, all of which must fit (the word cloud in Traktor's collection): a feeling (relaxing, sad, dark, happy, energetic, angry, romantic, party), a use (driving, workout, late-night, background, dancing), a theme (death, fear, faith, lonely, night, nature), a sound (instrumental, slow, fast, minor, non-english), an era or year (80s, 1994), a genre family (industrial, goth) e.g. 'dark industrial', 'calm instrumental'"},
                                                        "playlist": {"type": "string", "description": "one of his playlists (Traktor's DJ sets or Spotify's), by name"},
                                                        "artist": {"type": "string"}, "album": {"type": "string"}, "song": {"type": "string"},
                                                        "new": {"type": "boolean", "description": "'new songs': the ones added to Bilby most recently"},
