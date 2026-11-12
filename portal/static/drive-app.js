@@ -17,7 +17,7 @@
   // A call that got no answer from the door is made once more through the Funnel (the door then rests five minutes); an HTTP error from the gate itself is not the door's fault.
   const door = (g, fresh) => (window.SkippyDirect ? SkippyDirect.pick(g, fresh ? { fresh: true } : undefined) : g);
   const noAnswer = e => e instanceof TypeError || e instanceof SyntaxError;
-  const leaveDoor = g => !!(window.SkippyDirect && g && SkippyDirect.demote(g));
+  const leaveDoor = (g, used) => !!(window.SkippyDirect && g && SkippyDirect.demote(g, used));
   async function onceMore(g, call) { try { return await call(); } catch (e) { if (!noAnswer(e) || !leaveDoor(g)) throw e; return call(); } }
   const now = (glyph, text) => { $("#now-g").setAttribute("href", "#g-" + glyph); $("#now-t").textContent = S.nowText = text || ""; };
   const lit = (id, on) => { $(id).dataset.on = on ? "1" : "0"; };
@@ -257,13 +257,19 @@
     await play();
   }
   au.addEventListener("ended", () => { if (S.mode === "discovery" || S.mode === "library") nextSong(); else if (S.mode === "book") saveBook(true); });
+  const STALL_MS = 20000;
+  let stallTimer = 0;
+  function unstall() { clearTimeout(stallTimer); S.waitingAt = 0; }
   // The door gave out under a song or a book: the same one goes on from the Funnel, from where it stopped (static/direct.js). False when it was not on the door.
+  // If the door took a request and never answered, or went quiet mid-stream, the element's `error` may be delayed or never fire: a 20 s stall watcher on `waiting`
+  // sends the same song or book on from the Funnel, at the same position.
   function resumeOnFunnel() {
     const music = S.mode === "discovery" || S.mode === "library";
     if (!music && S.mode !== "book") return false;
     const it = S.q[S.qi];
     if (music ? !(it && it.path) : !S.cur) return false;
-    if (!leaveDoor(music ? S.music : S.book)) return false;
+    const went = String(au.currentSrc || au.src || "").split("/t/")[0];
+    if (!leaveDoor(music ? S.music : S.book, went)) return false;
     const at = au.currentTime || 0;
     warmStop(); ours = true; au.src = music ? mu("a", it.path) : bu(`a/${S.cur.id}`);
     if (at > 0) au.addEventListener("loadedmetadata", () => { au.currentTime = at; }, { once: true });
@@ -271,6 +277,8 @@
     return true;
   }
   au.addEventListener("error", () => { if (resumeOnFunnel()) return; if (S.mode === "discovery" || S.mode === "library") setTimeout(nextSong, 800); });
+  au.addEventListener("waiting", () => { clearTimeout(stallTimer); if (!au.paused && au.readyState < 3) resumeOnFunnel(); });
+  ["playing", "pause", "emptied", "ended", "error"].forEach(ev => au.addEventListener(ev, unstall));
   au.addEventListener("timeupdate", () => {
     $("#now-bar i").style.width = au.duration ? (100 * au.currentTime / au.duration).toFixed(2) + "%" : "0";
     if (S.mode === "book") saveBook(false);

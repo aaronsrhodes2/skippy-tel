@@ -54,6 +54,22 @@
     S.url = S.g.url;
     return true;
   }
+  // The door cut under a playing book: the same book goes on from the Funnel, from where it stopped (static/direct.js).
+  const STALL_MS = 20000;
+  let stallTimer = 0;
+  function unstall() { clearTimeout(stallTimer); S.waitingAt = 0; }
+  function resumeOnFunnel() {
+    if (!S.g || !au.src) return false;
+    if (au.src.indexOf(S.g.url + "/") !== 0) return false;
+    if (!leaveDoor()) return false;
+    const at = au.currentTime || 0;
+    au.src = gu(`a/${S.cur.id}`);
+    au.addEventListener("loadedmetadata", () => { au.currentTime = at; au.playbackRate = S.speed; au.preservesPitch = true; }, { once: true });
+    au.play().catch(() => {});
+    return true;
+  }
+  au.addEventListener("waiting", () => { clearTimeout(stallTimer); if (!au.paused && au.readyState < 3) resumeOnFunnel(); });
+  ["playing", "pause", "emptied", "ended", "error"].forEach(ev => au.addEventListener(ev, unstall));
 
   async function boot(again) {
     try {

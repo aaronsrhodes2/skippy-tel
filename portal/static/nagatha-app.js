@@ -715,6 +715,7 @@
     showMsg(code ? C.playProblem(code, "hls") : C.playProblem(0), () => open(it, { start: at, audio: P.audio }));
   }
   video.addEventListener("error", onVideoError);
+  video.addEventListener("stalled", () => { if (P.item && !video.paused) S.waitingAt = Date.now(); });
 
   function showMsg(text, retry) {
     const m = $("#p-msg");
