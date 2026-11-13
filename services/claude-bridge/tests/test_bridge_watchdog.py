@@ -112,8 +112,8 @@ def test_stop_ends_a_run_whose_grandchild_still_holds_the_pipe_and_kills_it(shop
 
 # ── the limits themselves ───────────────────────────────────────────────────
 def test_the_defaults_are_two_hours_and_half_an_hour_and_can_be_set_per_workshop(shop):
-    assert engine.MAX_RUN_S == 2 * 3600 and engine.IDLE_S == 30 * 60
-    assert (shop.max_run_s, shop.idle_s) == (2 * 3600, 30 * 60)
+    assert engine.MAX_RUN_S == 12 * 3600 and engine.IDLE_S == 30 * 60
+    assert (shop.max_run_s, shop.idle_s) == (12 * 3600, 30 * 60)
     other = engine.Workshop(shop.claude_cmd, repo=shop.repo, primary="p", sessions=shop.sessions_path, max_run_s=5, idle_s="3")
     assert (other.max_run_s, other.idle_s) == (5.0, 3.0)
 

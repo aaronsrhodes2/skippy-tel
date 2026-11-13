@@ -175,7 +175,8 @@ def retry_pause(attempt: int) -> float:
 LOGIN_TTL_S = 120.0                # how long one answer from `claude auth status` is trusted
 LOGIN_TIMEOUT_S = 15.0
 GIT_TIMEOUT = 180
-MAX_RUN_S = 2 * 3600.0             # a run still going after this long is stopped (the watchdog; see Workshop._attempt)
+MAX_RUN_S = float(os.getenv("WORKSHOP_MAX_RUN_S") or 12 * 3600.0)   # a run still going after this long is stopped (the watchdog; see Workshop._attempt).
+# 12 h, not 2 (the Captain, 2026-11-13): purple works unattended on long goals while he is at work or asleep. A HUNG run is still caught by IDLE_S.
 IDLE_S = 30 * 60.0                 # ... and so is one that printed nothing for this long (a long test run is silent for minutes, not half an hour)
 WATCH_TICK_S = 0.5                 # how often the run's thread looks at the clock (and at Stop) while claude is quiet
 REAP_S = 30.0                      # how long a process that has closed its output, or been killed, gets to exit before it is killed again
