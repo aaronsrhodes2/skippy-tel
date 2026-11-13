@@ -165,6 +165,35 @@ RESUME_NOTE = ("[Skippy's note: the model (or the bridge) went away in the middl
                "The Captain's message was:]\n\n")
 
 
+HANG_TRIES = 3                     # a run that goes quiet is examined and resumed this many times before it is reported as stuck
+HANG_NOTE = ("[Skippy's note: the run went quiet for {quiet} and was stopped, so the command that hung is gone. What it was doing when it hung:\n{evidence}\n\n"
+             "Work out WHY it hung (waiting on a prompt or sign-in, a host that does not answer, a lock, a test or loop that never ends, output nobody reads), "
+             "then fix the cause or get the same result another way (a timeout, a non-interactive flag, a smaller step, a different tool). Do NOT skip it: "
+             "whatever it was meant to tell you is still needed for the goal. Do not run the same command unchanged. This is hang {n} of {limit}; "
+             "if you are stuck after the last one, report exactly what you found and tried. Look at the state of things first (the repo, any half-done file), "
+             "then carry on. The Captain's message was:]\n\n")
+
+
+def is_hang(error: str | None) -> bool:
+    """Was this ending the idle watchdog (a run that printed nothing for too long), as opposed to the whole-run clock?"""
+    return bool(error) and "went quiet for" in error
+
+
+def children_of(pid: int) -> list[str]:
+    """What the run's process had going (name and start of the command line, newest last): the first thing to look at in a hang."""
+    try:
+        import psutil
+        found = []
+        for child in psutil.Process(pid).children(recursive=True):
+            try:
+                found.append(f"{child.name()}: {' '.join(child.cmdline())[:160]}")
+            except psutil.Error:
+                continue
+        return found[-8:]
+    except Exception:  # noqa: BLE001 — a diagnosis is a bonus; the retry never depends on it
+        return []
+
+
 def transient(error: str | None) -> bool:
     """Is this ending a model or a connection going away (retry), rather than an answer or a refusal (keep)?"""
     return bool(error) and bool(_TRANSIENT.search(error)) and not error.lower().startswith("failed to authenticate")
@@ -459,6 +488,8 @@ class Run:
         self.session_seen: str | None = None   # Claude Code's session for this run as soon as it is known: a retry resumes it
         self.calls = toolchain.Calls()         # each tool call's time and outcome, for the reply's toolchain (the `chain` event at the end)
         self._chained = False
+        self.hangs = 0                         # times the idle watchdog stopped it and it was examined and resumed (HANG_TRIES)
+        self.hang_evidence = ""                # what the last hang looked like (Workshop._diagnose), for the resume note
         self.vibes: list[str] = []             # what the Captain added while this run worked (join): with `message`, the goal (goal.statement)
         self._inbox: list[str] = []            # those, not yet shown to the model: it sees them at its next tool result or stop
 
@@ -722,6 +753,7 @@ class Workshop:
         self.sessions_path, self.remote, self.prompt_file = sessions, remote, prompt_file
         self.max_run_s = MAX_RUN_S if max_run_s is None else float(max_run_s)      # the watchdog's two limits; tests shorten them
         self.idle_s = IDLE_S if idle_s is None else float(idle_s)
+        self.hang_tries, self.hang_pause_s = HANG_TRIES, 5.0     # a quiet run is examined and resumed this often, after this pause (tests change them)
         self.retry_for_s = RETRY_FOR_S          # how long a run whose model went away keeps trying (tests shorten it)
         # Runs are saved next to the sessions file, so anything that points sessions somewhere (a test's tmp dir) moves
         # the runs with it; nothing but the real bridge ever writes to the real directory.
@@ -1725,7 +1757,7 @@ class Workshop:
             words, first = run.message, time.monotonic()
             if resumed:
                 run.message = RESUME_NOTE + words
-            run.retry_when = lambda error: transient(error) and time.monotonic() - first < self.retry_for_s
+            run.retry_when = lambda error: (transient(error) and time.monotonic() - first < self.retry_for_s) or (is_hang(error) and run.hangs < self.hang_tries)
             while True:
                 session = run.session_seen or self._sessions().get(self.session_key(run.project, run.conv, run.brain))
                 run.held = None
@@ -1735,8 +1767,13 @@ class Workshop:
                     self._attempt(run, session)
                 if run.done or run.held is None:
                     break
+                hung = is_hang(run.held)
+                if hung:                               # it went quiet: examined, and resumed with the evidence (HANG_NOTE), not just retried
+                    run.hangs += 1
+                    self._clear_locks(self.project(run.project).clone)
+                    run.emit({"t": "text", "text": f"(it went quiet; examining the hang and resuming, hang {run.hangs} of {self.hang_tries})"})
                 run.retries += 1                       # the model went away: wait, then go on in the same session
-                pause = retry_pause(run.retries)
+                pause = self.hang_pause_s if hung else retry_pause(run.retries)
                 run.emit({"t": "retry", "attempt": run.retries, "why": run.held[:200], "in_s": pause})
                 print(f"[bridge] run {run.task}: {run.held[:120]!r}; trying again in {pause:.0f} s", file=sys.stderr, flush=True)
                 until = time.monotonic() + pause
@@ -1744,7 +1781,8 @@ class Workshop:
                     time.sleep(min(WATCH_TICK_S, max(0.0, until - time.monotonic())))
                 if run.cancelled:
                     break
-                run.message = RESUME_NOTE + words
+                run.message = (HANG_NOTE.format(quiet=_span(self.idle_s), evidence=run.hang_evidence or "(nothing was captured)", n=run.hangs, limit=self.hang_tries)
+                               if hung else RESUME_NOTE) + words
             run.retry_when = None
             if not run.done:                           # stopped while it waited, or a held failure with nothing after it
                 run.finish(False, "stopped" if run.cancelled else (run.held or "Claude Code failed."))
@@ -1776,6 +1814,25 @@ class Workshop:
             pass
         finally:
             lines.put(None)
+
+    def _diagnose(self, run: Run, proc, quiet_s: float, last_tool: str) -> str:
+        """What a hung run looked like, taken just before its process tree is killed: the last tool call, what was running under it, and the
+        last things it said. Goes to the model in HANG_NOTE."""
+        kids = children_of(proc.pid)
+        with run._cond:
+            tail = [(e.get("text") or e.get("detail") or "")[:140] for e in run.events[-5:] if e.get("t") in ("text", "tool")]
+        return "\n".join([f"- quiet for {_span(quiet_s)}", f"- last tool call: {last_tool or '(none yet)'}",
+                          "- running under it: " + ("; ".join(kids) if kids else "(nothing found)"),
+                          "- its last words and calls: " + (" | ".join(t for t in tail if t) or "(none)")])
+
+    def _clear_locks(self, clone: str) -> None:
+        """The killed command's leftovers that block the next try: a git index.lock nobody holds any more (older than a minute)."""
+        lock = Path(clone) / ".git" / "index.lock"
+        try:
+            if lock.is_file() and time.time() - lock.stat().st_mtime > 60:
+                lock.unlink()
+        except OSError:
+            pass
 
     def _over_limit(self, now: float, started: float, last_line: float) -> str | None:
         """Why this run has to be stopped (in the words the chat shows), or None while it is within its limits."""
@@ -1831,6 +1888,7 @@ class Workshop:
         tick = max(0.02, min(WATCH_TICK_S, self.idle_s / 4, self.max_run_s / 4))
         started = last_line = time.monotonic()
         timed_out: str | None = None
+        last_tool = ""
         while True:
             now = time.monotonic()
             if run.cancelled:
@@ -1838,6 +1896,8 @@ class Workshop:
                 break
             timed_out = self._over_limit(now, started, last_line)
             if timed_out:
+                if is_hang(timed_out):
+                    run.hang_evidence = self._diagnose(run, proc, now - last_line, last_tool)
                 _kill_tree(proc)
                 break
             try:
@@ -1875,6 +1935,7 @@ class Workshop:
                             run.emit({"t": "text", "text": pending})
                             pending = None
                         name = str(block.get("name") or "tool")
+                        last_tool = f"{name} {tool_detail(name, block.get('input'))}"[:300]
                         run.tool_call(name, block.get("input"), str(block.get("id") or ""), tool_detail(name, block.get("input")))
             elif kind == "user" and not evt.get("parent_tool_use_id"):   # the tools' results: how long each call took, and whether it failed
                 for block in (evt.get("message") or {}).get("content") or []:

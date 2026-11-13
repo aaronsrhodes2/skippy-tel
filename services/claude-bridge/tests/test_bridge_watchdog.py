@@ -8,6 +8,7 @@ orphaned claude.exe kept working in the clone after that.
 The watchdog: MAX_RUN_S (default 2 h) of wall clock and IDLE_S (default 30 min) without a single output line each kill
 the whole process tree and finish the run failed with a plain message. The tests shorten both to a second or two and
 use a fake claude that hangs, never stops talking, or hangs with a grandchild that holds the output pipe."""
+import os
 import time
 
 import pytest
@@ -19,6 +20,7 @@ from bridge_testkit import calls, finish, wait_for
 @pytest.fixture(autouse=True)
 def no_hung_process_outlives_a_test(shop):
     """A fake that hangs loops for ten minutes; whatever a failed assertion leaves running is stopped here."""
+    shop.hang_tries = 0                                      # the limits below are about the kill itself; hang recovery has its own tests
     yield
     for task, run in list(shop._runs.items()):
         if not run.done:
@@ -169,3 +171,30 @@ def test_child_env_sets_the_two_variables_and_drops_the_key():
     assert env == {"PATH": "/bin", "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never",
                    "BASH_MAX_TIMEOUT_MS": str(4 * 3600 * 1000),
                    "CLAUDE_CODE_ENABLE_TODO_TOOLS": "1", "SKIPPY_GOAL_GATE": "1"}              # (7ae71a08: a command may run for 4 hours)
+
+
+# ── hang recovery: a quiet run is examined and resumed with the evidence, a limited number of times ──
+def test_a_hung_run_is_resumed_with_the_evidence_then_reported_stuck(shop, monkeypatch, tmp_path):
+    started = go(shop, monkeypatch, tmp_path, "hang", idle_s=1.0, max_run_s=600.0, hang_tries=1, hang_pause_s=0.1)
+    run = finish(shop.start("aaaaaaaa", "conv-12345678", "check the thing"), timeout=60)
+    assert run.hangs == 1 and run.ok is False and run.error.startswith("Claude Code went quiet for 1 second")
+    assert "hang 1 of 1" in run.message and "Do NOT skip it" in run.message and "last tool call" in run.message and run.message.endswith("check the thing")
+    assert any("examining the hang and resuming" in e.get("text", "") for e in run.events)
+    assert time.time() - started < 50
+
+
+def test_a_stale_git_lock_left_by_a_killed_command_is_cleared(shop, tmp_path):
+    (tmp_path / ".git").mkdir()
+    lock = tmp_path / ".git" / "index.lock"
+    lock.write_text("")
+    shop._clear_locks(str(tmp_path))
+    assert lock.exists()                                     # young: someone may hold it
+    old = time.time() - 600
+    os.utime(lock, (old, old))
+    shop._clear_locks(str(tmp_path))
+    assert not lock.exists()
+
+
+def test_only_the_idle_watchdog_counts_as_a_hang():
+    assert engine.is_hang("Claude Code went quiet for 30 minutes (a command may be stuck), so I stopped it.")
+    assert not engine.is_hang("Claude Code was still going after 12 hours, so I stopped it.") and not engine.is_hang(None)
