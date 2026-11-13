@@ -236,7 +236,10 @@ def handoff(request: str, segment: int, clone: str, journal: Journal) -> str:
     log = git_text(clone, "log", "--oneline", f"-{MAX_LOG_LINES}").splitlines()
     parts = [request.strip(), "", "---",
              f"This is segment {segment} of the job above. The segment before it used its turn budget and its session is over;"
-             " nothing from it carries over except what follows."]
+             " nothing from it carries over except what follows.",
+             "FIRST, re-verify the goal: the text above is the whole goal (the original request and everything the Captain added). Before doing anything new, "
+             "check each part of it against the repository and what is shown below, and say in one line which parts are done, which are not, and the "
+             "next step. Do not trust the earlier segment's claims of 'done': look."]
     parts += ["", "Repository, as it is now:"]
     parts += ["  git status:"] + [f"    {s}" for s in status[:MAX_STATUS_LINES]] if status else ["  git status: clean"]
     if len(status) > MAX_STATUS_LINES:
