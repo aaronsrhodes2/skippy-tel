@@ -350,11 +350,18 @@ class EsphomeLink:
             self.set_text("mouth", mouth_text)
             if "emote" in self.keys and emote_text:
                 self.set_text("emote", emote_text)
+            if self.streamer is not None:                           # the face skippy-pc draws: started here and now, not after the box's round trip (a pod on weak Wi-Fi
+                self.streamer.set_box_state("speaking", True, self._box_face[2], self._box_face[3])      # was seconds behind the others, and every pod must talk as one)
+                asyncio.get_running_loop().call_later(min(seconds + 0.4, 30), self._mirror_over)
             await self.client.execute_service(face, {"state": "speaking"})
             await asyncio.sleep(min(seconds + 0.4, 30))
             await self.client.execute_service(face, {"state": "idle"})
         except Exception as e:                                      # noqa: BLE001 — a pod that is busy or gone simply misses it
             self.log(f"[{self.room.name}] (mirror: {type(e).__name__})")
+
+    def _mirror_over(self) -> None:
+        if self.streamer is not None and time.monotonic() >= self._lips_until - 0.02:
+            self.streamer.set_box_state(*self._box_face)
 
     def session(self, on: bool) -> None:
         if "session" in self.keys:
