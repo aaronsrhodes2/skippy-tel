@@ -47,6 +47,8 @@ MILD_LOSS = 0.03
 HEAVY_LOSS, LIGHT_LOSS = 0.08, 0.01              # share of datagrams lost in a second: over HEAVY the link is full (slow down); up to LIGHT the pace may rise
 ZRAW_MAX = 11000                                  # the most raw record bytes in one deflated datagram (the box inflates into 12 KB)
 ZLEVEL = 6
+COARSE_S = 300.0                                  # after the link overflowed, a talking face is drawn in 4 bits a colour for this long (a frame a fifth smaller)
+COARSE_MASK = 0xF79E                               # RGB565 with the low bit of each colour dropped (white stays white to the eye)
 
 
 def deflate(raw: bytes) -> bytes:
@@ -249,6 +251,8 @@ class FaceStreamer(threading.Thread):
         self.sent_dg, self._sent_mark = 0, 0
         self.sent_bytes, self._bytes_mark, self._t_mark = 0, 0, 0.0
         self._cut_until = 0.0
+        self.coarse_until = -1e9                           # while now < this and he is talking, the face is drawn in coarser colour
+        self.coarse_frames = 0
         self.tokens, self._tok_t = 0.0, 0.0                # the allowance (bytes) the pace has saved up, and when it was last topped up
         self._out: queue.Queue = queue.Queue()             # datagrams on their way out, sent evenly by a thread of their own (_sender)
         self.ceiling, self.ceiling_at = rate, -1e9        # the bytes a second at which the link last overflowed, and when (forgotten after CEILING_S)
@@ -305,6 +309,7 @@ class FaceStreamer(threading.Thread):
                 self.ceiling, self.ceiling_at = base, now
                 self.rate = max(RATE_MIN, base * max(0.7, 1.0 - share) * 0.95)
                 self._cut_until = now + 1.5
+                self.coarse_until = now + COARSE_S
             self.loss_until = 0.0
         elif lost and share > MILD_LOSS and near:
             pass                                               # some lost while sending flat out: the link is about full: hold the pace, do not add to it
@@ -391,6 +396,9 @@ class FaceStreamer(threading.Thread):
                     self.stats["held"] = self.stats.get("held", 0) + 1
                     continue
                 img = to565(self.face.render())
+                if now < self.coarse_until and self.face.talking:
+                    img = img & np.uint16(COARSE_MASK)
+                    self.coarse_frames += 1
                 while keys and now - t_start >= keys[0]:
                     keys.pop(0)
                     self.enc.keyframe(1)

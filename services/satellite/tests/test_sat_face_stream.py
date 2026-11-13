@@ -662,3 +662,13 @@ def test_the_pencil_follows_his_voice_and_the_last_moments_of_the_window_make_hi
     f.set_state("thinking"); f._think_on = False
     f.tick(10000); f.tick(17000)
     assert f.sweat.opa > 0                                         # working for more than 5 s: a bead of sweat
+
+
+def test_an_overflow_turns_on_coarser_colour_for_a_talking_face():
+    from face_stream import FaceStreamer, COARSE_S
+    s = FaceStreamer("127.0.0.1", send=lambda d: None)
+    assert s.coarse_until < 0                                    # a link that never overflowed keeps true colour
+    s.note_loss(0, now=1.0)
+    s.sent_dg += 200; s.sent_bytes += 270_000
+    s.note_loss(40, now=2.0)
+    assert s.coarse_until == 2.0 + COARSE_S
