@@ -208,6 +208,7 @@ class Face:
         self.pst = ""
         self.rk, self.ramp, self.bx_, self.by_, self.prev_bx = 0.0, 3.0, 0.0, 0.0, 0.0
         self.next_beat = self.next_idle = 0
+        self.g_prev, self.g_t0, self.g_lc, self.g_strong, self.g_slump = "n", 0, "n", False, 0.0   # body gestures: the emotion now, when it began, how far he has sunk
         self.wobs = 0.4
         self.lean_k = 2
         self.mg = 2.1
@@ -543,6 +544,7 @@ class Face:
         # the can's rocking
         beat = False
         wob = 0.4
+        lc, st0 = "n", False
         if talk:
             c0 = "n"
             if len(em) >= 3 and em[1] == "|":
@@ -581,6 +583,8 @@ class Face:
                     self.bx_ = roundf(math.sin(self.rk * 9) * self.ramp)
                     self.by_ = roundf(-abs(math.sin(self.rk * 9)) * self.ramp * 0.35)
             ox, oy = self.bx_, self.by_
+        gdx, gdy = self._gesture(now, talk, lc, st0)               # what he does with his body for what he feels (a hop, a shrug, a shake of the no)
+        ox, oy = ox + gdx, oy + gdy
         rkv = ox - self.prev_bx                                    # (the hat is thrown by the step itself, as it was tuned to be)
         self.prev_bx = ox
         self.sx += (ox - self.sx) * GLIDE                          # the can itself glides to where the step says: at 20 frames a second it need not jump
@@ -711,6 +715,50 @@ class Face:
         self._thinking(now, st)
         self._pad(now, st)
         self._ears(st, talk, cx, cy, pivotY, lt)
+
+    def _gesture(self, now: int, talk: bool, lc: str, strong: bool) -> tuple[float, float]:
+        """The body says more than the lips (the Captain, 2026-11-12): when the feeling he is speaking changes, the can does something that fits it, as an offset
+        (pixels) on top of its rocking. Surprise hops, excitement hops twice, laughing bobs, smug shrugs, annoyed stomps and shakes, sad sinks and stays sunk,
+        curious leans in, worried trembles, bored droops, shy shrinks away, loving sways, happy nods. Nothing while he is not talking (the sinking eases out)."""
+        if not talk:
+            lc, strong = "n", False
+        if lc != self.g_prev:
+            self.g_prev, self.g_t0, self.g_lc, self.g_strong = lc, now, lc, strong
+        t = (now - self.g_t0) / 1000.0
+        k = 1.5 if self.g_strong else 1.0
+        dx = dy = 0.0
+        sink = 0.0
+        pi = math.pi
+        if lc == "s" and t < 0.5:
+            dy = -26 * k * math.sin(pi * t / 0.5)
+        elif lc == "e" and t < 0.9:
+            dy = -20 * k * abs(math.sin(pi * t / 0.45))
+        elif lc == "l" and t < 1.6:
+            dy = -9 * k * abs(math.sin(2 * pi * t / 0.3)) * (1.0 - t / 1.6)
+            dx = 4 * k * math.sin(2 * pi * t / 0.3) * (1.0 - t / 1.6)
+        elif lc == "m" and t < 1.4:                                   # the shrug: up and a little aside, held, then back
+            e = math.sin(pi * min(t / 1.4, 1.0))
+            dy, dx = -14 * k * min(1.0, e * 2), 10 * k * min(1.0, e * 2)
+        elif lc == "a" and t < 1.0:                                   # the stomp, then a shake
+            dy = 14 * k * max(0.0, math.sin(pi * min(t / 0.18, 1.0))) if t < 0.18 else 0.0
+            dx = 12 * k * math.sin(2 * pi * t / 0.22) * max(0.0, 1.0 - t) if t >= 0.18 else 0.0
+        elif lc == "q" and t < 1.8:                                   # leans in to the question and cocks to a side
+            dx = 18 * k * math.sin(pi * min(t / 1.8, 1.0) * 0.5) * (1.0 - 0.3 * t / 1.8)
+        elif lc == "w" and t < 1.0:
+            dx = 5 * k * math.sin(2 * pi * t / 0.09) * (1.0 - t)
+        elif lc == "b" and t < 1.2:
+            dy = 9 * math.sin(pi * min(t / 1.2, 1.0))
+        elif lc == "r" and t < 1.2:
+            dx, dy = -14 * k * math.sin(pi * min(t / 1.2, 1.0)), 6 * math.sin(pi * min(t / 1.2, 1.0))
+        elif lc == "v":
+            dx = 8 * math.sin(t * 2.2) * min(1.0, t)
+        elif lc == "h" and t < 0.8:
+            dy = 8 * k * abs(math.sin(2 * pi * t / 0.8))
+        if lc == "d":
+            sink = min(1.0, t / 0.6)
+        self.g_slump += (sink - self.g_slump) * 0.15
+        dy += 12 * self.g_slump
+        return dx, dy
 
     def _hat(self, now, talk, beat, rkv, theta, lt, cx, cy, pivotY, dead) -> None:
         self.hc += 1

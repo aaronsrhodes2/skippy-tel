@@ -672,3 +672,33 @@ def test_an_overflow_turns_on_coarser_colour_for_a_talking_face():
     s.sent_dg += 200; s.sent_bytes += 270_000
     s.note_loss(40, now=2.0)
     assert s.coarse_until == 2.0 + COARSE_S
+
+
+def test_body_gestures_fit_the_feeling_and_never_move_a_resting_can():
+    from face_render import Face
+    f = Face()
+    assert f._gesture(1000, False, "s", True) == (0.0, 0.0)           # not talking: nothing
+    f._gesture(2000, True, "s", False)
+    assert f._gesture(2250, True, "s", False)[1] < -20                # surprise: a hop up at its peak
+    f2 = Face(); f2._gesture(0, True, "m", False)
+    assert f2._gesture(700, True, "m", False)[0] > 5                  # smug: a shrug aside
+    f3 = Face(); f3._gesture(0, True, "d", False)
+    assert max(f3._gesture(t, True, "d", False)[1] for t in range(0, 3000, 50)) > 9     # sad: sinks and stays sunk
+    for lc in "selmaqwbrvhdnk":
+        g = Face(); g._gesture(0, True, lc, True)
+        for t in range(0, 4000, 50):
+            dx, dy = g._gesture(t, True, lc, True)
+            assert abs(dx) < 30 and abs(dy) < 45
+
+
+def test_a_whole_speech_with_every_feeling_renders():
+    import numpy as np
+    from face_render import Face
+    f = Face()
+    f.set_state("speaking"); f.talking = True; f.talk_t0 = 0
+    f.emote = "n|" + "s" * 10 + "m" * 10 + "a" * 10 + "d" * 10 + "q" * 10 + "e" * 10
+    f.mouth = "h" + "BCD" * 80
+    for now in range(0, 6000, 50):
+        f.tick(now)
+        img = f.render()
+    assert isinstance(img, np.ndarray)
