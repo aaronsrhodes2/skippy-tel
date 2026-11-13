@@ -162,7 +162,8 @@ def _unpushed(cwd: str) -> str:
 
 
 def added_lines(diff: str) -> str:
-    return "\n".join(line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++"))
+    """The added lines of a diff, minus lines marked `secret-fixture` (a made-up key in a test: the guard's own tests must be pushable)."""
+    return "\n".join(line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++") and "secret-fixture" not in line)
 
 
 def new_billable(diff: str) -> str | None:
