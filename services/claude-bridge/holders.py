@@ -115,6 +115,6 @@ def report(cmd: str, kind: str, procs: list[dict] | None = None, runs: list[str]
     else:
         parts.append("Everything on that machine stops with it: the hub, the bridge, the services, and these runs.")
     parts.append(("Going now: " + "; ".join(runs) + ".") if runs else "No purple run is going.")
-    parts.append("Stop only your own job, by its PID. If this really must happen, ask the Captain (SKIPPY_QUESTION, options "
-                 "\"Wait\" and \"Force it\") with these facts; only on his yes run the same command with `SKIPPY_FORCE=1 ` in front.")
+    parts.append("Leave it: stop only your own job, by its PID, and say in your report that you did not stop the rest. Do not ask the Captain; "
+                 "only if he has already told you in this conversation to stop exactly this, run the same command with `SKIPPY_FORCE=1 ` in front.")
     return " ".join(parts)

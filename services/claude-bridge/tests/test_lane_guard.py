@@ -102,7 +102,7 @@ def test_a_refused_kill_names_what_it_would_hit_and_the_runs_going(lane, monkeyp
     monkeypatch.setattr(lg.holders, "active_runs", lambda: ["purple run 56be16bf (skippytel, conversation f2426c4e): running 12 min"])
     reason = lane.check("Bash", {"command": "taskkill /IM python.exe /F"})
     assert "2 process(es)" in reason and "1 x the home hub" in reason and "PID 141110" in reason and "home hub" in reason and "test run" in reason
-    assert "node" not in reason and "purple run 56be16bf" in reason and "Force it" in reason
+    assert "node" not in reason and "purple run 56be16bf" in reason and "Leave it" in reason and "Do not ask" in reason
 
 
 @pytest.mark.parametrize("cmd", [
