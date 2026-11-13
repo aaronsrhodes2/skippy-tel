@@ -359,7 +359,7 @@ def test_a_core_run_on_a_listed_project_goes_through_the_sdk_engine(core_shop, t
     assert s.kwargs["cwd"] == shop.project("skippytel").clone and s.kwargs["model"] == engine.CORE_MODEL
     assert s.kwargs["cli_path"] == "C:/fake/claude.exe" and s.kwargs["max_turns"] == sdk.SEGMENT_TURNS
     assert s.kwargs["env"]["ANTHROPIC_BASE_URL"] == "https://core.example" and s.kwargs["env"]["SKIPPY_HOME_TOKEN"] == ""
-    assert set(s.hooks) == {"PreToolUse", "Stop"} and s.prompt == "hi"
+    assert set(s.hooks) == {"PreToolUse", "PostToolUse", "Stop"} and s.prompt == "hi"        # PostToolUse: the loop breaker (loop_breaker.py)
     assert s.kwargs["tools"] == list(sdk.CODING_TOOLS) and s.kwargs["env"]["DISABLE_AUTO_COMPACT"] == "1" and "mcp_servers" not in s.kwargs
     assert shop._sessions()[shop.session_key("skippytel", "conv-12345678", "core")] == "sdk-1"
     assert not shop.record.exists()                                  # the CLI engine (the fake claude) was never started

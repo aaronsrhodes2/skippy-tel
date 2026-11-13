@@ -86,3 +86,19 @@ The guard writes `state/purple-audit.jsonl` for every refusal and every flagged 
    spoken yes through the hub); purple always reports what it moved.
 4. **Adding billable infrastructure** (`infra/**`, a new `resource "google_*"`). *Default: refused at push time and noted; changing or using existing
    resources through the pipeline is allowed.*
+
+## Goal slayer: the behaviour that goes with the rules (the Captain, 2026-11-13)
+Purple is slower than a paid model, and he works days and sleeps nights: the hours he is away are the hours purple is for. So the stance is **never wait, never
+ask, always finish, then be sure**. What backs it, in code (services/claude-bridge/):
+
+| Piece | File | What it does |
+|---|---|---|
+| The three limits | `purple_guard.py` (PreToolUse on every tool) | refuses a leak, a spend, a diff that weakens tests; audit in `state/purple-audit.jsonl` |
+| Contract and proof | prompt + `goal.py` | tasks with their proof; the stop gate sends the turn back while one is open or the request is not met by its own report |
+| Untested change | `goal.py` | code was edited and no test ran after the last edit: back to run it |
+| Verification pass | `goal.py` (`DEEPEN`, once per run, only if code changed) | whole suite, own diff against the three limits, one attempt to break it, a live check; then one report |
+| No promises, no waiting on a question | `hanging.py` | a turn may not end on "I'll report later", a background command still running, or an offer |
+| Loop breaker | `loop_breaker.py` (PostToolUse) | the same failure 3 / 5 / 7 / 10 times: hypothesis, research, change approach, split the goal |
+| Long commands | `BASH_MAX_TIMEOUT_MS` | a command may run for 4 hours |
+| Finish line | `finish_gate.py`, `work_check.py` | nothing left uncommitted, unpushed or not live; the project's own check |
+| The report | prompt | done (with proof), not done and why, decisions made without asking, what the guard refused |

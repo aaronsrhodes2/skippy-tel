@@ -47,6 +47,7 @@ from typing import Any, AsyncIterator, Callable
 
 import goal
 import hanging
+import loop_breaker
 import purple_guard
 import run_state
 import work_check
@@ -227,6 +228,16 @@ def guard_hook(guard: "purple_guard.Guard"):
     return hook
 
 
+def loop_hook(breaker: "loop_breaker.LoopBreaker"):
+    """PostToolUse: the same failure again and again earns the next step up loop_breaker.LADDER, as extra context (never a refusal)."""
+    async def hook(input_data: dict, tool_use_id: str | None, context: Any) -> dict:
+        msg = breaker.observe(str(input_data.get("tool_name") or ""), input_data.get("tool_input") or {}, input_data.get("tool_response"))
+        if not msg:
+            return {}
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": msg}}
+    return hook
+
+
 class StopGate:
     """Stop: a run with loose ends (run_state.loose_ends: uncommitted, unpushed, or a portal change not live yet) is sent back,
     up to `limit` times, with the facts."""
@@ -304,7 +315,7 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
     baseline = set(run_state.dirty_paths(run_state.git_text(clone, "status", "--porcelain", "--untracked-files=all")))
     say = lambda text: run.emit({"t": "text", "text": text})            # noqa: E731 - a note in the chat, in parentheses
     gate = StopGate(clone, baseline, say=say, base_head=run_state.git_text(clone, "rev-parse", "HEAD"))
-    hooks = {"PreToolUse": [(LANE_TOOLS, lane_hook(lane)), (None, guard_hook(purple_guard.Guard(cwd=clone, core_run=core_run)))], "Stop": [(None, gate.hook)]}
+    hooks = {"PreToolUse": [(LANE_TOOLS, lane_hook(lane)), (None, guard_hook(purple_guard.Guard(cwd=clone, core_run=core_run)))], "PostToolUse": [("Bash|Edit|Write|MultiEdit", loop_hook(loop_breaker.LoopBreaker()))], "Stop": [(None, gate.hook)]}
     session_id, pending, kept = resume, None, None
 
     def keep(sid: str | None) -> None:

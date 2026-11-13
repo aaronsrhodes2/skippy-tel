@@ -48,6 +48,7 @@ import markup
 import conversation_log
 import new_folder
 import projects as projects_mod
+import purple_hooks
 import run_state
 import sdk_engine
 import toolchain
@@ -1477,10 +1478,11 @@ class Workshop:
         finish = f'"{sys.executable}" "{Path(__file__).resolve().with_name("finish_gate.py")}"'
         # before a Core run that draws its work starts: the best picture of what was asked, and what makes it recognisable (reference.py)
         refer = f'"{sys.executable}" "{Path(__file__).resolve().with_name("reference.py")}"'
-        limits = f'"{sys.executable}" "{Path(__file__).resolve().with_name("purple_guard.py")}"'      # leak / spend / lie, on every tool (purple_guard.py)
-        want = {"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        purple = purple_hooks.entries()                  # leak / spend / lie on every tool, and the loop breaker (purple_hooks.py, shared with CodeBench)
+        want = {"hooks": {"PostToolUse": purple["PostToolUse"],
+                          "PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
                                           "hooks": [{"type": "command", "command": hook, "timeout": 10}]},
-                                         {"matcher": "*", "hooks": [{"type": "command", "command": limits, "timeout": 60}]},
+                                         *purple["PreToolUse"],
                                          {"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}],
                           "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}],
                           "UserPromptSubmit": [{"hooks": [{"type": "command", "command": refer, "timeout": REFERENCE_TIMEOUT}]}],

