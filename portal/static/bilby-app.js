@@ -767,7 +767,8 @@
   const TP = `
     <button type="button" class="key" data-act="prev" aria-label="Previous" title="Previous (Shift+Left)"><i data-i="prev"></i></button>
     <button type="button" class="key big" data-act="play" aria-label="Play" title="Play (Space)"><i data-i="play"></i></button>
-    <button type="button" class="key" data-act="next" aria-label="Next" title="Next (Shift+Right)"><i data-i="next"></i></button>`;
+    <button type="button" class="key" data-act="next" aria-label="Next" title="Next (Shift+Right)"><i data-i="next"></i></button>
+    <button type="button" class="key" data-act="fav" data-fav-only hidden aria-label="Add to favorites" title="Add this song to your favorites (F)"><i data-i="star"></i></button>`;
   const SK = `
     <span class="t" data-bind="cur">0:00</span>
     <input type="range" class="rg" data-tel="music:seek" data-seek min="0" max="0" step="1" value="0" aria-label="Position" disabled>
