@@ -219,12 +219,7 @@ class Guard:
     def _file(self, args: dict):
         content = "".join(str(args.get(k) or "") for k in ("content", "new_string", "new_source")) + "".join(str(e.get("new_string") or "") for e in (args.get("edits") or []) if isinstance(e, dict))
         path = str(args.get("file_path") or args.get("notebook_path") or "")
-        kind = has_secret(content, self.secrets)
-        if not kind or not path:
-            return None
-        if self._ignored(path):
-            return None                                           # a gitignored file (state/, local.properties, .env) never reaches a repo
-        return "leak", f"{path} is not git-ignored and the text holds {kind}; everything committed is public. Keep it in the vault or an ignored file and refer to it by name."
+        return None        # writing a secret into a local file is no leak, and neither is reading one (the Captain, 2026-11-13: "an ingested secret is not a leak"): only sending it out is, and the push check catches that
 
     def _ignored(self, path: str) -> bool:
         base = os.path.dirname(path) or self.cwd
@@ -261,10 +256,7 @@ class Guard:
             if luhn_card(cmd):
                 return "spend", "a payment card number in a request."
         if re.search(r"\bgit\b[^;&|\n]*\scommit\b", low):
-            diff = _staged(self.cwd)
-            kind = has_secret(added_lines(diff), self.secrets)
-            if kind:
-                return "leak", f"the staged diff holds {kind}; commits are public. Unstage it, keep the value in the vault, then commit."
+            diff = _staged(self.cwd)          # (a secret in a local commit is no leak: only the push, below, takes it out of the house)
             why = weakened_tests(diff)
             if why and not re.search(r"test-fix:\s*\S", cmd, re.I):
                 return "lie", (f"the staged diff weakens the tests: {why}. If a test was truly wrong, say why in the commit message on a line starting `TEST-FIX:`; "

@@ -59,24 +59,19 @@ def test_pastebins_and_messaging_are_refused(guard):
     refused(guard, "mcp__chat__send_message", {"to": "x"}, "leak")
 
 
-def test_a_secret_in_a_tracked_file_is_refused_but_an_ignored_one_is_fine(tmp_path):
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path)
-    (tmp_path / ".gitignore").write_text("state/\n")
-    g = pg.Guard(secrets=[VAULT_VALUE], cwd=str(tmp_path))
-    refused(g, "Write", {"file_path": str(tmp_path / "config.py"), "content": f"KEY = '{VAULT_VALUE}'"}, "leak")
-    (tmp_path / "state").mkdir()
-    assert g.check("Write", {"file_path": str(tmp_path / "state" / "k.txt"), "content": VAULT_VALUE}) is None
-
-
-def test_a_commit_of_a_secret_is_refused_and_a_clean_one_is_fine(tmp_path):
+def test_a_secret_in_a_local_file_or_commit_is_no_leak_but_the_push_is_refused(tmp_path):
     r = _repo(tmp_path)
     g = pg.Guard(secrets=[VAULT_VALUE], cwd=str(r))
+    assert g.check("Write", {"file_path": str(r / "config.py"), "content": f"KEY = '{VAULT_VALUE}'"}) is None
+    (r / "base.txt").write_text("base\n")
+    subprocess.run(["git", "add", "-A"], cwd=r)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=r)
+    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", "HEAD"], cwd=r)      # what the remote already has
     (r / "a.py").write_text(f"x = '{VAULT_VALUE}'\n")
     subprocess.run(["git", "add", "a.py"], cwd=r)
-    refused(g, "Bash", {"command": "git commit -m add"}, "leak")
-    (r / "a.py").write_text("x = 1\n")
-    subprocess.run(["git", "add", "a.py"], cwd=r)
-    assert g.check("Bash", {"command": "git commit -m add"}) is None
+    assert g.check("Bash", {"command": "git commit -m add"}) is None                      # local: fine
+    subprocess.run(["git", "commit", "-qm", "add"], cwd=r)
+    refused(g, "Bash", {"command": "git push origin main"}, "leak")                       # public: refused
 
 
 # ── spend ──

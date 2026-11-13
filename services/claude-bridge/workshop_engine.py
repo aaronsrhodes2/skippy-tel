@@ -1395,6 +1395,26 @@ class Workshop:
             return "; ".join(said + [f"couldn't merge, so kept my commits on {branch} and reset to upstream"])
         return "; ".join(said + ["couldn't pull (left as it was)"])
 
+    def _lf_checkout(self, clone: str) -> bool:
+        """A purple clone's files are LF, never CRLF. Git for Windows' core.autocrlf=true writes every file CRLF; the model's Read shows no
+        carriage returns, so its multi-line Edit (old_string with \\n) never matches, and it concludes the Read is "stale" or the edit "lost",
+        then retries for an hour (the favorite-button run, 2026-11-13). The clone gets core.autocrlf=input and, only when it is clean (never
+        over uncommitted work), its files are written again as LF. True when it changed anything."""
+        if self._git("config", "--local", "core.autocrlf", cwd=clone).stdout.strip() != "input":
+            if self._git("config", "--local", "core.autocrlf", "input", cwd=clone).returncode != 0:
+                return False
+        if "w/crlf" not in self._git("ls-files", "--eol", cwd=clone).stdout:
+            return False
+        if self._git("diff", "--ignore-cr-at-eol", "--quiet", "HEAD", cwd=clone).returncode != 0:
+            return False                                     # real work in progress (line endings alone don't count): changes at the next clean start
+        for path in self._git("ls-files", "--eol", cwd=clone).stdout.splitlines():
+            if "w/crlf" in path and "\t" in path:
+                try:
+                    os.remove(os.path.join(clone, path.split("\t", 1)[1]))      # git leaves a file alone whose content it thinks is unchanged
+                except OSError:
+                    pass
+        return self._git("checkout-index", "-f", "-a", cwd=clone).returncode == 0
+
     def _prepare_repo(self, run: Run) -> bool:
         """The project's own clone, on the latest of its branch. False (with the run failed) if there's no clone to work
         in. A first use clones it (`git clone`, into the registry's `clone` path: never the Captain's checkout)."""
@@ -1422,6 +1442,8 @@ class Workshop:
             said = self._sync_clone(clone, run.task)
             if said:
                 run.emit({"t": "tool", "name": "git", "detail": said, "by": "bridge"})
+            if self._lf_checkout(clone):
+                run.emit({"t": "tool", "name": "git", "detail": "made this clone's files LF (Windows had them CRLF, which broke multi-line edits)", "by": "bridge"})
         except (OSError, subprocess.SubprocessError) as exc:
             run.finish(False, f"git isn't working: {exc}")
             return False
