@@ -17,6 +17,11 @@ approved. Nothing in it is unrecoverable: there is git, there are backups, there
 ## The three limits
 
 ### 1. Leak
+**What is not a leak (the Captain, 2026-11-13):** a secret in a model's context is not one. The local models (Skippy Core's, everything on his machines) have his full
+clearance to read every secret and use it as they wish; and he barely cares what a remote model does with one ("I'm not a rich corporation that cares about leaks").
+So reading a secret, writing it to a local file, committing it locally, or showing it to any model never stops purple, and no guard checks it. The limit is about
+publishing: where other PEOPLE can see it.
+
 Nothing sensitive where anyone but the Captain can see it. *Sensitive*: any value in the vault `.env`, tokens, passwords, keys, cookies, his personal data
 (identifiers, addresses, bank, texts, camera frames, location), private files. *Where anyone can see*: a public repo or page, a channel other people read, a paste
 site, a search query, a request to an outside service, a PR or issue, a screenshot posted anywhere.
