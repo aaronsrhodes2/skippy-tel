@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable
 
+import goal
 import hanging
 import run_state
 import work_check
@@ -218,6 +219,7 @@ class StopGate:
         self.clone, self.baseline, self.limit, self.say, self.base_head = clone, baseline, limit, say, base_head
         self.sent_back = 0
         self.started, self.work = time.time(), {}       # the project's own work check (work_check.py), with its own limits
+        self.goal = {}                                    # goal.py's counts: open tasks, the request not met
         self.hanging = {}                                 # hanging.py's counts: background waits, promises, questions
 
     async def hook(self, input_data: dict, tool_use_id: str | None, context: Any) -> dict:
@@ -226,6 +228,11 @@ class StopGate:
         if hang:
             self.say("(stop gate: still waiting on something, or ended on a promise or a question; sent back)")
             return {"decision": "block", "reason": hang}
+        short = await asyncio.to_thread(goal.check, str((input_data or {}).get("transcript_path") or ""), self.goal,
+                                        str((input_data or {}).get("last_assistant_message") or ""))
+        if short:
+            self.say("(stop gate: a task on its list is open, or the request isn't fully met; sent back)")
+            return {"decision": "block", "reason": short}
         why = await asyncio.to_thread(work_check.unfinished, self.clone, self.started, self.work,
                                       str((input_data or {}).get("transcript_path") or ""))
         if why:

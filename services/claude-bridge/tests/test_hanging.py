@@ -48,10 +48,12 @@ def test_a_promise_goes_back_and_a_done_passes(tmp_path):
     assert hanging.reason(t, {}, ask=lambda p: "DONE", request="fix it") == ""
 
 
-def test_a_question_goes_back_once_then_it_is_his(tmp_path):
-    t = _write(tmp_path, [_said("Want me to push it?")])
+def test_a_question_goes_back_with_his_standing_yes_and_only_then_is_his(tmp_path):
+    t = _write(tmp_path, [_said("Do I have your permission to download the file?")])
     counts = {}
-    assert "decisions made" in hanging.reason(t, counts, ask=lambda p: "ASK", request="fix it")
+    for _ in range(hanging.LIMITS["ask"]):
+        why = hanging.reason(t, counts, ask=lambda p: "ASK", request="fix it")
+        assert "downloading files" in why and "undo" in why
     assert hanging.reason(t, counts, ask=lambda p: "ASK", request="fix it") == ""
 
 

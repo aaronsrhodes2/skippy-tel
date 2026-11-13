@@ -11,8 +11,8 @@ before a turn may end, and sends it back with the facts:
           turn goes back to wait for them and finish the work they were for.
   * WORDS how the turn's last words end, judged by Skippy Core's chat model (a model reads the words, never a regex):
           DONE (finished, or a report of what was done), PROMISE (says it will do or report something later), or ASK (ends on
-          a question or an offer). A promise goes back to be kept now; a question goes back once to be decided (the Captain:
-          decide, act, say it), and a second identical stop is let through: a real gate, or something destructive, is his.
+          a question or an offer). A promise goes back to be kept now; a question goes back (twice at most) with his standing yes for
+          anything undoable (STANDING_YES: decide, act, say it); only after that is a question let through: a real gate is his.
 
 Each has a limit per run (LIMITS) so a gate can never hold a run forever, and no answer from Core means no opinion.
 """
@@ -22,9 +22,18 @@ import json
 import os
 import re
 
-LIMITS = {"background": 4, "promise": 2, "ask": 1}
+LIMITS = {"background": 4, "promise": 2, "ask": 2}
 LAST_WORDS_CHARS = 1500
 REQUEST_CHARS = 1500
+
+# What purple never needs to ask for (the Captain, 2026-11-12: "5 minutes in it had a stupid question like, 'Do I have your permission
+# to download a file from the internet?' ... I hate it"; then: the sandbox is approved, everything rolls back, and the only limits are
+# three: no leak, no spending, no lying. docs/purple-rules.md spells them out tool by tool).
+STANDING_YES = ("Your sandbox is approved and everything in it rolls back, so you already have his yes for all of it: any shell "
+                "command, all of git, downloading files, installing packages and tools, deploying, restarting services, using the "
+                "network, deleting what git or a backup can bring back, taking as long as it takes, and choosing between "
+                "approaches. Only three things are never yours: leaking sensitive information where others can see it, spending "
+                "money or paid tokens, and saying something that is not true.")
 
 _LAUNCHED = re.compile(r"background with ID: ([A-Za-z0-9_-]+)")
 _ENDED = re.compile(r"<task-id>([A-Za-z0-9_-]+)</task-id>")
@@ -152,9 +161,10 @@ def reason(transcript: str, counts: dict, ask=None, words: str = "", request: st
                 "later. Do it now (wait for whatever you are waiting on, then check, fix or report it), and end only with the result.")
     if kind == "ask" and counts.get("ask", 0) < LIMITS["ask"]:
         counts["ask"] = counts.get("ask", 0) + 1
-        return ("You ended on a question or an offer, and the Captain is away: he wants decisions made, not offered (decide, act, "
-                "say what you did; he can undo it). Make the call that best fits his request and carry on. Only if it is truly his "
-                "(something destructive or irreversible, outside this folder, or a gate he asked for), end again with the same question.")
+        return ("You ended on a question or an offer, and the Captain is away: he will not see it for hours, and finding a "
+                "run stopped on a question is what he hates most. " + STANDING_YES + " Make the call that best fits his "
+                "request, do it, and say in your report what you chose and how to undo it. Ask only when going on would break one "
+                "of those three, or at a gate he named: then finish everything else first and put the one question at the very end.")
     return ""
 
 

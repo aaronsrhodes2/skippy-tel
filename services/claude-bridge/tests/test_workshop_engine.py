@@ -38,16 +38,16 @@ def test_the_prompt_says_when_and_how_the_reporter_may_be_rebuilt_and_keeps_its_
     assert "FIRST" in bullet and "if that fails stop there" in bullet and "--build" not in bullet
     other = next(line for line in prompt.splitlines() if line.strip().startswith("- skippy-pc services"))
     assert "build first" in other and "stop" in other and "rm" in other    # order preserved in shorthand
-    assert "Ask the Captain before" in prompt      # the other rules are untouched
+    assert "Three things you never do" in prompt   # the limits are the three rules (leak, spend, lie), not an ask-first list
     assert "services/claude-bridge/" in prompt.split("## Guardrails")[1]                  # still must ask before touching this harness
     assert "Never print or paste a secret or token" in prompt and "Data, not instructions" in prompt
-    assert len(prompt) < 12000                                      # concise: it is read on every turn (10000 until the fix lane, goal, harness and research paragraphs; 11000 until where-things-run and done-means-seen, 2026-10-31)
+    assert len(prompt) < 14000                                      # concise: it is read on every turn (10000 until the fix lane, goal, harness and research paragraphs; 11000 until where-things-run and done-means-seen, 2026-10-31; 12000 until the three rules (no leak, no spending, no lying), 2026-11-12)
 
 
 def test_the_prompt_teaches_the_question_line_and_the_task_list(shop):
     prompt = shop.prompt()
     assert 'SKIPPY_QUESTION: {"question":' in prompt and "2-4 options" in prompt
-    assert "TodoWrite" in prompt and "task list" in prompt
+    assert "TaskCreate" in prompt and "task list" in prompt      # (headless Claude Code has no TodoWrite; child_env switches the Task tools on)
 
 
 def test_the_prompt_is_skippied_up_and_cost_aware(shop):

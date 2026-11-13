@@ -560,6 +560,10 @@ def child_env(base=None) -> dict:
     # longer than that (sigma-ground's) was relaunched 7-9 times per run in the CodeBench gates run (2026-11-12) and never
     # finished. purple has no clock to protect (the Captain: "let things run for hours"), so a command may ask for up to 4 hours.
     env.setdefault("BASH_MAX_TIMEOUT_MS", str(4 * 3600 * 1000))
+    # Headless Claude Code has no task list unless asked (0 of 16 CodeBench runs kept one); with it a long goal is steps the stop
+    # gate can check (goal.py), and the gate itself is on only for runs started with this environment.
+    env.setdefault("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1")
+    env.setdefault("SKIPPY_GOAL_GATE", "1")
     # The Captain's long-lived Claude token (`claude setup-token`, a year, kept in the vault): with it, claude never needs a /login at this PC,
     # which is what used to tie him to his desk. Without one, claude falls back to its own stored sign-in, as before.
     token = "".join(vault_value("CLAUDE_CODE_OAUTH_TOKEN", env, ENV_FILES).split())   # a terminal-wrapped paste leaves a space inside; a token has none
