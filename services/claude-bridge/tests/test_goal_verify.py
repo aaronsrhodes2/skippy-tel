@@ -42,7 +42,7 @@ def test_the_verification_pass_runs_once_after_everything_else_passes(tmp_path):
     t = _write(tmp_path, recs)
     counts = {}
     first = goal.reason(t, counts, ask=lambda p: "MET", request="fix a")
-    assert first == goal.DEEPEN and counts["deepen"] == 1
+    assert first == goal.DEEPEN + goal.reread("fix a") and counts["deepen"] == 1
     assert goal.reason(t, counts, ask=lambda p: "MET", request="fix a") == ""        # once per run
 
 

@@ -91,6 +91,21 @@ DEEPEN = ("Verification pass. Nobody is watching this run, so use the time to be
           "guard refused. If all of that is already done in this turn, say so in the report and end.")
 
 
+def statement(request: str, vibes: list[str] | None = None) -> str:
+    """THE GOAL: the request plus everything the Captain added while the run worked, in order. A run that was nudged ("also make it blue",
+    "and not on mobile") has one goal, the whole of it, and it is judged and re-read as a whole (the Captain, 2026-11-13)."""
+    parts = [request.strip()] if request and request.strip() else []
+    parts += [f"Added while you worked ({i}): {v.strip()}" for i, v in enumerate(vibes or [], 1) if v and v.strip()]
+    return "\n\n".join(parts)[: hanging.REQUEST_CHARS]
+
+
+def reread(goal_text: str) -> str:
+    """The goal, put in front of the model again at every stop that sends it back, so a long run never drifts from it."""
+    if not goal_text.strip():
+        return ""
+    return "\n\nThe goal, re-read in full (do not let the work drift from any part of it):\n<goal>\n" + goal_text + "\n</goal>"
+
+
 def open_tasks(records: list[dict]) -> list[str]:
     return [f"#{i} {t['subject']}" for i, t in tasks(records).items() if t["status"] in OPEN_STATES]
 
@@ -138,42 +153,44 @@ def core_asker(env=os.environ):
                                    system="You check whether a report says a request was fully done. Answer on one line.")
 
 
-def reason(transcript: str, counts: dict, ask=None, words: str = "", request: str = "") -> str:
-    """Why this turn may not end yet, or '' to let it. `counts` (kept by the caller across stops) is updated."""
+def reason(transcript: str, counts: dict, ask=None, words: str = "", request: str = "", vibes: list[str] | None = None) -> str:
+    """Why this turn may not end yet, or '' to let it. `counts` (kept by the caller across stops) is updated. `vibes` are the messages the
+    Captain sent while the run worked: with the request they are the goal, which every reason restates (reread)."""
     records = hanging._records(transcript)
+    if not request:
+        import eyes
+        request = eyes.task_of(transcript) or ""
+    goal_text = statement(request, vibes)
     left = open_tasks(records)
     if left and counts.get("tasks", 0) < LIMITS["tasks"]:
         counts["tasks"] = counts.get("tasks", 0) + 1
         return (f"{len(left)} task(s) on your own list are not done: {'; '.join(left[:8])}. Nobody is watching this run and "
                 "there is time: finish each one now. If one truly cannot or should not be done, mark it completed or deleted "
-                "with TaskUpdate and say why in your report.")
+                "with TaskUpdate and say why in your report." + reread(goal_text))
     if untested_since_edit(records) and counts.get("untested", 0) < LIMITS["untested"]:
         counts["untested"] = counts.get("untested", 0) + 1
         return ("You changed code and no test ran after your last change. Run the tests now (the project's own command, the whole suite if it is quick), "
-                "fix what you broke, and only then end. If there is genuinely nothing to run, say that plainly in your report.")
+                "fix what you broke, and only then end. If there is genuinely nothing to run, say that plainly in your report." + reread(goal_text))
     if ask is None or counts.get("goal", 0) >= LIMITS["goal"]:
-        return deepen(records, counts)
-    if not request:
-        import eyes
-        request = eyes.task_of(transcript) or ""
-    missing = judge(request, words or hanging.last_words(records), ask)
+        return deepen(records, counts, goal_text)
+    missing = judge(goal_text, words or hanging.last_words(records), ask)
     if not missing:
-        return deepen(records, counts)
+        return deepen(records, counts, goal_text)
     counts["goal"] = counts.get("goal", 0) + 1
     return (f"The request is not fully met yet, by your own report: {missing}. Nobody is watching this run and there is time: "
             "do that now, check it works, and end only when the whole request is done. If it truly cannot be done, say exactly "
-            "what blocks it.")
+            "what blocks it." + reread(goal_text))
 
 
-def deepen(records: list[dict], counts: dict) -> str:
+def deepen(records: list[dict], counts: dict, goal_text: str = "") -> str:
     """Once per run, after every other check passed and only when code was changed: the verification pass."""
     if counts.get("deepen", 0) >= LIMITS["deepen"] or not edited_code(records):
         return ""
     counts["deepen"] = counts.get("deepen", 0) + 1
-    return DEEPEN
+    return DEEPEN + reread(goal_text)
 
 
-def check(transcript: str, counts: dict, words: str = "", env=os.environ) -> str:
+def check(transcript: str, counts: dict, words: str = "", env=os.environ, request: str = "", vibes: list[str] | None = None) -> str:
     """The stop gate's call: off unless the run's environment switches it on."""
     if env.get("SKIPPY_GOAL_GATE") != "1" or not (transcript or words):
         return ""
@@ -181,4 +198,4 @@ def check(transcript: str, counts: dict, words: str = "", env=os.environ) -> str
         asker = core_asker(env)
     except Exception:                                    # noqa: BLE001 — no Core settings: the task-list fact still runs
         asker = None
-    return reason(transcript, counts, ask=asker, words=words)
+    return reason(transcript, counts, ask=asker, words=words, request=request, vibes=vibes)

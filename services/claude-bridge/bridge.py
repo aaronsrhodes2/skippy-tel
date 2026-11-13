@@ -201,7 +201,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/workshop":
             self._workshop_start()
             return
-        if path == "/workshop/folders":                         # New folder: the folder, its git repo, its GitHub repo
+        if path == "/workshop/join":
+            self._workshop_join()
+            return
+        if path == "/workshop/folders":                        # New folder: the folder, its git repo, its GitHub repo
             if self._workshop_ok():
                 try:
                     self._json(200, WORKSHOP.new_folder(str(self._read_body().get("name") or "")))
@@ -281,6 +284,18 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "bad_request", "message": str(exc)})
         else:
             self._json(200, {"ok": True, "task": run.task, "done": run.done})
+
+    def _workshop_join(self) -> None:
+        """POST /workshop/join: a message for a conversation whose run is going joins that run's goal (no line, no new run); 404 when none is."""
+        if not self._workshop_ok():
+            return
+        body = self._read_body()
+        run = WORKSHOP.join(str(body.get("conv") or ""), str(body.get("message") or ""), brain=str(body.get("brain") or "core"),
+                            project=str(body.get("project") or ""))
+        if run is None:
+            self._json(404, {"error": "no_live_run"})
+        else:
+            self._json(200, {"ok": True, "task": run.task})
 
     def _workshop_runs(self) -> None:
         """Which runs this bridge holds (counts and state only, no text): the reporter compares it with the portal's

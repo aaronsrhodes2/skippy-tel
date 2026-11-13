@@ -458,6 +458,23 @@ class Run:
         self.session_seen: str | None = None   # Claude Code's session for this run as soon as it is known: a retry resumes it
         self.calls = toolchain.Calls()         # each tool call's time and outcome, for the reply's toolchain (the `chain` event at the end)
         self._chained = False
+        self.vibes: list[str] = []             # what the Captain added while this run worked (join): with `message`, the goal (goal.statement)
+        self._inbox: list[str] = []            # those, not yet shown to the model: it sees them at its next tool result or stop
+
+    def join(self, text: str) -> None:
+        """The Captain wrote while this run works: it is part of the goal now, and the model reads it at its next tool result."""
+        text = (text or "").strip()[:MAX_MESSAGE]
+        if not text:
+            return
+        with self._cond:
+            self.vibes.append(text)
+            self._inbox.append(text)
+        self.emit({"t": "text", "text": f"(added to the goal while I work: {text[:200]})"})
+
+    def drain_inbox(self) -> list[str]:
+        with self._cond:
+            got, self._inbox = self._inbox, []
+        return got
 
     def emit(self, event: dict) -> int | None:
         """Add an event; its index in the list, or None when the list is full."""
@@ -873,6 +890,18 @@ class Workshop:
         self._save(run, True)                          # on disk before any work: a restart then finds it and can say so
         self.convlog.started(run)                      # the Captain's message is on record before anything runs
         threading.Thread(target=self._work, args=(run,), daemon=True).start()
+        return run
+
+    def join(self, conv: str, message: str, brain: str = "core", project: str = "") -> Run | None:
+        """A message for a conversation whose run is still going: it joins that run (Run.join) instead of waiting in line behind it.
+        The run it joined, or None when no run of this brain is live on that conversation (the caller starts a run as usual)."""
+        project = project or projects_mod.DEFAULT
+        with self._lock:
+            live = [r for r in self._runs.values() if not r.done and r.conv == conv and r.brain == (brain or "core") and r.project == project]
+        if not live:
+            return None
+        run = max(live, key=lambda r: r.created)
+        run.join(message)
         return run
 
     def _changed(self, run: Run, force: bool) -> None:

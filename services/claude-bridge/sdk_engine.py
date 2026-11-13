@@ -238,26 +238,49 @@ def loop_hook(breaker: "loop_breaker.LoopBreaker"):
     return hook
 
 
+def told(messages: list[str]) -> str:
+    """What the model is shown when the Captain wrote while it worked."""
+    return ("The Captain wrote while you were working. It is part of the goal now (the goal is the original request AND everything he adds): "
+            + " | ".join(messages) + ". Fold it into what you are doing; if it changes the plan, say so in your next report.")
+
+
+def join_hook(run):
+    """PostToolUse: messages the Captain sent mid-run (Run.join) reach the model at the very next tool result, as extra context."""
+    async def hook(input_data: dict, tool_use_id: str | None, context: Any) -> dict:
+        got = run.drain_inbox()
+        if not got:
+            return {}
+        return {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": told(got)}}
+    return hook
+
+
 class StopGate:
     """Stop: a run with loose ends (run_state.loose_ends: uncommitted, unpushed, or a portal change not live yet) is sent back,
     up to `limit` times, with the facts."""
 
     def __init__(self, clone: str, baseline: set[str], limit: int = run_state.GATE_LIMIT, say: Callable[[str], None] = lambda t: None,
-                 base_head: str = ""):
+                 base_head: str = "", run=None):
         self.clone, self.baseline, self.limit, self.say, self.base_head = clone, baseline, limit, say, base_head
+        self.run = run                                    # its inbox and vibes: what the Captain added while it worked
         self.sent_back = 0
         self.started, self.work = time.time(), {}       # the project's own work check (work_check.py), with its own limits
         self.goal = {}                                    # goal.py's counts: open tasks, the request not met
         self.hanging = {}                                 # hanging.py's counts: background waits, promises, questions
 
     async def hook(self, input_data: dict, tool_use_id: str | None, context: Any) -> dict:
-        hang = await asyncio.to_thread(hanging.check, str((input_data or {}).get("transcript_path") or ""), self.hanging,
+        if self.run is not None:                          # he wrote since the last tool result: the turn may not end without reading it
+            late = self.run.drain_inbox()
+            if late:
+                self.say("(stop gate: a message arrived while I worked; it is part of the goal, sent back)")
+                return {"decision": "block", "reason": told(late) + goal.reread(goal.statement(self.run.message, self.run.vibes))}
+        hang =await asyncio.to_thread(hanging.check, str((input_data or {}).get("transcript_path") or ""), self.hanging,
                                        str((input_data or {}).get("last_assistant_message") or ""))
         if hang:
             self.say("(stop gate: still waiting on something, or ended on a promise or a question; sent back)")
             return {"decision": "block", "reason": hang}
         short = await asyncio.to_thread(goal.check, str((input_data or {}).get("transcript_path") or ""), self.goal,
-                                        str((input_data or {}).get("last_assistant_message") or ""))
+                                        str((input_data or {}).get("last_assistant_message") or ""), os.environ,
+                                        self.run.message if self.run is not None else "", list(self.run.vibes) if self.run is not None else [])
         if short:
             self.say("(stop gate: a task on its list is open, or the request isn't fully met; sent back)")
             return {"decision": "block", "reason": short}
@@ -314,8 +337,9 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
     journal = run_state.Journal()
     baseline = set(run_state.dirty_paths(run_state.git_text(clone, "status", "--porcelain", "--untracked-files=all")))
     say = lambda text: run.emit({"t": "text", "text": text})            # noqa: E731 - a note in the chat, in parentheses
-    gate = StopGate(clone, baseline, say=say, base_head=run_state.git_text(clone, "rev-parse", "HEAD"))
-    hooks = {"PreToolUse": [(LANE_TOOLS, lane_hook(lane)), (None, guard_hook(purple_guard.Guard(cwd=clone, core_run=core_run)))], "PostToolUse": [("Bash|Edit|Write|MultiEdit", loop_hook(loop_breaker.LoopBreaker()))], "Stop": [(None, gate.hook)]}
+    gate = StopGate(clone, baseline, say=say, base_head=run_state.git_text(clone, "rev-parse", "HEAD"), run=run)
+    hooks = {"PreToolUse": [(LANE_TOOLS, lane_hook(lane)), (None, guard_hook(purple_guard.Guard(cwd=clone, core_run=core_run)))],
+             "PostToolUse": [("Bash|Edit|Write|MultiEdit", loop_hook(loop_breaker.LoopBreaker())), (None, join_hook(run))], "Stop": [(None, gate.hook)]}
     session_id, pending, kept = resume, None, None
 
     def keep(sid: str | None) -> None:
