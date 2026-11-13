@@ -107,10 +107,29 @@ def test_a_refused_kill_names_what_it_would_hit_and_the_runs_going(lane, monkeyp
 
 @pytest.mark.parametrize("cmd", [
     "ssh skippy-core 'sudo python3 /opt/skippy-core/cd/cd.py ops status'", "ssh skippy-core 'sudo python3 /opt/skippy-core/cd/cd.py ops logs'",
-    "taskkill //PID 4242 //F", "docker compose stop flask-api", "kill 4242",
+    "docker compose stop flask-api",
     "ssh skippy-core 'sudo python3 /opt/skippy-core/cd/cd.py ops restart-game garrysmod'",     # a games fix is not refused
 ])
 def test_their_harmless_cousins_are_fine(lane, cmd):
+    assert lane.check("Bash", {"command": cmd}) is None, cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "taskkill //F //PID 45044 //PID 4242", "taskkill /PID 45044 /F", "Stop-Process -Id 45044 -Force", "kill -9 45044", "kill 4242 45044",
+    "taskkill //F //PID $(tasklist | findstr python | awk '{print $2}')", "tasklist | findstr python | awk '{print $2}' | xargs kill -9",
+])
+def test_a_kill_by_pid_of_a_process_the_run_did_not_start_is_refused(lane, cmd, monkeypatch):
+    """2026-11-13: a coder killed every python PID on the machine (the benchmark runner, bridge, hub, radio, starter)."""
+    monkeypatch.setattr(lg, "own_pids", lambda: {4242})
+    monkeypatch.setattr(lg.holders, "processes", lambda: [])
+    monkeypatch.setattr(lg.holders, "active_runs", lambda: [])
+    assert lane.check("Bash", {"command": cmd}), cmd
+    assert lane.check("Bash", {"command": "SKIPPY_FORCE=1 " + cmd}) is None
+
+
+@pytest.mark.parametrize("cmd", ["taskkill //PID 4242 //F", "kill 4242", "kill -9 4242", "Stop-Process -Id 4242", "kill $!", "docker compose stop x"])
+def test_a_kill_of_the_runs_own_process_is_fine(lane, cmd, monkeypatch):
+    monkeypatch.setattr(lg, "own_pids", lambda: {4242})
     assert lane.check("Bash", {"command": cmd}) is None, cmd
 
 

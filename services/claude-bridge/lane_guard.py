@@ -46,6 +46,47 @@ RISKY = [
     (re.compile(r"\b(?:shutdown(?:\.exe)?\s+[/-][rs]|Restart-Computer|Stop-Computer|systemctl\s+(?:reboot|poweroff))\b", re.I),
      "it restarts or shuts down a machine."),
 ]
+# A kill BY PID is refused unless every PID is the run's own (2026-11-13: a coder ran `tasklist | findstr python`, then taskkill on every python
+# PID on the machine: the benchmark runner, the bridge, the hub, the radio and the starter all died, twice that day). Own = a descendant of the
+# claude process this hook runs under, i.e. started by this run's own Bash calls.
+_KILL_PID = re.compile(
+    r"\btaskkill(?:\.exe)?\b[^\n;&|]*?[/-]PID\b(?P<tk>[^\n;&|]*)"
+    r"|\bStop-Process\b[^\n;&|]*?-Id\b(?P<sp>[^\n;&|]*)"
+    r"|(?<![\w-])kill\b(?P<k>[^\n;&|]*)"
+    r"|\bwmic\b[^\n;&|]*?processid\s*=\s*(?P<w>\d+)[^\n;&|]*?\b(?:delete|terminate)\b", re.I)
+
+
+def own_pids() -> set[int]:
+    """Every process under the claude process this hook was started by (its ancestors up to the first claude/node one, then all that one's descendants)."""
+    try:
+        import psutil
+        me = psutil.Process(os.getpid())
+        root = me.parent() or me
+        for p in me.parents():
+            root = p
+            if re.search(r"claude|node", p.name(), re.I):
+                break
+        return {c.pid for c in root.children(recursive=True)} - {os.getpid()}
+    except Exception:
+        return set()
+
+
+def foreign_kill(cmd: str, own=None) -> str | None:
+    """The reason a kill-by-PID in `cmd` is refused (a PID that is not this run's own, or PIDs taken from a command's output), else None."""
+    mine = None
+    for m in _KILL_PID.finditer(cmd):
+        arg = next((v for v in m.groups() if v is not None), "")
+        if re.search(r"\$\(|`", arg) or re.search(r"\|\s*xargs\b[^\n]*\bkill\b|\b(?:tasklist|pgrep|ps)\b[^\n]*\|[^\n]*\b(?:while|for)\b[^\n]*\bkill\b|\bfor\b[^\n]*\btasklist\b[^\n]*\bkill\b", cmd, re.I):
+            return "it kills PIDs taken from another command's output (every process of a kind), which hits other sessions' work; name only the PIDs you started."
+        pids = [int(x) for x in re.findall(r"(?<![\w$%-])\d{2,}(?![\w:.])", arg)]
+        if pids:
+            mine = (own or own_pids)() if mine is None else mine
+            alien = [p for p in pids if p not in mine]
+            if alien:
+                return f"PID {', '.join(map(str, alien))} was not started by this run (only a process under this run's own claude can be stopped by PID: a bridge, the hub, the radio or another run's work is somebody else's)."
+    return None
+
+
 _PATH = re.compile(r"(\"[^\"]+\"|'[^']+'|(?<![\w/.-])(?:[A-Za-z]:[\\/]|/[a-zA-Z]/|~[\\/]|\.\.(?:[\\/]|$))[^\s;&|'\"<>]*)")
 
 
@@ -110,6 +151,9 @@ class Lane:
             for (pattern, why), kind in zip(RISKY, ("kill", "reboot")):
                 if pattern.search(cmd):
                     return f"{why} {holders.report(cmd, kind)}"
+            alien = foreign_kill(cmd)
+            if alien:
+                return f"{alien} {holders.report(cmd, 'kill')}"
         for seg in re.split(r"&&|\|\||;|\n", cmd):
             reason = self._segment(seg)
             if reason:
