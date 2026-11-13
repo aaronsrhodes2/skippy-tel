@@ -139,7 +139,10 @@ def fetch(app: dict, cache: Path = CACHE) -> Path:
 # ── adb ──
 def adb(*args: str, serial: str | None = None, timeout: int = 300) -> str:
     cmd = ["adb"] + (["-s", serial] if serial else []) + list(args)
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return "timed out"                                      # a box that is off, or has wireless debugging off, does not answer a connect
     return (r.stdout + r.stderr).strip()
 
 
