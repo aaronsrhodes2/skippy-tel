@@ -3,7 +3,9 @@
 A player is Claude Code with purple's system prompt and an empty config (no skills, no memory), run headless like purple runs:
 `--dangerously-skip-permissions` with the lane guard keeping its writes in its own folder, effort high, a 131K window.
   * coder: Skippy Core's coder (the local model under test);
-  * haiku: Claude Haiku 5.5, the bar (the Captain, 2026-11-10: "a local coding model ... on par with a 130k haiku").
+  * haiku: Claude Haiku 5.5, the bar (the Captain, 2026-11-10: "a local coding model ... on par with a 130k haiku"). RETIRED from
+    the default 2026-11-12 (the Captain: "we have gotten what we want out of Haiku ... pivot all experimentation over to our local
+    models only"): its 6 valid baseline runs are the bar; it plays only when named with --players and the API key has credit.
 Both run a task at once (they share nothing); the coder's runs wait for purple's bridge to be idle, since Core serves one at a time.
 
 Each run starts from the task's parent commit as a fresh one-commit repo (`git archive`, so no history: the fix can't be looked up)
@@ -15,7 +17,7 @@ commit's message. Scoring puts those test files back as the commit had them (an 
     me for permission basically never unless I ask for a gate or a stop");
   * minutes, turns, output tokens: what it cost.
 
-    python tools/codebench/run.py [--tasks id,id] [--players coder,haiku] [--tag baseline] [--timeout 60]
+    python tools/codebench/run.py [--tasks id,id] [--players coder] [--tag baseline] [--timeout 60]
 
 Results go to CODEBENCH_DIR/results-<tag>.jsonl, one line per (task, player); a pair already there is skipped, so a run resumes.
 `--gates` adds purple's stop gate (finish_gate.py: uncommitted work is sent back) for the coder: the setup purple really has.
@@ -220,7 +222,7 @@ def judged(task: dict, words: str) -> str:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tasks", default="", help="task ids, comma separated (all by default)")
-    ap.add_argument("--players", default="coder,haiku")
+    ap.add_argument("--players", default="coder")
     ap.add_argument("--tag", default="baseline", help="names this configuration in the results")
     ap.add_argument("--timeout", type=int, default=60, help="minutes a run may take")
     ap.add_argument("--gates", action="store_true", help="give the coder purple's stop gate")
