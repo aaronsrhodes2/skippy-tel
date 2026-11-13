@@ -118,6 +118,7 @@ def setup(task: dict, player: str, run: Path, gates: bool) -> tuple[list, dict, 
             ["git", "rev-parse", "HEAD"], cwd=work, capture_output=True, text=True).stdout.strip(), "sent_back": 0,
             "started": time.time()}), encoding="utf-8")
         env["SKIPPY_FINISH_STATE"] = str(state)
+        env["SKIPPY_AUDIT"] = str(config.parent / "purple-audit.jsonl")     # the guard's refusals per task, never the house audit
     (config / "hooks.json").write_text(json.dumps({"hooks": hooks}), encoding="utf-8")
     project = projects.Project(id=f"f-cb-{task['id']}-{player}", name=task["repo"], primary=str(work), clone=str(work), repo="",
                                branch="", deploy="", inplace=True)
