@@ -328,6 +328,8 @@ class Room:
         self.floor, self.min_speech_ms, self.listen_ms, self.followup_ms, self.summarize_over = floor, min_speech_ms, listen_ms, followup_ms, summarize_over
         self.mic_gain = mic_gain                                # SATELLITE_MIC_GAIN: digital gain on the box's audio
         self.debug = debug                                      # SATELLITE_DEBUG=1: the log shows what room talk was heard (private: off by default)
+        self.pod_voice = True                                   # SATELLITE_POD_VOICE=1 gives the box's own speaker Skippy's voice back; otherwise it only rings alarms and timers
+        self._alarm_sound = False                               # True while a timer or alarm announces itself: that one may sound from the box
         self.pc_outs = list(pc_outs)                            # speaker_out.PcOut: his voice also out of skippy-pc's HDMI / Bluetooth stereo
         self.filler, self.filler_after_s = filler, filler_after_s       # pre-recorded quips (filler.py) to cover a slow answer
         self.hlog = hlog                                        # housemem.HouseLog: the house log (words after the name, tools, outcomes; never audio)
@@ -1078,8 +1080,11 @@ class Room:
                 asyncio.ensure_future(out.play(voice[1]))
         if voice is not None and voice[0] == "mp3":
             sole = next((o for o in self.pc_outs if getattr(o, "sole", False) and o.available()), None)
+        quiet_pod = voice is not None and not self.pod_voice and not self._alarm_sound     # the pod's own speaker is for alarms and timers only (the Captain, 2026-11-12)
         if sole is None:
             self._also(voice)
+            if quiet_pod:
+                voice = None                                    # the words and the lips, no sound from the box: the stereos carry the voice
             if announce:
                 await self.link.announce(said, voice)
             else:
@@ -1094,9 +1099,12 @@ class Room:
         else:
             await self.link.speak(said, None, follow_up)
         if not await playing:
-            self.log(f"[{self.name}] (the {sole.kind} output dropped it: the pod says it)")
-            await self.link.announce(said, voice)
-        elif getattr(sole, "last_heard", True) is False:         # a probe of an output taken for off (sync.py), and still nobody heard it
+            if quiet_pod:
+                self.log(f"[{self.name}] (the {sole.kind} output dropped it; the pod's speaker is off for voice)")
+            else:
+                self.log(f"[{self.name}] (the {sole.kind} output dropped it: the pod says it)")
+                await self.link.announce(said, voice)
+        elif getattr(sole, "last_heard", True) is False and not quiet_pod:   # a probe of an output taken for off (sync.py), and still nobody heard it
             self.log(f"[{self.name}] (the {sole.kind} output is still off: the pod says it)")
             await self.link.announce(said, voice)
 
@@ -1220,7 +1228,7 @@ class Room:
                         quiet = False
                 if not quiet:
                     await self.link.announce("", ("pcm", *alarm_clock.pcm_of(tone)))
-                    if voice is not None:
+                    if voice is not None and self.pod_voice:    # the box's own speaker is for the chime alone (the Captain, 2026-11-12): the words are on its screen and the stereos say them
                         clip = ("mp3", voice) if voice[:4] != b"RIFF" else ("pcm", *alarm_clock.pcm_of(voice))
                         await self.link.announce(text, clip)
         finally:
@@ -1248,16 +1256,28 @@ class Room:
         for timer in (self.timers.due() if self.clock is None else ()):     # with the house's clock, it rings them (alarm_clock.py)
             self.log(f"[{self.name}] timer done: {timer.label}")
             from alarms import timer_name                       # noqa: PLC0415
-            await self.announce(f"Your {timer_name(timer.label)} timer is done.")
+            self._alarm_sound = True
+            try:
+                await self.announce(f"Your {timer_name(timer.label)} timer is done.")
+            finally:
+                self._alarm_sound = False
         if self.alarms is not None and self.clock is None:
             for alarm in self.alarms.due():
                 self.log(f"[{self.name}] {alarm.kind} going off: {alarm.hhmm} {alarm.label}")
                 self._record("alarm", what=alarm.kind, label=alarm.label or None)
-                await self.announce(self.alarms.spoken(alarm))
+                self._alarm_sound = True
+                try:
+                    await self.announce(self.alarms.spoken(alarm))
+                finally:
+                    self._alarm_sound = False
                 self._listen_for_answer()
             again = self.alarms.ring_again()                    # nobody answered: once a minute, a few times
             if again is not None:
-                await self.announce(self.alarms.spoken(again))
+                self._alarm_sound = True
+                try:
+                    await self.announce(self.alarms.spoken(again))
+                finally:
+                    self._alarm_sound = False
                 self._listen_for_answer()
         if self.workspace is not None and self.run_action is not None:
             for auto in self.workspace.due():                   # automations only exist after his recorded yes; each fires once a day, quietly
@@ -1952,6 +1972,7 @@ def build_rooms(env: dict):
                                      filler_after_s=float(env.get("SATELLITE_FILLER_S", "1.0")), hlog=hlog, workspace=workspace, run_action=run_action, homechat=homechat, starters=starters,
                                      followup_ms=int(float(env.get("SATELLITE_SESSION_S", "30")) * 1000))      # the name opens a conversation: it stays open this long without a word
         room.alarms = alarms
+        room.pod_voice = env.get("SATELLITE_POD_VOICE", "0").lower() in ("1", "on", "yes")
         room.clock = house_clock
         room.inbox = state / "hub-inbox" / f"{name}.json"
         connected[name] = room
@@ -2123,13 +2144,13 @@ def announce_tools(room_of, connected: dict, env: dict, loop):
                     async def by_stereo(out=out, boxes=tuple(standing_in)) -> None:
                         if not await out.play(voice[1]):        # the router dropped it (never played late) or it would not decode: the boxes it stood in for say it
                             for box in boxes:
-                                await box.link.announce(text, voice)
+                                await box.link.announce(text, voice if getattr(box, "pod_voice", True) else None)
                     asyncio.ensure_future(by_stereo())
                     heard.append(lay.place_words(stereo) or place)
                 else:                                           # the stereo went off since the look: those boxes speak after all
                     loud += standing_in
             for r in loud:
-                asyncio.ensure_future(r.link.announce(text, voice))
+                asyncio.ensure_future(r.link.announce(text, voice if getattr(r, "pod_voice", True) else None))
                 heard.append(r.name)
             here.log(f"[{here.name}] announced {place}: {text}")
             return (f"Announced {' and '.join(heard)}: {text}" if heard

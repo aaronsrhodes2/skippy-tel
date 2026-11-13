@@ -470,3 +470,26 @@ def test_a_clip_whose_play_is_cancelled_is_taken_off_the_router_so_it_is_not_sai
     finally:
         router.close()
     assert on_it == 1 and after == 0                                      # cancelled: gone from the router at once, not 2.6 s later
+
+
+def test_a_pod_with_voice_off_never_makes_the_sound_the_words_and_lips_still_go():
+    r = Room("office", Link(), Gate(), object(), Timers(), log=lambda m: None, pc_outs=[])
+    r.pod_voice = False
+    asyncio.run(r._out("Hello.", ("mp3", b"CLIP"), announce=False))
+    assert r.link.spoken == [("speak", "Hello.", None)]               # no clip to the box: only the words
+
+
+def test_a_pod_with_voice_off_is_not_the_fallback_when_the_stereo_drops_it():
+    out = Out(plays=False)
+    r = room(out)
+    r.pod_voice = False
+    asyncio.run(r._out("Hello.", ("mp3", b"CLIP"), announce=True))
+    assert all(v is None for _, _, v in r.link.spoken)               # the dropped clip is not said by the pod
+
+
+def test_a_timer_may_still_sound_from_the_pod():
+    r = Room("office", Link(), Gate(), object(), Timers(), log=lambda m: None, pc_outs=[])
+    r.pod_voice = False
+    r._alarm_sound = True
+    asyncio.run(r._out("Your timer is done.", ("mp3", b"CLIP"), announce=True))
+    assert r.link.spoken == [("announce", "Your timer is done.", ("mp3", b"CLIP"))]
