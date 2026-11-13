@@ -15,8 +15,11 @@ Its software stack is made here, from skippy-pc, in layers, each one pinned in `
 in `state/media-box/cache/<sha256>.apk|apkm` (or let `deploy` download it from the manifest's source) and change the hash.
 
 ## Reaching the box
-Wireless adb, paired once (`media_box.py pair IP:PORT CODE` from Developer options > Wireless debugging > Pair device with pairing code). The connect port
-changes at every reboot; the tool finds it through mDNS. Needs Wireless debugging on after a reboot.
+The box's own "Internet Adb" switch (Developer options > Debugging, on) keeps adb on the fixed port 5555 and survives reboots; our key is already authorised. Wireless
+debugging does not: Android drops it at every reboot and its port is random, so it is only the last resort. `media_box.py` tries `<manifest host>:5555`, then
+the address mDNS gives, then scans the subnet for 5555, and checks `ro.serialno` so it never talks to another Android. The box's Wi-Fi MAC is random per boot, so its
+DHCP address moves (it was .69, then .237): a router reservation cannot pin it on Wi-Fi, only the wired Ethernet MAC (30:a6:12:15:45:4c) once a cable is in.
+Never forward port 5555 on the router: "Internet Adb" is only for the LAN.
 
 ## Firmware flashes (the plan; nothing here has been flashed)
 1. Back up the stock firmware first (`rkdeveloptool rl` in maskrom, or the vendor's tool): the stock image is the only way back.

@@ -147,16 +147,50 @@ def adb(*args: str, serial: str | None = None, timeout: int = 300) -> str:
     return (r.stdout + r.stderr).strip()
 
 
+def scan_adb_port(host: str, port: int = 5555, workers: int = 64) -> list[str]:
+    """Addresses on host's /24 that answer on the fixed adb port (the box's Wi-Fi MAC is random per boot, so its DHCP address moves)."""
+    import concurrent.futures
+    import socket
+    prefix = host.rsplit(".", 1)[0]
+
+    def probe(i: int) -> str | None:
+        ip = f"{prefix}.{i}"
+        try:
+            with socket.create_connection((ip, port), timeout=0.4):
+                return ip
+        except OSError:
+            return None
+    with concurrent.futures.ThreadPoolExecutor(workers) as ex:
+        return [ip for ip in ex.map(probe, range(1, 255)) if ip]
+
+
 def find_serial(host: str, serial: str = "") -> str | None:
-    """A connected adb serial for the box: already connected, else its mDNS connect service (by serial number, else address), else the fixed port 5555."""
-    target = parse_mdns(adb("mdns", "services"), host, serial)
+    """A connected adb serial for the box. The fixed port (the box's "Internet Adb" switch, 5555, which survives reboots) at the manifest address, then
+    wherever mDNS says the box is, then a scan of the subnet for 5555 (the box is told by its serial number). Wireless debugging's random port is the last
+    resort: Android drops that setting at reboot."""
     for line in adb("devices").splitlines()[1:]:
-        if line.endswith("device") and ((target and line.startswith(target.split(":")[0] + ":")) or line.startswith(host + ":")):
+        if line.endswith("device") and line.startswith(host + ":"):
             return line.split()[0]
-    for candidate in ([target] if target else []) + [f"{host}:5555"]:
-        if "connected" in adb("connect", candidate, timeout=20):
-            return candidate
+    mdns = parse_mdns(adb("mdns", "services"), host, serial)
+    tried: list[str] = []
+    for ip in [host] + ([mdns.split(":")[0]] if mdns else []):
+        cand = f"{ip}:5555"
+        if cand not in tried:
+            tried.append(cand)
+            if "connected" in adb("connect", cand, timeout=15) and _is_box(cand, serial):
+                return cand
+    for ip in scan_adb_port(host):
+        cand = f"{ip}:5555"
+        if cand not in tried and "connected" in adb("connect", cand, timeout=15) and _is_box(cand, serial):
+            return cand
+    if mdns and "connected" in adb("connect", mdns, timeout=20):
+        return mdns
     return None
+
+
+def _is_box(cand: str, serial: str) -> bool:
+    """The device at cand is the box (its serial number matches), never another Android on the net."""
+    return not serial or adb("shell", "getprop", "ro.serialno", serial=cand, timeout=20).strip() == serial
 
 
 def check_signer(apk: Path, want: str) -> None:
