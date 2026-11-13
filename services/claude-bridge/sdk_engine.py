@@ -359,7 +359,7 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
     for n in itertools.count(1):
         if segments is not None and n > segments:
             break
-        prompt = request if n == 1 else run_state.handoff(request, n, clone, journal)
+        prompt = request if n == 1 else run_state.handoff(goal.statement(request, list(getattr(run, "vibes", []))), n, clone, journal)   # the whole goal, additions too
         session = await open_session(n, resume if n == 1 else None, hooks)
         ended: Ended | None = None
         problem: str | None = None
