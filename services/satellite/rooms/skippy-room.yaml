@@ -220,6 +220,7 @@ wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   power_save_mode: none                   # a voice terminal must never doze (the Theater Fan lesson)
+  post_connect_roaming: false             # 2026-11-13: the bedroom pod read -67 dBm, ran a roam scan every 5 min, and the second one dropped it off Wi-Fi for 15 min (a 20-min cycle all night); a pod never moves, so it never roams
   on_connect:
     - lambda: 'ESP_LOGI("net", "wifi up");'
   on_disconnect:
