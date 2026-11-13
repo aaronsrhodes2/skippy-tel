@@ -265,7 +265,7 @@ audio_adc:
     address: 0x40
     bits_per_sample: 16bit
     sample_rate: 16000
-    mic_gain: 33db
+    mic_gain: 37.5db            # the chip's maximum (was 33 dB: the hub logged speech at 0.008-0.012 against a 0.024 bar, 2026-11-13)
 
 output:
   - platform: gpio
