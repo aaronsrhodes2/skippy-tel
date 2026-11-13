@@ -268,6 +268,22 @@ def main(argv: list[str] | None = None) -> int:
         recorded[app["package"]] = app["sha256"]
         STATE.parent.mkdir(parents=True, exist_ok=True)
         STATE.write_text(json.dumps(recorded, indent=1), encoding="utf-8")
+    launcher = m.get("launcher")
+    if launcher and a.cmd == "deploy":
+        proj = ROOT / launcher["project"]
+        print(f"{'would build' if a.dry_run else 'building'} the launcher ({launcher['project']}) and make it the home screen")
+        if not a.dry_run:
+            gradle = "gradlew.bat" if sys.platform == "win32" else "./gradlew"
+            r = subprocess.run([gradle, "--no-daemon", "assembleDebug", "-q"], cwd=proj, capture_output=True, text=True, timeout=900, shell=sys.platform == "win32")
+            apk = proj / "app" / "build" / "outputs" / "apk" / "debug" / "app-debug.apk"
+            if r.returncode != 0 or not apk.is_file():
+                print("  launcher build failed: " + (r.stdout + r.stderr)[-600:])
+                return 1
+            print("  " + (adb("install", "-r", str(apk), serial=serial).splitlines() or ["(no output)"])[-1])
+            print("  " + adb("shell", "cmd", "package", "set-home-activity", f"{launcher['package']}/{launcher['activity']}", serial=serial))
+    if m.get("timezone") and a.cmd == "deploy" and not a.dry_run:
+        adb("shell", "settings", "put", "global", "auto_time_zone", "0", serial=serial)
+        adb("shell", "cmd", "alarm", "set-timezone", m["timezone"], serial=serial)
     for pkg in todo["remove"]:
         print(f"{'would remove' if a.dry_run else 'removing'} {pkg}")
         if not a.dry_run:

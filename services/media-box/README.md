@@ -9,6 +9,7 @@ Its software stack is made here, from skippy-pc, in layers, each one pinned in `
 |---|---|---|---|
 | apps | Moonlight, Plex (SHA-256 pinned; Plex's signer too) | `python tools/media_box.py deploy` | done |
 | stock apps | TikTok, two app stores, Scooper TV ... taken off | the manifest's `remove` list, same command | done |
+| launcher | the Skippy home screen: a small native app (WebView page, Java, no dependencies) that is the box's HOME: tiles for Steam, Plex, YouTube, Netflix, Disney+, all apps, settings, status lamps; starts Steam by itself at boot (8 s, any key stops it) | `deploy` builds `services/media-box/launcher` and installs it as the home app | done |
 | firmware | the Android image itself | Rockchip maskrom + `rkdeveloptool` (below) | not yet: needs the Captain's USB A-to-A cable and a chosen image |
 
 `python tools/media_box.py status` is read only and exits 2 when the box differs from the manifest. A pin is the only way an app changes: put the new file

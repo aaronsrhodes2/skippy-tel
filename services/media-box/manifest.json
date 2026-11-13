@@ -10,7 +10,11 @@
       "name": "Moonlight",
       "why": "the console: streams Steam Big Picture from skippy-pc's Sunshine",
       "kind": "apk",
-      "source": {"github": "moonlight-stream/moonlight-android", "tag": "v12.2", "asset": "app-nonRoot-release.apk"},
+      "source": {
+        "github": "moonlight-stream/moonlight-android",
+        "tag": "v12.2",
+        "asset": "app-nonRoot-release.apk"
+      },
       "sha256": "a871f6190365386ef3ac5722a016d4da015ee1555631ec257f6e5dc3f4a45fe0"
     },
     {
@@ -18,10 +22,21 @@
       "name": "Plex",
       "why": "plays skippy-pc's Plex library directly (the box decodes H.264/HEVC itself)",
       "kind": "apkm",
-      "source": {"apkmirror": "plex-inc/plex", "release": "plex-find-movies-tv-shows-2026-22-0", "variant": "plex-find-movies-tv-shows-2026-22-0-android-apk-download"},
+      "source": {
+        "apkmirror": "plex-inc/plex",
+        "release": "plex-find-movies-tv-shows-2026-22-0",
+        "variant": "plex-find-movies-tv-shows-2026-22-0-android-apk-download"
+      },
       "sha256": "5c8db86f517a84162062cac7375fdda4b02195aa8e1ae23173f3fdce8be8cbd7",
       "signer_sha256": "822cd1246884be960e0f2667eb8afc5f7df08920363c2f16742933bfeb5717c6",
-      "splits": ["arm64_v8a", "armeabi_v7a", "en", "hdpi", "xhdpi", "tvdpi"]
+      "splits": [
+        "arm64_v8a",
+        "armeabi_v7a",
+        "en",
+        "hdpi",
+        "xhdpi",
+        "tvdpi"
+      ]
     }
   ],
   "remove": [
@@ -31,5 +46,12 @@
     "cm.aptoidetv.pt",
     "cm.aptoide.pt",
     "com.chihihgs.store"
-  ]
+  ],
+  "launcher": {
+    "package": "live.makerportal.skippy.launcher",
+    "activity": ".MainActivity",
+    "project": "services/media-box/launcher",
+    "why": "the Skippy home screen (HOME app): tiles for Steam (through Moonlight, started by itself at boot), Plex, YouTube, Netflix, Disney+, all apps and settings; status lamps"
+  },
+  "timezone": "America/Los_Angeles"
 }
