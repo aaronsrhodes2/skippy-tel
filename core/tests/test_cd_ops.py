@@ -129,6 +129,11 @@ def test_ops_runs_remote_py_in_a_container_with_this_boxs_identity_and_the_args_
     assert not any(a.startswith("OPS_ID_TOKEN") for a in cmd)                        # only home and discord-setup get a token
 
 
+def test_stay_on_goes_through_ops_like_any_other_command(ops):
+    assert ops.ops(["stay-on", "off"]) == 0
+    assert docker_cmd(ops)[-3:] == ["scripts/remote.py", "stay-on", "off"]
+
+
 def test_home_and_discord_setup_get_an_id_token_for_the_portals_ops_audience(ops, monkeypatch):
     asked = []
     monkeypatch.setattr(cd_mod.oidc, "id_token", lambda audience: asked.append(audience) or "an-id-token")

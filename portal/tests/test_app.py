@@ -41,6 +41,12 @@ class FakeVm:
         self.state.status = "RUNNING"
         return self.state
 
+    def stay_on(self, on=True):
+        self.calls.append(("stay_on", on))
+        self.metadata["stay-on"] = "1" if on else ""
+        self.state.idle_minutes, self.state.max_hours = ("0", "0") if on else ("30", "8")
+        return self.state
+
     def stop(self):
         self.calls.append(("stop",))
         self.state.status = "TERMINATED"

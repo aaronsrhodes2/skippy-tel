@@ -6,6 +6,8 @@ act without anyone fetching logs or pressing buttons.
     python scripts/remote.py logs [game]
     python scripts/remote.py start <game> [<game> ...]
     python scripts/remote.py stop | restart
+    python scripts/remote.py stay-on [on|off]  # never sleep, no hour limit (idle-minutes 0, max-hours 0); off: 30 min / 8 h.
+                                               # Metadata only: a running VM is not stopped or restarted
     python scripts/remote.py discord-setup     # runs in the portal (it holds the bot token)
     python scripts/remote.py tail <game> [lines]         # these four run on the VM
     python scripts/remote.py search <game> <regex>       # (ops_agent.py), VM must be on
@@ -75,6 +77,7 @@ def status(vm) -> dict:
         "games": s.games,
         "idle_minutes": s.idle_minutes,
         "max_hours": s.max_hours,                    # the watchdog's session ceiling (0 = none)
+        "stay_on": ops.stay_on(vm),                  # `stay-on`: idle 0 is kept across starts
         "minutes_up": s.minutes_up(),
         "invite_codes": codes,
         "ready": diagnostics.current_ready(vm, s.started_at) if s.status == "RUNNING" else {},   # each game's own log: joinable?
@@ -195,6 +198,11 @@ def main(argv: list[str]) -> int:
         ok, message = ops.start_games(vm, args, None, is_admin=True)
         print(message)
         return 0 if ok else 1
+    elif cmd == "stay-on":
+        if args[:1] not in ([], ["on"], ["off"]):
+            print("stay-on takes `on` (the default) or `off`.")
+            return 2
+        print(ops.set_stay_on(vm, args[:1] != ["off"])[1])
     elif cmd == "stop":
         print(ops.stop_server(vm)[1])
     elif cmd == "restart":

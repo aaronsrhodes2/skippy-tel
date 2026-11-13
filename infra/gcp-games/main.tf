@@ -158,6 +158,7 @@ resource "google_compute_instance" "games" {
       machine_type,   # games.sh sizes it per session
       metadata["games"],
       metadata["idle-minutes"],
+      metadata["stay-on"], # `ops stay-on` (portal/gcp.py stay_on): keeps idle-minutes at 0 across starts
       metadata["games-env"],
       metadata["portal-friends"], # the portal's friends list (portal/friends.py)
       metadata["portal-modules"], # launcher modules the Captain retired in the Admin Graveyard (portal/modules.py)

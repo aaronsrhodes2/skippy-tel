@@ -91,6 +91,10 @@ def _external_ip(instance) -> str | None:
     return None
 
 
+DEFAULT_IDLE_MINUTES = 30      # what `stay-on off` goes back to: infra/gcp-games/main.tf's idle-minutes
+DEFAULT_MAX_HOURS = 8          # ... and variables.tf's max_hours
+
+
 class GamesVm:
     def __init__(self, project: str, zone: str, instance: str):
         self.project, self.zone, self.instance = project, zone, instance
@@ -151,6 +155,14 @@ class GamesVm:
         """Merge keys into the VM's settings. Takes effect on the next boot."""
         current = _metadata_dict(self._get()).get("games-env", "")
         self._set_metadata({"games-env": envfile.merge(current, updates)})
+
+    def stay_on(self, on: bool = True) -> VmStatus:
+        """Stay-on: the VM never sleeps and has no hour ceiling (idle-minutes 0, max-hours 0), until it is switched off again
+        (30 idle minutes, the 8 hour ceiling). Metadata only: the watchdog reads it at its next check (every 5 minutes), so a
+        running VM is neither stopped nor restarted. The `stay-on` flag is what keeps it across later starts (ops.start_games)."""
+        self._set_metadata({"stay-on": "1" if on else "", "idle-minutes": "0" if on else str(DEFAULT_IDLE_MINUTES),
+                            "max-hours": "0" if on else str(DEFAULT_MAX_HOURS)})
+        return self.status()
 
     def start(self, games: list[str], idle_minutes: int = 30) -> VmStatus:
         """Size the VM for `games`, choose which games start, and boot it.

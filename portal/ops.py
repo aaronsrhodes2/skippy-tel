@@ -33,6 +33,23 @@ def switch_message(current: list[str], wanted: list[str], visible: list[str] | N
     return f"{lead} To play {want} instead, ask {SWITCH_OWNER} to switch the server."
 
 
+def stay_on(vm) -> bool:
+    """Is the VM in the stay-on state (metadata `stay-on`)? Unreadable means no."""
+    try:
+        return vm.get_metadata("stay-on") == "1"
+    except Exception:   # noqa: BLE001: a start must not fail over a flag it couldn't read
+        return False
+
+
+def set_stay_on(vm, on: bool) -> tuple[bool, str]:
+    """Switch stay-on on or off. Never stops, starts or restarts the VM: the watchdog picks it up at its next check."""
+    vm.stay_on(on)
+    if on:
+        return True, ("Stay-on is ON: the server never goes to sleep and has no hour limit (idle-minutes 0, max-hours 0), "
+                      "now and after every later start, until `stay-on off`. It bills for every hour it is on.")
+    return True, "Stay-on is OFF: the server sleeps after 30 idle minutes and a session ends after 8 hours, as before."
+
+
 def start_games(vm, games: list[str], idle_raw: str | None, is_admin: bool, who: str = "",
                 visible: list[str] | None = None) -> tuple[bool, str]:
     """`visible` is the games this person may see (None: all); it keeps a hidden game's name out of messages."""
@@ -54,15 +71,17 @@ def start_games(vm, games: list[str], idle_raw: str | None, is_admin: bool, who:
             watch.record_blocked(vm, who, selected, list(status.games))
         return False, ("The server is already running. Games can only be changed while it's asleep "
                        "(or by an admin restart).")
-    idle = clamp_idle(idle_raw, is_admin)
+    # Stay-on (`ops stay-on`, gcp.GamesVm.stay_on) is the Captain's standing order: no start puts the idle timer back.
+    idle = 0 if stay_on(vm) else clamp_idle(idle_raw, is_admin)
     try:
         vm.start(selected, idle_minutes=idle)
     except CapacityError as exc:
         return False, capacity_message(exc)
     ready = max(GAMES[g].ready_minutes for g in selected)
     return True, (f"Starting {', '.join(GAMES[g].name for g in selected)} — usually joinable in about "
-                  f"{ready} minutes (longer right after a game update). It sleeps after {idle} "
-                  "idle minutes; anyone on the portal can wake it again.")
+                  f"{ready} minutes (longer right after a game update). "
+                  + ("It stays on until someone stops it (auto-sleep is off)." if idle == 0 else
+                     f"It sleeps after {idle} idle minutes; anyone on the portal can wake it again."))
 
 
 def may_stop(vm, is_admin: bool, visible: list[str]) -> tuple[bool, str]:

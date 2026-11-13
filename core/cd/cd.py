@@ -22,7 +22,7 @@ serving_at: when all traffic moved to the new revision); each run's log in runs/
     cd.py run                one pass (the timer)
     cd.py deploy [sha]       deploy now (main's newest green commit, or that one), whatever state.json says
     cd.py rollback [rev]     send the portal's traffic to that revision (blank: one step back from the serving one; latest: undo)
-    cd.py ops <command> ...  scripts/remote.py on this box's identity: status, logs, start, stop, restart, tail, search, stats,
+    cd.py ops <command> ...  scripts/remote.py on this box's identity: status, logs, start, stop, restart, stay-on, tail, search, stats,
                              restart-game, backups, restore-game, discord-setup, home, configure (what the `ops` workflow did)
     cd.py domains            tools/domains.py: the portal's domains (what the `domains` workflow did)
     cd.py home-dns           keep home's public names (deploy.json home_dns) on home's IP now: prints the IP, then what each name got

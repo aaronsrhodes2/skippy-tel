@@ -126,7 +126,15 @@ next boot).
 - **Session limit**: metadata `max-hours` (Terraform variable `max_hours`, default **8**, 0 = none) stops the VM
   that many hours after boot whatever the traffic says, with a heads-up in the game's Discord channel 15
   minutes ahead. It is off while a session's idle-minutes is 0 (the admin's "never sleep").
-  To change it: edit the variable's default (or `terraform.tfvars`) and push; nothing else writes it.
+  To change it: edit the variable's default (or `terraform.tfvars`) and push; only stay-on (below) also writes it.
+- **Stay-on** (for long work on the server, such as the Factorio co-pilot): `ssh skippy-core 'sudo python3
+  /opt/skippy-core/cd/cd.py ops stay-on'` sets idle-minutes 0 and max-hours 0, so the VM never sleeps and has no session
+  limit; `ops stay-on off` puts back 30 idle minutes and the 8 hour limit. Both only write metadata: a running VM is
+  not stopped or restarted, and the watchdog follows at its next 5-minute check. Stay-on is a standing order (metadata
+  `stay-on`): every later start, from the portal, the chat or `ops start`, keeps idle-minutes at 0 until it is
+  switched off, and `ops status` shows `"stay_on": true`. A Terraform apply of `infra/gcp-games` writes max-hours
+  back to 8; that changes nothing while idle-minutes is 0 (the watchdog then has no limit at all). The VM bills for
+  every hour it is on, so switch it off when the work is done.
 - **The portal's Watcher** (Dashboard → warnings) says so when the server has been on longer than the limit plus
   an hour, or longer than 2 hours with nobody playing *and* the watchdog's idle clock past its limit by a check (or
   its checks not running: the report's `last_check_s`). The 30 idle minutes after a long session are not a warning.
