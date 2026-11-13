@@ -127,11 +127,11 @@ def test_durations_read_in_plain_words(seconds, words):
 
 
 def test_the_default_messages_read_well(shop):
-    assert shop._over_limit(7201.0, 0.0, 7200.0) == ("Claude Code was still going after 2 hours, so I stopped it. "
+    assert shop._over_limit(43201.0, 0.0, 43200.0) == ("Claude Code was still going after 12 hours, so I stopped it. "
                                                      "Send the message again, or a smaller one, to carry on.")
     assert shop._over_limit(1801.0, 0.0, 0.0).startswith("Claude Code went quiet for 30 minutes")
     assert shop._over_limit(100.0, 0.0, 99.0) is None
-    assert shop._over_limit(7199.0, 0.0, 7198.0) is None
+    assert shop._over_limit(43199.0, 0.0, 43198.0) is None
 
 
 # ── nothing waits for a person ──────────────────────────────────────────────
