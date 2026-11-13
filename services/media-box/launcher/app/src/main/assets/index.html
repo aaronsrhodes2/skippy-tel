@@ -40,10 +40,15 @@
   .tile .lbl { font-size: 2.6vh; letter-spacing: .5vw; font-weight: 600; color: var(--w); text-transform: uppercase; }
   .tile:focus, .tile.on { opacity: 1; transform: scale(1.045); z-index: 3; }
   .tile:focus::before, .tile.on::before { background: #02130c; }
-  .tile.big { flex: 2.2; }
+  .tile.big { flex: 1; height: 46vh; }
+  .row.small { justify-content: center; }
+  .row.small .tile { flex: 0 0 18vw; height: 12vh; }
+  .row.small .tile svg { width: 5vh; height: 5vh; }
+  .row.small .tile > span { flex-direction: row; gap: 1.6vw; }
+  .row.small .tile .lbl { font-size: 1.9vh; }
   .tile.g { --k: var(--g); } .tile.a { --k: var(--a); } .tile.r { --k: var(--r); } .tile.c { --k: var(--c); } .tile.v { --k: var(--v); } .tile.d { --k: var(--dgh); }
-  .tile.big svg { width: 15vh; height: 15vh; }
-  .tile.big .lbl { font-size: 3.4vh; }
+  .tile.big svg { width: 20vh; height: 20vh; }
+  .tile.big .lbl { font-size: 4.4vh; }
 
   footer { height: 5vh; display: flex; justify-content: space-between; align-items: center; font-size: 1.9vh; letter-spacing: .3vw; color: var(--dgh); text-transform: uppercase; }
   footer kbd { color: var(--g); font-family: inherit; }
@@ -82,16 +87,10 @@
     <button class="tile big g" data-do="steam"><span>
       <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="26"/><circle cx="40" cy="26" r="7"/><circle cx="22" cy="40" r="5"/><path d="M26 36l9-7"/></svg>
       <div class="lbl">Steam</div></span></button>
-    <button class="tile a" data-pkg="com.plexapp.android"><span>
+    <button class="tile big a" data-pkg="com.plexapp.android"><span>
       <svg viewBox="0 0 64 64"><path d="M20 10h14l14 22-14 22H20l14-22z"/></svg><div class="lbl">Plex</div></span></button>
-    <button class="tile r" data-pkg="com.google.android.youtube.tv"><span>
-      <svg viewBox="0 0 64 64"><rect x="8" y="16" width="48" height="32" rx="9"/><path d="M27 24l14 8-14 8z"/></svg><div class="lbl">YouTube</div></span></button>
   </div>
-  <div class="row" id="r2">
-    <button class="tile r" data-pkg="com.netflix.mediaclient"><span>
-      <svg viewBox="0 0 64 64"><path d="M20 52V12l24 40V12"/></svg><div class="lbl">Netflix</div></span></button>
-    <button class="tile c" data-pkg="com.disney.disneyplus"><span>
-      <svg viewBox="0 0 64 64"><path d="M10 40c4-18 20-26 36-22M14 30c6-8 14-12 24-12"/><path d="M50 40v12M44 46h12"/></svg><div class="lbl">Disney+</div></span></button>
+  <div class="row small" id="r2">
     <button class="tile v" data-do="apps"><span>
       <svg viewBox="0 0 64 64"><rect x="10" y="10" width="16" height="16"/><rect x="38" y="10" width="16" height="16"/><rect x="10" y="38" width="16" height="16"/><rect x="38" y="38" width="16" height="16"/></svg><div class="lbl">All apps</div></span></button>
     <button class="tile d" data-do="settings"><span>
