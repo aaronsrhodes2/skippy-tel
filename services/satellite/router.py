@@ -314,6 +314,14 @@ class Router:
         play.source.close()
         play.finished.set()
 
+    def stop_voice(self) -> int:
+        """Cut Skippy's voice off at once (a pod's top key: someone else needs to be heard). The music is left alone. -> how many clips were stopped."""
+        with self.lock:
+            clips = [p for p in self.plays.values() if p.layer == "voice"]
+        for p in clips:
+            self.stop(p)
+        return len(clips)
+
     def retarget(self, old, new, layer: str = "media") -> int:
         """Move what plays on `old` outputs to `new` ones, at once (music: "now upstairs too"). -> how many plays moved."""
         old, moved = set(old), 0

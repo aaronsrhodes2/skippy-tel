@@ -493,3 +493,67 @@ def test_a_timer_may_still_sound_from_the_pod():
     r._alarm_sound = True
     asyncio.run(r._out("Your timer is done.", ("mp3", b"CLIP"), announce=True))
     assert r.link.spoken == [("announce", "Your timer is done.", ("mp3", b"CLIP"))]
+
+
+class _Clock:
+    def __init__(self, ringing):
+        self.ringing, self.calls = ringing, []
+
+    def stop(self, by=""): self.calls.append(("stop", by))
+    def snooze(self, by=""): self.calls.append(("snooze", by))
+
+
+class _Radio:
+    def __init__(self, playing):
+        self.playing, self.calls = playing, []
+
+    async def control(self, action):
+        self.calls.append(action)
+        return True
+
+
+class _Stereo:
+    def __init__(self, radio): self.radio = radio
+    def duck(self, on, s=30.0): pass
+
+
+def test_top_key_stops_a_ring_before_anything_else_and_held_snoozes():
+    r = room(Out())
+    r.clock = _Clock({"alarm": object()})
+    r.top_key(); r.top_key(held=True)
+    assert [c[0] for c in r.clock.calls] == ["stop", "snooze"]
+
+
+def test_top_key_while_he_talks_stops_his_voice_and_the_rest_of_the_reply():
+    out = Out()
+    out.router = type("R", (), {"stopped": 0, "stop_voice": lambda self: setattr(self, "stopped", self.stopped + 1) or 1})()
+    r = room(out)
+    out.talking_until = time.monotonic() + 5
+    r.top_key()
+    assert out.router.stopped == 1 and r._shushed and out.talking_until == 0.0
+    asyncio.run(r.say("And another thing.", voice=("mp3", b"CLIP")))
+    assert r.link.spoken == [] and out.played == []                  # the rest of that reply is not spoken
+    async def wake():
+        r._woke("test")
+    asyncio.run(wake())
+    assert r._shushed is False                                       # until someone wakes him
+
+
+def test_top_key_on_music_is_next_and_held_is_pause_or_resume():
+    import asyncio as aio
+    r = room(Out())
+    radio = _Radio(True)
+    r.stereo = _Stereo(radio)
+
+    async def go():
+        r.top_key(); r.top_key(held=True)
+        await aio.sleep(0)
+    aio.run(go())
+    assert radio.calls == ["next", "pause"]
+    radio2 = _Radio(False); r.stereo = _Stereo(radio2)
+
+    async def go2():
+        r.top_key(); r.top_key(held=True)
+        await aio.sleep(0)
+    aio.run(go2())
+    assert radio2.calls == ["resume"]                                # nothing playing: a tap does nothing, a hold starts it

@@ -111,6 +111,7 @@ class EsphomeLink:
         self.streamer = None                                        # the face skippy-pc draws for this box (face_stream.FaceStreamer), once it is connected
         self._box_face = ("idle", False, False, False)              # the box's own last `Face` report: state, talking, mic off, speaker off
         self._lips_until = 0.0                                      # (monotonic) the hub drives the mouth until then: his voice is on the PC output (lips)
+        self._top_down, self._top_seen_off = None, False                # the top key: when it went down, and whether the box has reported it up yet
         self._mirror_next = None                                    # (mouth, emote) for the other pods, started by lips()
         self._mic_switch_off = False                                # the box's Microphone switch, as it last reported it
         self._ended_at = 0.0                                        # (monotonic) when released() last ended a turn on the box
@@ -130,6 +131,8 @@ class EsphomeLink:
                 self.keys["mouth"] = e.key
             elif kind == "BinarySensorInfo" and oid.endswith("tap"):
                 self.keys["tap"] = e.key
+            elif kind == "BinarySensorInfo" and oid.endswith("top_key"):
+                self.keys["top_key"] = e.key
             elif kind == "BinarySensorInfo" and "stream_live" in oid:
                 self.keys["stream_live"] = e.key
             elif kind == "TextSensorInfo" and oid == "face":
@@ -258,6 +261,14 @@ class EsphomeLink:
             self._mic_switch_off = not state.state
         elif kind == "BinarySensorState" and state.key == self.keys.get("tap") and state.state:
             self.room.tap()
+        elif kind == "BinarySensorState" and state.key == self.keys.get("top_key"):
+            now = time.monotonic()
+            if state.state and self._top_seen_off:                      # a press (never the state the box reports when it connects)
+                self._top_down = now
+            elif not state.state:
+                if self._top_down is not None:
+                    self.room.top_key(held=now - self._top_down >= 0.8)
+                self._top_down, self._top_seen_off = None, True
         elif kind == "BinarySensorState" and state.key == self.keys.get("stream_live") and self.streamer is not None:
             self.streamer.set_live(bool(state.state) and not getattr(state, "missing_state", False))
         elif kind == "SensorState" and state.key == self.keys.get("stream_loss") and self.streamer is not None:
@@ -360,6 +371,15 @@ class EsphomeLink:
             await self.client.execute_service(face, {"state": "idle"})
         except Exception as e:                                      # noqa: BLE001 — a pod that is busy or gone simply misses it
             self.log(f"[{self.room.name}] (mirror: {type(e).__name__})")
+
+    def hush(self) -> None:
+        """Skippy was stopped (the top key): the lips stop here and on the other pods now."""
+        self._lips_until = 0.0
+        if self.streamer is not None:
+            self.streamer.set_box_state(*self._box_face)
+        for other in self.others():
+            other._lips_until = 0.0
+            other._mirror_over()
 
     def _mirror_over(self) -> None:
         if self.streamer is not None and time.monotonic() >= self._lips_until - 0.02:

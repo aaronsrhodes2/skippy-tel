@@ -330,6 +330,7 @@ class Room:
         self.debug = debug                                      # SATELLITE_DEBUG=1: the log shows what room talk was heard (private: off by default)
         self.pod_voice = True                                   # SATELLITE_POD_VOICE=1 gives the box's own speaker Skippy's voice back; otherwise it only rings alarms and timers
         self._alarm_sound = False                               # True while a timer or alarm announces itself: that one may sound from the box
+        self._shushed = False                                   # the top key stopped him: the rest of this reply is not spoken
         self.pc_outs = list(pc_outs)                            # speaker_out.PcOut: his voice also out of skippy-pc's HDMI / Bluetooth stereo
         self.filler, self.filler_after_s = filler, filler_after_s       # pre-recorded quips (filler.py) to cover a slow answer
         self.hlog = hlog                                        # housemem.HouseLog: the house log (words after the name, tools, outcomes; never audio)
@@ -398,6 +399,37 @@ class Room:
     def stream_ended(self) -> None:
         if self.buf and self.mode != BUSY:
             self._finish()                                      # it stopped streaming mid-sentence: use what we have
+
+    def top_key(self, held: bool = False) -> None:
+        """The pod's top key (the Captain, 2026-11-12). An alarm or timer ringing: stop it (held: snooze). Skippy talking: stop him, politely, so someone else
+        can be heard. Otherwise the house music: next song (held: pause, or resume)."""
+        clock = self.clock
+        if clock is not None and getattr(clock, "ringing", None) is not None:
+            self.log(f"[{self.name}] top key: {'snooze' if held else 'stop'} the ring")
+            (clock.snooze if held else clock.stop)(by=f"{self.name} top key")
+            return
+        if self.voice.locked() or any(getattr(o, "talking_until", 0) > time.monotonic() for o in self.pc_outs):
+            self.log(f"[{self.name}] top key: Skippy stops talking")
+            self.shush()
+            return
+        radio = getattr(self.stereo, "radio", None)
+        if radio is None or not radio.playing and not held:
+            return
+        action = ("pause" if radio.playing else "resume") if held else "next"
+        self.log(f"[{self.name}] top key: music {action}")
+        asyncio.ensure_future(radio.control(action))
+
+    def shush(self) -> None:
+        """Stop Skippy's voice now, on every output, and the rest of this reply; the lips stop too. The next time anyone wakes him he talks again."""
+        self._shushed = True
+        for out in self.pc_outs:
+            router = getattr(out, "router", None)
+            if router is not None and hasattr(router, "stop_voice"):
+                router.stop_voice()
+                out.talking_until = 0.0
+        hush = getattr(self.link, "hush", None)
+        if hush is not None:
+            hush()
 
     def tap(self) -> None:
         """A touch on the box's screen: the same as saying "Skippy"."""
@@ -486,6 +518,7 @@ class Room:
 
     def _woke(self, by: str) -> None:
         self.log(f"[{self.name}] woke")
+        self._shushed = False
         self._alarm_hush(by)
         if self.stereo is not None:
             self.stereo.duck(True, 25)                          # the house radio (a song, Spotify or a book) goes quiet, on every speaker, while he talks to Skippy
@@ -1055,6 +1088,8 @@ class Room:
         if silent:
             return                                              # "speak aloud" off: the answer only appears in the thread
         self._last_said = (said, time.monotonic())              # an echo of it is not the Captain talking (is_echo)
+        if self._shushed and not announce:
+            return                                              # he was stopped by the top key: the rest of that reply stays unsaid
         async with self.voice:
             made = time.monotonic()
             ahead = (voice is None or said != text) and self.clips is not None and said in self.clips     # a fixed phrase, rendered ahead: no TTS call

@@ -543,8 +543,9 @@ binary_sensor:
       - delayed_on: 20ms
     on_press:
       - switch.toggle: mic_on
-  - platform: gpio                        # top key: a click switches the pod's OWN speaker off and on (the house stereos are unaffected and keep their own volume)
-    id: key_up
+  - platform: gpio                        # top key (the Captain, 2026-11-12): the hub decides what it does (stop a ring, stop Skippy talking, next song; held: snooze / pause). The pod's speaker
+    id: key_up                            # stays on at ${pod_volume} for the alarm and timer chimes only.
+    name: Top key
     pin:
       pca9554: expander
       number: 4
@@ -553,13 +554,6 @@ binary_sensor:
       inverted: true
     filters:
       - delayed_on: 20ms
-    on_press:
-      - lambda: |-
-          id(spk_off) = !id(spk_off);                                   // the key owns the flag (never derived from the player's volume, which moves during announcements)
-          id(player)->make_call().set_volume(id(spk_off) ? 0.0f : ${pod_volume}f).perform();
-      - script.execute:
-          id: face
-          state: !lambda 'return id(state_now);'
 
 # ── the face: one ring that breathes, coloured by what is happening ───────────────────────────────────────
 globals:
