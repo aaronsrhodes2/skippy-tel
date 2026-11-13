@@ -25,7 +25,9 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 
-LAST_WORDS = 4                  # the previous segment's last text blocks, verbatim
+import ledger as ledger_mod
+
+LAST_WORDS = 4                 # the previous segment's last text blocks, verbatim
 LAST_TOOLS = 20                 # ... and its last tool calls, one line each
 MAX_WORDS_CHARS = 2500          # each of those text blocks is cut at this
 MAX_STATUS_LINES = 60
@@ -50,6 +52,7 @@ class Journal:
     tool_calls: int = 0
     edited: dict = field(default_factory=dict)         # the files it wrote or edited, in order (a dict is an ordered set)
     read: dict = field(default_factory=dict)           # the files it read
+    ledger: ledger_mod.Ledger = field(default_factory=ledger_mod.Ledger)   # its phrases, with when each was last referred to (ledger.py)
 
     def touched(self, name: str, args: dict) -> None:
         path = args.get("file_path") or args.get("notebook_path") if isinstance(args, dict) else None
@@ -59,10 +62,12 @@ class Journal:
     def said(self, text: str) -> None:
         if text and text.strip():
             self.words.append(text.strip()[:MAX_WORDS_CHARS])
+            self.ledger.say(text)
 
     def did(self, name: str, detail: str) -> None:
         self.tool_calls += 1
         self.tools.append(f"{name}: {detail}" if detail else name)
+        self.ledger.do(name, detail)
 
     def turn(self) -> None:
         self.turns += 1
@@ -251,6 +256,13 @@ def handoff(request: str, segment: int, clone: str, journal: Journal) -> str:
             parts += ["  >>>", *[f"  {line}" for line in w.splitlines()], "  <<<"]
     if journal.tools:
         parts += ["", "Its last tool calls, oldest first:"] + [f"  {t}" for t in journal.tools]
+    kept = journal.ledger.carry()
+    if kept:
+        gone = len(journal.ledger.dropped())
+        where = journal.ledger.archive(clone)
+        parts += ["", f"Earlier in this job, word for word, the things the work has kept coming back to ({len(kept)} phrases; {gone} that nothing has referred to "
+                      f"for a long while were left out, not summarised{f'; every one is in {where}, grep it if you need one back' if where and gone else ''}):"]
+        parts += [f"  {k}" for k in kept]
     files = file_map(clone, journal)
     if files:
         budget, shown = MAP_CHARS, []
