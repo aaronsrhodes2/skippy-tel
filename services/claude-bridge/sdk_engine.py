@@ -47,6 +47,7 @@ from typing import Any, AsyncIterator, Callable
 
 import goal
 import hanging
+import purple_guard
 import run_state
 import work_check
 from lane_guard import Lane
@@ -210,6 +211,22 @@ def lane_hook(lane: Lane):
     return hook
 
 
+def guard_hook(guard: "purple_guard.Guard"):
+    """PreToolUse on every tool: purple's three limits (purple_guard.py, docs/purple-rules.md): a leak, a spend, a diff that weakens the tests."""
+    async def hook(input_data: dict, tool_use_id: str | None, context: Any) -> dict:
+        tool = str(input_data.get("tool_name") or "")
+        args = input_data.get("tool_input") or {}
+        hit = await asyncio.to_thread(guard.check, tool, args if isinstance(args, dict) else {})
+        if not hit:
+            return {}
+        rule, why = hit
+        purple_guard.audit(rule, tool, why, f"{tool} {json.dumps(args, ensure_ascii=False)}", guard.secrets)
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": f"Refused by the Captain's {rule.upper()} rule: {why} (docs/purple-rules.md). "
+                                                                   "If this really is the only way to the goal, finish everything else and say so."}}
+    return hook
+
+
 class StopGate:
     """Stop: a run with loose ends (run_state.loose_ends: uncommitted, unpushed, or a portal change not live yet) is sent back,
     up to `limit` times, with the facts."""
@@ -278,7 +295,7 @@ def conventions(run, text: str) -> str:
 
 async def drive(run, *, clone: str, request: str, resume: str | None, open_session: OpenSession,
                 remember: Callable[[str], None], detail: Callable[[str, dict], str], lane: Lane,
-                segments: int | None = MAX_SEGMENTS, rotate_at: int = ROTATE_TOKENS) -> None:
+                segments: int | None = MAX_SEGMENTS, rotate_at: int = ROTATE_TOKENS, core_run: bool = False) -> None:
     """Run `request` to its end in segments, as many as it needs unless `segments` caps them; every outcome ends in run.finish().
 
     A segment ends one of two ways, both told by Claude Code itself: its context (measured from the usage on each model
@@ -287,7 +304,7 @@ async def drive(run, *, clone: str, request: str, resume: str | None, open_sessi
     baseline = set(run_state.dirty_paths(run_state.git_text(clone, "status", "--porcelain", "--untracked-files=all")))
     say = lambda text: run.emit({"t": "text", "text": text})            # noqa: E731 - a note in the chat, in parentheses
     gate = StopGate(clone, baseline, say=say, base_head=run_state.git_text(clone, "rev-parse", "HEAD"))
-    hooks = {"PreToolUse": [(LANE_TOOLS, lane_hook(lane))], "Stop": [(None, gate.hook)]}
+    hooks = {"PreToolUse": [(LANE_TOOLS, lane_hook(lane)), (None, guard_hook(purple_guard.Guard(cwd=clone, core_run=core_run)))], "Stop": [(None, gate.hook)]}
     session_id, pending, kept = resume, None, None
 
     def keep(sid: str | None) -> None:
@@ -472,7 +489,8 @@ def run_core(shop, run, session: str | None) -> None:
         async def main() -> None:
             await drive(run, clone=project.clone, request=run.message, resume=resume, open_session=open_session,
                         remember=lambda sid: shop._remember(shop.session_key(run.project, run.conv, run.brain), sid),
-                        detail=we.tool_detail, lane=Lane(project.clone, env["SKIPPY_LANE_DEPLOY"], deny_read=opts["deny_read"], fix=env["SKIPPY_LANE_FIX"]), rotate_at=rotate)
+                        detail=we.tool_detail, lane=Lane(project.clone, env["SKIPPY_LANE_DEPLOY"], deny_read=opts["deny_read"], fix=env["SKIPPY_LANE_FIX"]), rotate_at=rotate,
+                        core_run=env.get("SKIPPY_CORE_EYES") == "1")
 
         loop = asyncio.new_event_loop()
         task = loop.create_task(main())

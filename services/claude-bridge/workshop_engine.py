@@ -1477,8 +1477,10 @@ class Workshop:
         finish = f'"{sys.executable}" "{Path(__file__).resolve().with_name("finish_gate.py")}"'
         # before a Core run that draws its work starts: the best picture of what was asked, and what makes it recognisable (reference.py)
         refer = f'"{sys.executable}" "{Path(__file__).resolve().with_name("reference.py")}"'
+        limits = f'"{sys.executable}" "{Path(__file__).resolve().with_name("purple_guard.py")}"'      # leak / spend / lie, on every tool (purple_guard.py)
         want = {"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
                                           "hooks": [{"type": "command", "command": hook, "timeout": 10}]},
+                                         {"matcher": "*", "hooks": [{"type": "command", "command": limits, "timeout": 60}]},
                                          {"matcher": "Read", "hooks": [{"type": "command", "command": see, "timeout": 200}]}],
                           "SessionStart": [{"matcher": "compact", "hooks": [{"type": "command", "command": restate, "timeout": 10}]}],
                           "UserPromptSubmit": [{"hooks": [{"type": "command", "command": refer, "timeout": REFERENCE_TIMEOUT}]}],
