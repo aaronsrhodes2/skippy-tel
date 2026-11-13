@@ -101,6 +101,13 @@ def setup(task: dict, player: str, run: Path, gates: bool) -> tuple[list, dict, 
     py = f'"{sys.executable}"'
     hooks = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
                              "hooks": [{"type": "command", "command": f'{py} "{BRIDGE}/lane_guard.py"', "timeout": 10}]}]}
+    if gates:                                    # purple's own per-tool hooks (the three rules' guard, the loop breaker), as the engines wire them
+        try:
+            import purple_hooks
+            for event, more in purple_hooks.entries(sys.executable).items():
+                hooks.setdefault(event, []).extend(more)
+        except ImportError:                      # a bridge older than purple_hooks.py: the gates alone
+            pass
     env = we.child_env()
     for k in ("CLAUDE_CODE_OAUTH_TOKEN", "SKIPPY_LANE_DEPLOY", "SKIPPY_LANE_FIX", "SKIPPY_FINISH_STATE"):
         env.pop(k, None)
