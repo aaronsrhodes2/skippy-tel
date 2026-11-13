@@ -353,6 +353,8 @@ class EsphomeLink:
             if self.streamer is not None:                           # the face skippy-pc draws: started here and now, not after the box's round trip (a pod on weak Wi-Fi
                 self.streamer.set_box_state("speaking", True, self._box_face[2], self._box_face[3])      # was seconds behind the others, and every pod must talk as one)
                 asyncio.get_running_loop().call_later(min(seconds + 0.4, 30), self._mirror_over)
+                if self.streamer.live:                              # the box shows the stream, not its own drawing: no round trip to start or end the talking
+                    return
             await self.client.execute_service(face, {"state": "speaking"})
             await asyncio.sleep(min(seconds + 0.4, 30))
             await self.client.execute_service(face, {"state": "idle"})
