@@ -1,7 +1,7 @@
 {
   "_about": "The bedroom media box (an X88 Pro 13 Android TV box) as a deployment target, like the room pods. tools/media_box.py makes the box match this file: every app is pinned by the SHA-256 of the file it installs (a download that does not match is refused), so changing a pin is the one deliberate way to update an app. Packages in `remove` are the stock apps taken off for the user (reversible: cmd package install-existing <package>).",
   "name": "bedroom-media-box",
-  "host": "192.168.0.69",
+  "host": "192.168.0.237",
   "mac": "30:a6:12:15:45:4c",
   "serial": "ZX2437W0420068",
   "apps": [

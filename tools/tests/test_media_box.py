@@ -34,6 +34,7 @@ def test_mdns_finds_only_this_boxs_connect_service():
            "adb-OTHER\t_adb-tls-connect._tcp\t192.168.0.50:40000\n")
     assert mb.parse_mdns(out, "192.168.0.69") == "192.168.0.69:36453"
     assert mb.parse_mdns(out, "192.168.0.7") is None
+    assert mb.parse_mdns(out, "192.168.0.7", "ZX24") == "192.168.0.69:36453"       # by serial number: the address may have changed
 
 
 def test_plan_installs_what_is_missing_or_not_the_pinned_file_and_removes_only_what_is_there():

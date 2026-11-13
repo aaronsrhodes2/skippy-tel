@@ -47,12 +47,13 @@ def load_manifest(path: Path = MANIFEST) -> dict:
     return m
 
 
-def parse_mdns(text: str, host: str) -> str | None:
-    """`adb mdns services` -> "ip:port" of the box's connect service, or None."""
+def parse_mdns(text: str, host: str, serial: str = "") -> str | None:
+    """`adb mdns services` -> "ip:port" of the box's connect service, or None. The box is known by its serial number (its address comes from DHCP and
+    changed on 2026-11-12), else by the address in the manifest."""
     for line in text.splitlines():
         if "_adb-tls-connect" in line:
             m = re.search(r"(\d+\.\d+\.\d+\.\d+):(\d+)", line)
-            if m and m.group(1) == host:
+            if m and ((serial and serial in line) or m.group(1) == host):
                 return f"{m.group(1)}:{m.group(2)}"
     return None
 
@@ -146,12 +147,12 @@ def adb(*args: str, serial: str | None = None, timeout: int = 300) -> str:
     return (r.stdout + r.stderr).strip()
 
 
-def find_serial(host: str) -> str | None:
-    """A connected adb serial for the box: already connected, else its mDNS connect service, else the fixed port 5555."""
+def find_serial(host: str, serial: str = "") -> str | None:
+    """A connected adb serial for the box: already connected, else its mDNS connect service (by serial number, else address), else the fixed port 5555."""
+    target = parse_mdns(adb("mdns", "services"), host, serial)
     for line in adb("devices").splitlines()[1:]:
-        if line.startswith(host + ":") and line.endswith("device"):
+        if line.endswith("device") and ((target and line.startswith(target.split(":")[0] + ":")) or line.startswith(host + ":")):
             return line.split()[0]
-    target = parse_mdns(adb("mdns", "services"), host)
     for candidate in ([target] if target else []) + [f"{host}:5555"]:
         if "connected" in adb("connect", candidate, timeout=20):
             return candidate
@@ -210,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         print(adb("pair", a.addr, a.code))
         return 0
     m = load_manifest()
-    serial = find_serial(m["host"])
+    serial = find_serial(m["host"], m.get("serial", ""))
     if serial is None:
         print(f"{m['name']}: not reachable. Is it on, with Developer options > Wireless debugging on? (pair once with: media_box.py pair IP:PORT CODE)")
         return 1
