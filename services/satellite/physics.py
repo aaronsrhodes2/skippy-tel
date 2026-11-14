@@ -164,6 +164,13 @@ def source_words(src) -> str:
     return clean(first, 120)
 
 
+def named_call(reading) -> bool:
+    """Mentat's reading names the calculation and its inputs ("escape_velocity(body_name='mars')"). Its notes are then written for a card (a radius table, "a Fact-Sheet-era radius")
+    and tempt Core to name a source the Source line does not (the live hub, 2026-11-04 and 2026-11-10, every run: "via NASA Planetary Fact Sheet 2024" for an escape velocity whose
+    source was sigma-ground), so they are left out. A reading that is only a classifier's name ("astro_classifier") has its notes as the one account of what was computed: those stay."""
+    return "(" in str(reading or "")
+
+
 def suggestion(result) -> dict | None:
     """Mentat's clarification when the question left an input out: {needs, suggested, sentence, follow_up: {question, given}}; None for an answer, a gap or an error."""
     clar = result.get("clarification") if isinstance(result, dict) else None
@@ -218,7 +225,7 @@ def words(reply) -> str:
             out.append(f"Provenance: {tag}." + (" This is a speculative placeholder, not a measurement: say so prominently." if tag == "SPECULATIVE-PENDING" else ""))
         if r.get("uncertainty") not in (None, "", 0):
             out.append(f"Uncertainty: {say_value(r['uncertainty'])}.")
-        if r.get("notes"):
+        if r.get("notes") and not named_call(r.get("interpreted_as")):
             out.append(f"Note: {clean(r['notes'], 240)}")
         return " ".join(out) + REMINDER
     if r.get("display"):
