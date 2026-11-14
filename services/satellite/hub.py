@@ -1997,6 +1997,8 @@ def build_rooms(env: dict):
         tools = music_tools(lambda: holder["room"], loop, stereo=stereo)   # every room is a remote of the house radio: music, Spotify and his audiobooks are ONE stream
         tools = audiobooks.combine(tools, house_clock.tools(name), house_lists.tools(), announce_tools(lambda: holder["room"], connected, env, loop))
         brain = Brain(client, brain_model, timers, hass=house, extra=tools, news=news_mod.News(env, log=log), weather=house_weather, car=house_car, physics=house_physics)
+        import factorio_door                                     # noqa: PLC0415 — while a Factorio game is on, what a room hears goes to its foreman (factorio_door.py)
+        brain = factorio_door.wrap(brain, env, log=log)
         brain.room = name                                        # the primer says which room of house_layout.json he is talking from
         brain.audio = houseaudio.Audio(radio, routines, hlog)    # the prompt says what Bilby plays now (a book too) and what happened lately; a bare "stop" waits for it
         from aliases import AliasStore                          # noqa: PLC0415 — phrases that missed and then worked run their call at once (aliases.py)

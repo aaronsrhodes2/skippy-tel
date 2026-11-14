@@ -160,6 +160,8 @@ def build(env: dict):
     timers = Timers()
     gate = Gate(env.get("SATELLITE_GATE", "http://127.0.0.1:3007"), token)
     brain = Brain(client, model, timers, hass=build_house(env))
+    import factorio_door                                            # noqa: PLC0415 — while a Factorio game is on, what is heard goes to its foreman
+    brain = factorio_door.wrap(brain, env)
     return gate, brain, timers
 
 

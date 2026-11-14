@@ -15,6 +15,15 @@ Settings (the vault `.env`, or the environment): `SKIPPY_HOME_TOKEN`, `SKIPPY_CO
 `state/wakeword/skippy.onnx`), `SATELLITE_WAKE_THRESHOLD` (default 0.5; `wakectl.py test` picks it); `SATELLITE_ROOMS` (the hub); `MATTER_URL` (skippy-core's Matter controller); `HOMEKIT_KEEP_WARM`
 (seconds between keep-warm pings, default 30; 0 turns it off).
 
+## Factorio by voice
+
+While a Factorio game with Skippy the Foreman is on, its bridge keeps a door open on this PC (`http://127.0.0.1:47862`,
+AI-factorio `copilot/voice_door.py`). `factorio_door.py` puts that door in front of every room's brain: what is heard goes to the
+foreman and his answer is what Skippy says, in Skippy's voice. House things stay with the house ("lights", "music", "a timer" and the
+like, or anything begun with "house,"); "foreman," sends anything to the game. With no game on nothing changes. Only answers are
+spoken so far, not what the foreman says on his own. `SATELLITE_FACTORIO_DOOR=off` turns it off; `SATELLITE_FACTORIO_WAIT` (60) is
+how long an answer is waited for before "still working". Tests: `tests/test_sat_factorio_door.py`.
+
 ## The wake word
 
 `wakeword/README.md`: record him (`wakectl.py record`), train on the GPU (`bash wakeword/train.sh`), test and pick the threshold (`wakectl.py test`).
