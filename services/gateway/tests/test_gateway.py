@@ -46,10 +46,10 @@ def call(g, tool_name, **args):
     return r["content"][0]["text"], r["isError"]
 
 
-def test_it_lists_three_short_tools_not_every_backend_tool(world):
+def test_it_lists_five_short_tools_not_every_backend_tool(world):
     g, _ = world
     names = [t["name"] for t in g.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})["result"]["tools"]]
-    assert names == ["find_tools", "call_tool", "backends"]
+    assert names == ["find_tools", "call_tool", "backends", "listen", "speak"]
     assert g.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
 
 
@@ -57,7 +57,7 @@ def test_find_tools_filters_by_word_and_door(world):
     g, _ = world
     rows = json.loads(call(g, "find_tools", query="light")[0])
     assert [(r["backend"], r["name"]) for r in rows] == [("house", "home_control")] and rows[0]["arguments"] == ["name"]
-    assert {r["backend"] for r in json.loads(call(g, "find_tools")[0])} == {"purple", "house", "mentat"}
+    assert {r["backend"] for r in json.loads(call(g, "find_tools")[0])} == {"purple", "house", "mentat", "voice"}
     assert [r["backend"] for r in json.loads(call(g, "find_tools", backend="mentat")[0])] == ["mentat"]
 
 
@@ -106,7 +106,7 @@ def test_unknown_names_and_methods(world):
 def test_full_listing_is_opt_in(world, monkeypatch):
     g, _ = world
     monkeypatch.setenv("GATEWAY_FULL", "1")
-    assert {t["name"] for t in g.tool_list()} == {"purple_ask", "home_control", "ask"}
+    assert {t["name"] for t in g.tool_list()} == {"purple_ask", "home_control", "ask", "listen", "speak"}
 
 
 def test_backends_come_from_defaults_overrides_and_json():
@@ -136,9 +136,49 @@ def test_the_http_door_refuses_off_loopback_without_a_key_and_checks_it(world):
         listing = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
         assert _post(url, listing)[0] == 401 and _post(url, listing, "nope")[0] == 401
         status, reply = _post(url, listing, "gate-key")
-        assert status == 200 and len(reply["result"]["tools"]) == 3
+        assert status == 200 and len(reply["result"]["tools"]) == 5
         status, reply = _post(url, {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "call_tool", "arguments": {"name": "home_control", "arguments": {"name": "a"}}}}, "gate-key")
         assert status == 200 and "home_control" in reply["result"]["content"][0]["text"]
         assert _post(url, {"jsonrpc": "2.0", "method": "notifications/initialized"}, "gate-key")[0] == 202
     finally:
         server.shutdown()
+
+
+class FakeGate:
+    def __init__(self, down=False):
+        self.down, self.heard = down, []
+
+    def stt(self, audio, lang="en"):
+        if self.down:
+            raise ConnectionError("gate down")
+        self.heard.append((audio, lang))
+        return "turn the lights off"
+
+    def tts(self, text):
+        if self.down:
+            raise ConnectionError("gate down")
+        return b"MP3" + text.encode()
+
+
+def voice_world(gate):
+    return gw.Gateway({}, rpc_fn=lambda *a, **k: {"tools": []}, voice_fn=lambda n, a: gw.voice_call(n, a, gate_fn=lambda: gate))
+
+
+def test_listen_and_speak_go_through_the_voice_gate_and_are_found():
+    import base64
+    gate = FakeGate()
+    g = voice_world(gate)
+    text, err = call(g, "listen", audio_base64=base64.b64encode(b"RIFFwav").decode(), lang="en")
+    assert not err and json.loads(text) == {"text": "turn the lights off"} and gate.heard == [(b"RIFFwav", "en")]
+    text, err = call(g, "call_tool", name="speak", arguments={"text": "hi"})
+    out = json.loads(text)
+    assert not err and out["mime"] == "audio/mpeg" and base64.b64decode(out["audio_base64"]) == b"MP3hi"
+    assert {r["name"] for r in json.loads(call(g, "find_tools", backend="voice")[0])} == {"listen", "speak"}
+
+
+def test_voice_says_so_in_words_when_the_gate_or_the_input_is_bad():
+    g = voice_world(FakeGate(down=True))
+    text, err = call(g, "speak", text="hi")
+    assert err and "not available" in text
+    assert call(voice_world(FakeGate()), "speak", text=" ")[1] is True
+    assert call(voice_world(FakeGate()), "listen", audio_base64="")[1] is True

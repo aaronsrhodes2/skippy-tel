@@ -10,8 +10,8 @@ runner `tools/gateway_run.sh`, log `state/gateway.log`).
 | house | `127.0.0.1:47861` (services/satellite/house_mcp.py) | lights, switches, music, speakers, Spotify, texts, vision moments |
 | mentat | `skippy-core:7350` | physics: `ask`, `find_tools`, `call_tool` |
 
-Listed tools are three on purpose (Mentat's 220 once cost a chat ~73k tokens): `find_tools(query?, backend?)`, `call_tool(name, arguments?)`,
-`backends()`. Any real tool name also works directly in `tools/call`; `backend.name` picks one when two doors share a name; `GATEWAY_FULL=1`
+Listed tools are five on purpose (Mentat's 220 once cost a chat ~73k tokens): `find_tools(query?, backend?)`, `call_tool(name, arguments?)`,
+`backends()`, and two built-in voice tools: `listen(audio_base64, lang?)` (speech to text) and `speak(text)` (Skippy's voice, `audio_base64` as audio/mpeg), through the voice gate on this PC (`SATELLITE_GATE`, default :3007) with a pass signed from `SKIPPY_HOME_TOKEN`, the way the hub does it. Any real tool name also works directly in `tools/call`; `backend.name` picks one when two doors share a name; `GATEWAY_FULL=1`
 lists everything. A dead door is just absent. Add doors with `GATEWAY_BACKENDS='{"name": {"url": "...", "key": "..."}}'`.
 
 Off loopback it refuses to start without `GATEWAY_KEY` (`Authorization: Bearer`). The house door's rules hold through it (a lock or garage

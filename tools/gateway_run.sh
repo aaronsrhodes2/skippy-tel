@@ -9,7 +9,7 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; the
 echo $$ > "$PIDFILE"
 trap 'rm -f "$PIDFILE"' EXIT
 export PYTHONIOENCODING=utf-8:replace PYTHONUTF8=1
-for f in "/g/My Drive/vault/.env"; do [ -f "$f" ] && while IFS='=' read -r k v; do case "$k" in GATEWAY_KEY|GATEWAY_HOST|PURPLE_MCP_KEY|HOUSE_MCP_KEY) export "$k=$(printf %s "$v" | tr -d '"'"'"'\r')";; esac; done < "$f"; done
+for f in "/g/My Drive/vault/.env"; do [ -f "$f" ] && while IFS='=' read -r k v; do case "$k" in GATEWAY_KEY|GATEWAY_HOST|PURPLE_MCP_KEY|HOUSE_MCP_KEY|SKIPPY_HOME_TOKEN|SATELLITE_GATE) export "$k=$(printf %s "$v" | tr -d '"'"'"'\r')";; esac; done < "$f"; done
 delay=3
 while true; do
   started=$(date +%s)

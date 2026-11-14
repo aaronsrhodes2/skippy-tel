@@ -18,6 +18,7 @@ drops `confirm`); off loopback the gateway REFUSES to start without GATEWAY_KEY 
 """
 from __future__ import annotations
 
+import base64
 import hmac
 import json
 import os
@@ -40,7 +41,12 @@ LISTED = [
     {"name": "call_tool", "description": "Run any tool found with find_tools. `name` is the tool's name (or backend.name); `arguments` is its argument object.",
      "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "arguments": {"type": "object"}}, "required": ["name"]}},
     {"name": "backends", "description": "Which doors answer right now, and how many tools each has.", "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "listen", "description": "Speech to text: `audio_base64` is one recording (wav, webm, ogg or mp4, at most 4 MB); returns the words (Whisper at home).",
+     "inputSchema": {"type": "object", "properties": {"audio_base64": {"type": "string"}, "lang": {"type": "string"}}, "required": ["audio_base64"]}},
+    {"name": "speak", "description": "Text to speech in Skippy's own voice (at most 500 characters); returns `audio_base64` (audio/mpeg).",
+     "inputSchema": {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}},
 ]
+VOICE_TOOLS = ("listen", "speak")
 
 
 def load_backends(env=None) -> dict:
@@ -75,9 +81,44 @@ def rpc(url: str, key: str, method: str, params: dict | None = None, timeout: fl
     return reply.get("result")
 
 
+def _voice_gate():
+    """The hub's own way to the voice gate (services/satellite/voicegate.py): a pass signed from the home token, no portal in the loop."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "satellite"))
+    from voicegate import Gate                                      # noqa: PLC0415
+    token = os.environ.get("SKIPPY_HOME_TOKEN", "")
+    if not token:
+        raise RuntimeError("SKIPPY_HOME_TOKEN is not set for the gateway")
+    return Gate(os.environ.get("SATELLITE_GATE", "http://127.0.0.1:3007"), token)
+
+
+def _text_result(text: str, error: bool = False) -> dict:
+    return {"content": [{"type": "text", "text": text}], "isError": error}
+
+
+def voice_call(name: str, args: dict, gate_fn=_voice_gate) -> dict:
+    """listen / speak, said in words when the voice gate is down (never raised)."""
+    try:
+        gate = gate_fn()
+        if name == "listen":
+            try:
+                audio = base64.b64decode(str(args.get("audio_base64") or ""), validate=False)
+            except ValueError:
+                return _text_result("`audio_base64` is not base64.", True)
+            if not audio or len(audio) > 4_000_000:
+                return _text_result("Send one recording of at most 4 MB in `audio_base64`.", True)
+            return _text_result(json.dumps({"text": gate.stt(audio, str(args.get("lang") or "en"))}))
+        text = str(args.get("text") or "").strip()
+        if not text:
+            return _text_result("`text` is empty.", True)
+        mp3 = gate.tts(text)
+        return _text_result(json.dumps({"mime": "audio/mpeg", "audio_base64": base64.b64encode(mp3).decode()}))
+    except Exception as e:                                          # noqa: BLE001 — GateError, BudgetSpent, no token: said in words
+        return _text_result(f"{name} is not available right now ({type(e).__name__}: {e}).", True)
+
+
 class Gateway:
-    def __init__(self, backends: dict | None = None, rpc_fn=rpc, now=time.monotonic):
-        self.backends, self.rpc, self.now = backends if backends is not None else load_backends(), rpc_fn, now
+    def __init__(self, backends: dict | None = None, rpc_fn=rpc, now=time.monotonic, voice_fn=voice_call):
+        self.backends, self.rpc, self.now, self.voice = backends if backends is not None else load_backends(), rpc_fn, now, voice_fn
         self._catalog: dict = {}                    # backend -> (fetched_at, tools | None)
         self._lock = threading.Lock()
 
@@ -113,6 +154,10 @@ class Gateway:
     def find(self, query: str = "", backend: str = "") -> list[dict]:
         q = (query or "").lower().split()
         rows = []
+        if backend in ("", "voice"):
+            for t in LISTED:
+                if t["name"] in VOICE_TOOLS and all(w in f"{t['name']} {t['description']}".lower() for w in q):
+                    rows.append({"backend": "voice", "name": t["name"], "description": t["description"][:200], "arguments": sorted(t["inputSchema"]["properties"])})
         for backend_name in self.backends:
             if backend and backend_name != backend:
                 continue
@@ -124,6 +169,8 @@ class Gateway:
         return rows
 
     def call(self, name: str, arguments: dict) -> dict:
+        if name.removeprefix("voice.") in VOICE_TOOLS:
+            return self.voice(name.removeprefix("voice."), arguments or {})
         found = self._resolve(name)
         if not found:
             return {"content": [{"type": "text", "text": f"No door has a tool called '{name}'. Use find_tools to see them."}], "isError": True}
@@ -141,7 +188,7 @@ class Gateway:
 
     def tool_list(self) -> list[dict]:
         if os.environ.get("GATEWAY_FULL") == "1":
-            return [t for n, (_, t) in self.catalog().items() if "." not in n]
+            return [t for n, (_, t) in self.catalog().items() if "." not in n] + [t for t in LISTED if t["name"] in VOICE_TOOLS]
         return LISTED
 
     def handle(self, msg: dict) -> dict | None:
