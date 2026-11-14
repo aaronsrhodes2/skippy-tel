@@ -509,7 +509,7 @@ def run_core(shop, run, session: str | None) -> None:
         cli = native_cli(shop.claude_cmd)
         opts = engine_options(shop.state_dir)
         settings = shop.sdk_settings(opts["claude_md_excludes"])
-        mcp = shop.core_mcp_config(opts["house_tools"], opts["purple_tools"], opts["purple_tools_only"])
+        mcp = shop.core_mcp_config(opts["house_tools"], opts["purple_tools"], opts["purple_tools_only"], project)
         prompt_file = str(shop.prompt_path(run.project))
         turns, rotate = segment_turns(shop.state_dir), rotate_tokens(shop.state_dir)
         sessions: list[SdkSession] = []

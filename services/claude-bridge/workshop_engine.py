@@ -1510,7 +1510,7 @@ class Workshop:
                *thinking, "--dangerously-skip-permissions",
                "--append-system-prompt-file", str(self.prompt_path(project)), "--system-prompt-snapshot", "off",
                "--add-dir", self.project(project).primary, "--settings", self.lane_settings()]
-        for config in (self.house_mcp_config(), self.purple_mcp_config()):       # the house's tools, then purple's (services/purple-tools)
+        for config in (self.house_mcp_config(), self.purple_mcp_config(), self.folder_mcp_config(self.project(project))):   # the house's tools, purple's, then the folder's own
             if config:
                 cmd += ["--mcp-config", config]
         if session:
@@ -1550,10 +1550,42 @@ class Workshop:
             return None
         return self._write_state_file("purple-tools-mcp.json", json.dumps({"mcpServers": {"purple-tools": {"type": "stdio", "command": python.as_posix(), "args": [server.as_posix()], "alwaysLoad": True}}}, indent=1))
 
-    def core_mcp_config(self, house: bool, purple: bool, purple_only: list[str] | None = None) -> str | None:
+    def folder_mcp_servers(self, project) -> dict:
+        """The MCP servers a folder opened in place brings with it: the `mcpServers` of its own `.mcp.json` (the Captain, 2026-11-13: the Factorio
+        mod's `skippy-copilot` is the game's hands, and purple must have them as Fable does). Claude Code's `-p` mode does not load a project's
+        .mcp.json (it needs a trust prompt nobody can answer), so the bridge hands them over. Only for a folder (id f-<slug>): a registered project's
+        own servers stay as they are. Each server starts in the folder (relative `python -m pkg` needs it) and loads at once. {} when there are none."""
+        pid = getattr(project, "id", "") or ""
+        if not pid.startswith(projects_mod.FOLDER_PREFIX):
+            return {}
+        folder = Path(project.clone)
+        try:
+            found = json.loads((folder / ".mcp.json").read_text(encoding="utf-8")).get("mcpServers") or {}
+        except (OSError, ValueError, AttributeError):
+            return {}
+        servers = {}
+        for name, spec in found.items():
+            if not isinstance(spec, dict):
+                continue
+            spec = dict(spec)
+            if spec.get("type", "stdio") == "stdio":
+                spec.setdefault("cwd", folder.as_posix())
+            spec.setdefault("alwaysLoad", True)
+            servers[str(name)] = spec
+        return servers
+
+    def folder_mcp_config(self, project) -> str | None:
+        """folder_mcp_servers() as a config file for `--mcp-config`, or None when the folder brings none."""
+        servers = self.folder_mcp_servers(project)
+        return self._write_state_file(f"folder-mcp-{project.id}.json", json.dumps({"mcpServers": servers}, indent=1)) if servers else None
+
+    def core_mcp_config(self, house: bool, purple: bool, purple_only: list[str] | None = None, project=None) -> str | None:
         """One MCP config file holding only the servers switched on (the SDK engine takes a single one), or None when none is. `purple_only`
-        names the purple-tools to expose (the server's PURPLE_TOOLS_ONLY: a tool outside it is neither listed nor callable); none = all of them."""
+        names the purple-tools to expose (the server's PURPLE_TOOLS_ONLY: a tool outside it is neither listed nor callable); none = all of them.
+        `project`'s own servers (folder_mcp_servers) are always added."""
         servers: dict = {}
+        if project is not None:
+            servers.update(self.folder_mcp_servers(project))
         for wanted, make in ((house, self.house_mcp_config), (purple, self.purple_mcp_config)):
             path = make() if wanted else None
             if path:
