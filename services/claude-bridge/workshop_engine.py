@@ -76,6 +76,17 @@ REMOTE = os.getenv("WORKSHOP_REMOTE", "D:/trunk/git/skippy-tel.git")      # Skip
 SESSIONS = os.getenv("WORKSHOP_SESSIONS", os.path.join(os.path.dirname(REPO), ".skippy-workshop-sessions.json"))
 PROMPT_FILE = Path(__file__).with_name("workshop_prompt.md")
 PURPLE_TOOLS_SERVER = Path(__file__).resolve().parents[1] / "purple-tools" / "server.py"     # web search, Mentat, pop-ups, PDF, browser (an MCP server)
+
+
+def house_http_url(probe=None) -> str | None:
+    """The shared house MCP's URL (HOUSE_MCP_URL, default http://127.0.0.1:47861/mcp) when it answers /health, else None (a run then starts its own stdio copy)."""
+    import urllib.request                                                       # noqa: PLC0415
+    url = (os.environ.get("HOUSE_MCP_URL") or "http://127.0.0.1:47861/mcp").strip()
+    try:
+        with (probe or urllib.request.urlopen)(url.rsplit("/", 1)[0] + "/health", timeout=1.0) as r:    # noqa: S310 — this PC
+            return url if getattr(r, "status", 200) == 200 else None
+    except Exception:                                                           # noqa: BLE001 — down means the stdio copy
+        return None
 PROMPT_NAME = ".skippy-workshop-prompt.txt"   # the prompt as claude reads it ({repo}/{primary} filled in), next to the sessions file
 ENV_FILES = ("G:/My Drive/vault/.env",)        # where SKIPPY_HOME_TOKEN lives if the environment doesn't have it
 
@@ -1522,6 +1533,9 @@ class Workshop:
     def house_mcp_config(self) -> str | None:
         """The house's tools for every run, either brain (services/satellite/house_mcp.py on the satellite's venv: lights and switches,
         HomeKit, Matter, Leviton). None, and the run goes without them, until that venv exists. Written next to the runs."""
+        url = house_http_url()
+        if url:                                    # the shared house MCP (SkippyHouseMcp, tools/house_mcp_run.sh): ONE house with its connections, not one built per run
+            return self._write_state_file("house-mcp.json", json.dumps({"mcpServers": {"skippy-house": {"type": "http", "url": url, "alwaysLoad": True}}}, indent=1))
         satellite = Path(__file__).resolve().parents[1] / "satellite"
         python, server = satellite / ".venv" / "Scripts" / "python.exe", satellite / "house_mcp.py"
         if not (python.is_file() and server.is_file()):

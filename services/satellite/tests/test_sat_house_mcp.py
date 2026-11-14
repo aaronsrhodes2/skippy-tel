@@ -53,3 +53,36 @@ def test_music_tools_go_to_the_radio_not_the_house():
 
 def test_a_radio_that_is_down_is_a_sentence():
     assert "not answering" in house_mcp.radio_tool("music", {"action": "what"}, url="http://127.0.0.1:9", timeout=2)
+
+
+def test_the_http_door_needs_a_key_off_loopback_and_speaks_mcp():
+    import json
+    import threading
+    import urllib.request
+
+    import pytest
+    with pytest.raises(SystemExit):
+        house_mcp.make_http_server("0.0.0.0", 0, lambda: None)
+    lamp = Lamp()
+    server = house_mcp.make_http_server("127.0.0.1", 0, lambda: lamp, key="door-key")
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}/mcp"
+
+    def post(body, key=None):
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), method="POST",
+                                     headers={"Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, json.loads(r.read() or b"null")
+        except urllib.error.HTTPError as e:
+            return e.code, None
+    try:
+        listing = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        assert post(listing)[0] == 401 and post(listing, "wrong")[0] == 401
+        status, reply = post(listing, "door-key")
+        assert status == 200 and "home_control" in {t["name"] for t in reply["result"]["tools"]}
+        call_it = {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "home_control", "arguments": {"name": "desk lamp", "action": "on"}}}
+        assert post(call_it, "door-key")[1]["result"]["content"][0]["text"].startswith("Done") and lamp.calls
+        assert post({"jsonrpc": "2.0", "method": "notifications/initialized"}, "door-key")[0] == 202
+    finally:
+        server.shutdown()
