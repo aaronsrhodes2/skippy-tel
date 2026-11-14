@@ -1,0 +1,32 @@
+{
+ "n": 42,
+ "title": "Purple's setup of 2026-11-14: a train in 36 versions (one run, unreviewed)",
+ "model": "Purple Skippy: Claude Code on Skippy Core's coder (Qwen3.6-35B-A3B, MTP, Q8), local and free, the same message as v5 word for word",
+ "prompt": "a choo-choo train",
+ "comparable": true,
+ "blocks": 97985,
+ "minutes": 191,
+ "size": "121 x 57 x 236",
+ "verdict": "One run, unreviewed: no reviewer score and no blind judge yet. It ran 191 minutes over 461 turns, committed 36 versions and ended on its own with 'Build v36 committed. Done.', with no error and no push attempt. The build is 97,985 blocks and runs clean in the MineBench runtime.",
+ "stats": {
+  "started": "2026-11-14T18:36:23.496Z",
+  "minutes": 191,
+  "tokens": {
+   "input": 452599,
+   "cache_read": 26946448,
+   "output": 522634,
+   "total": 27921681
+  },
+  "models": [
+   {
+    "name": "Qwen3.6-35B-A3B (Skippy Core's coder slot: MTP, Q8_0)",
+    "tokens": {
+     "input": 452599,
+     "cache_read": 26946448,
+     "output": 522634
+    }
+   }
+  ]
+ },
+ "series": "purple1114"
+}

@@ -256,6 +256,9 @@ RADIANCE_SHOWCASE_SNIPPET = """
 # Runs come in series (run.json "series", "tuned" when absent), newest series first, each in the order its runs happened. The first
 # eleven are the tuned branch: by the Captain's call (2026-10-31) its tooling had tainted the comparison, so the fresh start began.
 MINEBENCH_SERIES = (
+    ("purple1114", "Purple's setup of 2026-11-14", "One run, 2026-11-14, under purple Skippy's current setup rather than a vanilla agent: the prompt of 39c3ffce, "
+     "the stop gates of 77a8f798 and the guards through eb059906, with the earlier rematch's hooks (eyes, reference, the finish gate) plus the lane guard "
+     "and purple's own hooks. Skippy Core's coder, \"a choo-choo train\", one build with no rival and no blind judge yet."),
     ("reference", "Look at the real thing first", "Four rounds, 2026-11-04, after the fault loop's reviewer passed builds a blind judge lost: "
      "the same coder, message, prompt and loop, and a reference before it starts. Core's big model turns the task into an image search, "
      "picks the best three real photos (Wikimedia Commons: the web's own search gave cartoon trains with faces) and writes what all three "
