@@ -185,7 +185,7 @@ def test_each_project_has_its_own_rules_file_and_rules(multi):
     assert multi.project("other").clone in other and multi.project("other").primary in other
     for text in (own, other):
         assert "{{" not in text and "{repo}" not in text and "{branch}" not in text
-        assert "## Guardrails" in text and "Never print or paste a secret" in text
+        assert "## Guardrails" in text and "Showing one inside your own run is fine" in text
     assert "services/claude-bridge/" in own.split("## Guardrails")[1]
     assert "services/claude-bridge/" not in other.split("## Guardrails")[1]
     finish(multi.start("aaaaaaaa", "conv-12345678", "x", project="other"))
