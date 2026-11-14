@@ -108,6 +108,9 @@ def setup(task: dict, player: str, run: Path, gates: bool) -> tuple[list, dict, 
     hooks = {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
                              "hooks": [{"type": "command", "command": f'{py} "{BRIDGE}/lane_guard.py"', "timeout": 10}]}]}
     if gates:                                    # purple's own per-tool hooks (the three rules' guard, the loop breaker), as the engines wire them
+        # A Core run's Read of a picture goes through eyes.py (the coder is text-only; without it Core answers "image input is not supported" and the
+        # run dies: SkippyTel-99cd5b60 did, 2026-11-14).
+        hooks["PreToolUse"].append({"matcher": "Read", "hooks": [{"type": "command", "command": f'{py} "{BRIDGE}/eyes.py"', "timeout": 200}]})
         try:
             import purple_hooks
             for event, more in purple_hooks.entries(sys.executable).items():
@@ -176,7 +179,7 @@ def ending(log: Path) -> dict:
     """From the stream-json log: the last words, whether they ask the Captain something, and turns, output tokens and working
     minutes summed over every `result` event (a background shell finishing wakes the session again, so one run can have several;
     the pilot's Haiku had five, and the last one's counts alone said 10 turns for a 32-turn run)."""
-    final, turns, out, ms, results = "", 0, 0, 0, 0
+    final, turns, out, ms, results, aborted = "", 0, 0, 0, 0, False
     for line in log.read_text(encoding="utf-8", errors="replace").splitlines():
         try:
             e = json.loads(line)
@@ -187,12 +190,13 @@ def ending(log: Path) -> dict:
                 return {"void": str(e.get("result") or "an API error")[:200]}   # refused at once (out of credit): no run, play it again
             results += 1
             final = str(e.get("result") or "")
+            aborted = bool(e.get("is_error")) and final.startswith("API Error")      # the server failed under the run: not an ending the run chose
             turns += int(e.get("num_turns") or 0)
             out += int((e.get("usage") or {}).get("output_tokens") or 0)
             ms += int(e.get("duration_ms") or 0)
     tail = final.strip()[-600:]
     return {"on_its_own": bool(tail) and not ASKED.search(tail[-300:]), "turns": turns, "output_tokens": out,
-            "work_minutes": round(ms / 60000, 1), "results": results, "last_words": tail}
+            "work_minutes": round(ms / 60000, 1), "results": results, "last_words": tail, "aborted": aborted}
 
 
 def play(task: dict, player: str, tag: str, timeout_min: int, gates: bool) -> dict:
@@ -218,6 +222,8 @@ def play(task: dict, player: str, tag: str, timeout_min: int, gates: bool) -> di
     row["ending"] = judged(task, row["last_words"])
     if row["ending"]:                                           # Core's judge (hanging.judge, purple's own stop gate) over the regex
         row["on_its_own"] = row["ending"] == "done"
+    if row.get("aborted"):                                      # an API error is no "done": the run was cut off by the server
+        row["ending"], row["on_its_own"] = "aborted", False
     if code == "timeout":                                       # cut off while working (no answer yet), or while waiting on a
         row["on_its_own"] = row["on_its_own"] and row["results"] > 0     # background shell after one: that answer still stands
     return row
