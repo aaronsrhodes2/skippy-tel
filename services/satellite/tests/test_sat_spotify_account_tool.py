@@ -1,4 +1,4 @@
-"""purple's `spotify` tool: words in, the spotify container's API (services/spotify/service.py) out."""
+"""the house MCP's `spotify_account` tool (was purple's `spotify`): words in, the spotify container's API (services/spotify/service.py) out."""
 import sys
 from pathlib import Path
 
@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import tools  # noqa: E402
+import house_portal_tools as tools  # noqa: E402
 
 URI = "spotify:track:" + "a" * 22
 
@@ -42,4 +42,4 @@ def test_a_refusal_comes_back_as_its_words():
     req, _ = fake({"/playlists": (503, {"error": "not signed in to Spotify yet"})})
     with pytest.raises(ValueError, match="not signed in"):
         tools.spotify({"action": "playlists"}, request=req)
-    assert tools.call("spotify", {"action": "nonsense"})[1] is True
+    assert tools.call("spotify_account", {"action": "nonsense"})[1] is True

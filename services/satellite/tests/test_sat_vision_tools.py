@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import tools  # noqa: E402
+import house_portal_tools as tools  # noqa: E402
 
 JPEG = b"\xff\xd8\xff\xe0" + b"j" * 30
 PNG = b"\x89PNG\r\n\x1a\n" + b"p" * 30

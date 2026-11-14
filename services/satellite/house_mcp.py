@@ -43,7 +43,8 @@ def radio_tool(name: str, args: dict, url: str | None = None, timeout: float = 6
 
 def tool_list() -> list[dict]:
     from house import TOOLS                                         # noqa: PLC0415
-    return [{"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]} for t in [*TOOLS, *music_tools()]]
+    import house_portal_tools                                       # noqa: PLC0415
+    return [{"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]} for t in [*TOOLS, *music_tools()]] + house_portal_tools.tool_list()
 
 
 def handle(msg: dict, house_of, radio=radio_tool) -> dict | None:
@@ -61,6 +62,10 @@ def handle(msg: dict, house_of, radio=radio_tool) -> dict | None:
         args = dict(params.get("arguments") or {})
         args.pop("confirm", None)                                   # never from text: only his voice confirms a lock
         name = str(params.get("name") or "")
+        import house_portal_tools                                   # noqa: PLC0415
+        if name in house_portal_tools.TOOLS:                        # favorites, Spotify account, vision moments, his text code: portal-side, no house needed
+            text, is_error = house_portal_tools.call(name, args)
+            return {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": text}], "isError": is_error}}
         if name in {t["name"] for t in music_tools()}:
             text = radio(name, args)                                # music needs no house at all: the radio plays it
         else:

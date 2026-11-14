@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import tools  # noqa: E402
+import house_portal_tools as tools  # noqa: E402
 
 
 def ask(answer, status=200):
@@ -49,8 +49,9 @@ def test_a_portal_that_refuses_is_an_error_in_words(monkeypatch):
     assert err is True and "answered 502" in text
 
 
-def test_it_is_offered_to_the_agent_and_takes_no_arguments(monkeypatch):
-    monkeypatch.setenv("PURPLE_TOOLS_ONLY", "texts_latest_code")
+def test_it_is_offered_by_the_house_mcp_and_takes_no_arguments():
+    import house_mcp
     tool = tools.TOOLS["texts_latest_code"]
     assert tool["input_schema"]["properties"] == {} and "verification code" in tool["description"]
-    assert list(tools.offered()) == ["texts_latest_code"]
+    listed = {t["name"] for t in house_mcp.handle({"id": 1, "method": "tools/list"}, lambda: None)["result"]["tools"]}
+    assert {"texts_latest_code", "bilby_favorite", "vision_flash", "vision_moment", "spotify_account", "home_control"} <= listed

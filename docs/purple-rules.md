@@ -59,10 +59,10 @@ If the goal can only be reached by breaking one of the three, purple leaves that
 | **Skill, ListSkills, SearchSkills** | yes | none | skills that call paid services follow rule 2 | none | prompt |
 | **MCP `mentat`** (physics) | yes, free, local | none | none | every physical number comes from Mentat with its `source` (PLATINUM §21) | prompt, Mentat's own guards |
 | **MCP purple-tools: `ask_mentat`, `mentat_tool(s)`** | yes | none | none | as above | prompt |
-| **`bilby_favorite`, `spotify`** | playing, queueing, saving his tracks | never read his listening data out to a public place | no purchase, plan change or Premium upsell | report what actually played | tool code |
+| **MCP skippy-house: `bilby_favorite`, `spotify_account`** | playing, queueing, saving his tracks | never read his listening data out to a public place | no purchase, plan change or Premium upsell | report what actually played | tool code |
 | **`car_charge`, `car_sentry`** | yes (physical, reversible) | location and state stay private | the Tesla Fleet API is metered beyond a free allowance: use only when the task needs it, never in a loop | say what the car did, from its reply | tool code, `docs/tesla.md` |
-| **`vision_flash`, `vision_moment`** | yes (local screens/cameras) | the pictures are the Captain's alone: never posted, committed or sent out | none | describe what is in the picture, not what was expected | tool code |
-| **`texts_latest_code`** | yes, for him | a code/text is never repeated in a public place or a commit | none | none | tool code |
+| **MCP skippy-house: `vision_flash`, `vision_moment`** | yes (local screens/cameras) | the pictures are the Captain's alone: never posted, committed or sent out | none | describe what is in the picture, not what was expected | tool code |
+| **MCP skippy-house: `texts_latest_code`** | yes, for him | a code/text is never repeated in a public place or a commit | none | none | tool code |
 | **MCP skippy-house: `home_control`, `home_devices`, `home_state`, `speakers`, `music`, `play_music`, `dj_mode`, `audiobook`, `spotify`** | lights, plugs, music, rooms | house state (who is home, cameras) never leaves the machine | none | say what was switched, from the read-back | house code; the garage door and locks keep their existing spoken-yes gate |
 | **Pop-ups** (`SKIPPY_POPUP`, `make_image`, `make_music`) | yes: local models | prompts carry no secret | local only: a pop-up that would call a paid API is not run | show what was made | `popup-gate` |
 | **Discord / email / SMS to anyone** | only to the Captain (his DM) | a message to anyone else is a public-ish channel | none | never poses as him | `purple_guard.py` (**decision 1** below) |

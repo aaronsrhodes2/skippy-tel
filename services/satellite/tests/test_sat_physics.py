@@ -46,10 +46,26 @@ def test_the_answer_is_the_value_with_its_units_how_mentat_read_it_and_a_short_s
     p, sent = make(ESCAPE)
     said = p.run({"question": "What is the escape velocity of the Earth?"}, room="living", trace="house-living-1")
     assert said.startswith("Mentat's answer: 11186 m/s. Mentat read the question as: escape_velocity(body_name='earth'). Source: sigma-ground (classical escape velocity). Provenance: DERIVED.")
-    assert "Note: Earth: GM 398600.435507" in said and "Velocity needed to escape" in said and "calculate or convert it yourself" in said
-    assert "11186.1" not in said and "JPL DE440 header (header.440; Park" not in said.split("Note:")[0]               # five digits, and the source is its first clause
+    assert "Note:" not in said and "398600" not in said and "Velocity needed to escape" not in said and "calculate or convert it yourself" in said          # the card's notes are not said (below)
+    assert "11186.1" not in said and "JPL DE440" not in said                                                                                            # five digits, and the source is its first clause
     assert sent == [{"url": "http://skippy-core:7350/ask", "body": {"question": "What is the escape velocity of the Earth?"}, "timeout": physics.ASK_TIMEOUT_S,
                      "headers": {"X-Skippy-Caller": "house-voice", "X-Skippy-Trace": "house-living-1"}}]
+
+
+def test_a_note_is_left_out_when_the_reading_names_the_call_and_kept_when_it_is_the_one_account_of_what_was_computed():
+    # the real Mars answer: its note says "a Fact-Sheet-era radius", and Core said "via NASA Planetary Fact Sheet 2024" in every run (the Source line was sigma-ground)
+    mars = {"ok": True, "result": {"units": "m/s", "value": 5027.0001, "interpreted_as": "escape_velocity(body_name='mars')", "source": "sigma-ground (classical escape velocity)",
+                                   "notes": "Mars: GM 42828.375662 km^3/s^2 (MAR097). radius 3389.5 km (predictor table: a Fact-Sheet-era radius, not independently sourced), at the surface."}}
+    said = make(mars)[0].run({"question": "escape velocity of mars"})
+    assert "Source: sigma-ground (classical escape velocity)." in said and "Fact-Sheet" not in said and "Note:" not in said
+    cascade = {"ok": True, "result": {"units": "s", "value": 499.00478383615643, "interpreted_as": "astro_classifier", "source": "sigma-ground benchmark cascade (astro_classifier)",
+                                      "notes": "ANSWER: 499.0 s Computed via astro_classifier: light_travel_time (t = d / c over 1 AU (Sun to Earth, IAU 2012): 499 s)"}}
+    said = make(cascade)[0].run({"question": "how long does light take from the sun"})
+    assert said.startswith("Mentat's answer: 499 s. Mentat read the question as: astro_classifier. Source: sigma-ground benchmark cascade (astro_classifier).")
+    assert "Note: ANSWER: 499.0 s Computed via astro_classifier: light_travel_time" in said                                                                 # no call in the reading: the note says what ran
+    bare = {"ok": True, "result": {"units": "K", "value": 373.15, "source": "sigma-ground", "notes": "Boiling point of water at 1 atm."}}
+    assert "Note: Boiling point of water at 1 atm." in make(bare)[0].run({"question": "boiling point of water"})                                               # no reading at all: the note stays
+    assert physics.named_call("kinetic_energy(mass_kg=1500, velocity_m_s=26.8224)") and not physics.named_call("thermo_classifier") and not physics.named_call(None)
 
 
 def test_numbers_are_said_to_five_digits_an_exact_one_whole_and_a_huge_one_in_words():
