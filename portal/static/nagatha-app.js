@@ -760,7 +760,7 @@
   $("#p-vol").addEventListener("input", e => { S.prefs.vol = +e.target.value; if (S.prefs.vol > 0) S.prefs.muted = false; applyVolume(); savePrefs(); });
 
   video.addEventListener("timeupdate", () => {
-    S.lastTimeAt = Date.now();
+    if (video.readyState >= 3) S.lastTimeAt = Date.now();        // only count progress, not the 250ms-after-waiting noise that defeats the stall rule
     paintTime();
     report(P.progress.tick(video.currentTime, !video.paused));
     if (Date.now() - P.lastLocal > 5000) { P.lastLocal = Date.now(); keepLocal(video.currentTime); }
