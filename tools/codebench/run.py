@@ -90,6 +90,12 @@ def checkout(task: dict, work: Path) -> None:
     for cmd in (["git", "init", "-q"], ["git", "config", "user.name", "Aaron Rhodes"], ["git", "config", "user.email", "aaron.s.rhodes@gmail.com"],
                 ["git", "config", "core.autocrlf", "false"], ["git", "add", "-A"], ["git", "commit", "-qm", "the starting point"]):
         subprocess.run(cmd, cwd=work, check=True, capture_output=True)
+    # A benchmark folder never pushes (found 2026-11-14: the coder added the real repos as remotes from the project's CLAUDE.md and pushed,
+    # one of them a force-push over a GitHub branch, with the Captain's own git login). The task says "never push"; this makes it true.
+    hook = work / ".git" / "hooks" / "pre-push"
+    hook.parent.mkdir(exist_ok=True)
+    hook.write_text("#!/bin/sh\necho 'This is a benchmark folder: it has no remote and never pushes. Commit locally and finish.' >&2\nexit 1\n", encoding="utf-8", newline="\n")
+    hook.chmod(0o755)
 
 
 def setup(task: dict, player: str, run: Path, gates: bool) -> tuple[list, dict, Path]:
