@@ -116,7 +116,7 @@ def test_the_drive_page_does_not_wait_for_an_error_a_stalled_door_never_raises()
     the wait itself: STALL_MS in `waiting` on the door, and the same song goes on from the Funnel."""
     text = (STATIC / "drive-app.js").read_text(encoding="utf-8")
     assert re.search(r"const STALL_MS = \d+;", text)
-    assert re.search(r'au\.addEventListener\("waiting",.{0,160}?!au\.paused && au\.readyState < 3\) resumeOnFunnel\(\)', text, re.S)
+    assert re.search(r'au\.addEventListener\("waiting",.{0,200}?setTimeout\(resumeOnFunnel, STALL_MS\)', text, re.S)
     assert re.search(r'\["playing", "pause", "emptied", "ended", "error"\]\.forEach\(ev => au\.addEventListener\(ev, unstall\)\)', text)
 
 
@@ -125,7 +125,7 @@ def test_the_book_and_film_players_do_not_wait_for_an_error_a_cut_door_takes_a_m
     closing never did; a film's stall rule was defeated by the `timeupdate` Chrome fires about 250 ms AFTER `waiting`, so it too waited for the element's error (74 s)."""
     books = (STATIC / "audiobooks-app.js").read_text(encoding="utf-8")
     assert "function resumeOnFunnel" in books and re.search(r"const STALL_MS = \d+;", books)
-    assert re.search(r'au\.addEventListener\("waiting",.{0,160}?!au\.paused && au\.readyState < 3\) resumeOnFunnel\(\)', books, re.S)
+    assert re.search(r'au\.addEventListener\("waiting",.{0,200}?setTimeout\(resumeOnFunnel, STALL_MS\)', books, re.S)
     assert re.search(r'\["playing", "pause", "emptied", "ended", "error"\]\.forEach\(ev => au\.addEventListener\(ev, unstall\)\)', books)
     films = (STATIC / "nagatha-app.js").read_text(encoding="utf-8")
     assert re.search(r'video\.addEventListener\("stalled", \(\) => \{ if \(P\.item && !video\.paused\) S\.waitingAt = Date\.now\(\); \}\);', films)
