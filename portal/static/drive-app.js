@@ -277,7 +277,7 @@
     return true;
   }
   au.addEventListener("error", () => { if (resumeOnFunnel()) return; if (S.mode === "discovery" || S.mode === "library") setTimeout(nextSong, 800); });
-  au.addEventListener("waiting", () => { clearTimeout(stallTimer); if (!au.paused && au.readyState < 3) resumeOnFunnel(); });
+  au.addEventListener("waiting", () => { clearTimeout(stallTimer); if (!au.paused && au.readyState < 3) stallTimer = setTimeout(resumeOnFunnel, STALL_MS); });
   ["playing", "pause", "emptied", "ended", "error"].forEach(ev => au.addEventListener(ev, unstall));
   au.addEventListener("timeupdate", () => {
     $("#now-bar i").style.width = au.duration ? (100 * au.currentTime / au.duration).toFixed(2) + "%" : "0";

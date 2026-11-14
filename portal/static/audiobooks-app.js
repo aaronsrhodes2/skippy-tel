@@ -68,7 +68,7 @@
     au.play().catch(() => {});
     return true;
   }
-  au.addEventListener("waiting", () => { clearTimeout(stallTimer); if (!au.paused && au.readyState < 3) resumeOnFunnel(); });
+  au.addEventListener("waiting", () => { clearTimeout(stallTimer); if (!au.paused && au.readyState < 3) stallTimer = setTimeout(resumeOnFunnel, STALL_MS); });
   ["playing", "pause", "emptied", "ended", "error"].forEach(ev => au.addEventListener(ev, unstall));
 
   async function boot(again) {
