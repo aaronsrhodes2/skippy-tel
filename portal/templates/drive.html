@@ -47,13 +47,13 @@
   #k-lib .g { color: #ff6a00; filter: drop-shadow(0 0 4px #c00000); }
   #k-lib .g.sub { color: #ff2a00; }
   @media (prefers-reduced-motion: reduce) { #k-disc .plate, #k-disc .g { animation: none; } }
-  /* the trio: play/pause, next and the star stacked in one key, a third each, split by two lines */
+  /* the trio: play/pause, back 30, fwd 30 and the star stacked in one key, a quarter each, split by three lines */
   #k-play .trio { position: relative; z-index: 1; display: flex; flex-direction: column; width: 100%; height: 100%; align-items: center; justify-content: space-around; }
   #k-play .trio .g { width: auto; height: 22%; max-width: 60%; aspect-ratio: 1; }
   #k-play .trio .fav-g { color: var(--amber); }
   #k-play .split { position: absolute; z-index: 1; left: 18%; right: 18%; height: 1px; background: var(--accent); opacity: .5; }
-  #k-play .split.s1 { top: 33.3%; } #k-play .split.s2 { top: 66.6%; }
-  #k-play .hit.play { bottom: 66.6%; } #k-play .hit.next { top: 33.3%; bottom: 33.3%; } #k-play .hit.fav { top: 66.6%; }
+  #k-play .split.s1 { top: 25%; } #k-play .split.s2 { top: 50%; } #k-play .split.s3 { top: 75%; }
+  #k-play .hit.play { bottom: 75%; } #k-play .hit.back { top: 50%; bottom: 50%; } #k-play .hit.next { top: 25%; bottom: 25%; } #k-play .hit.fav { top: 75%; }
   #k-skippy .face { position: relative; z-index: 1; height: 86%; aspect-ratio: 1; max-width: 92%; }
   #k-skippy .face img, #k-skippy .face canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
   #k-skippy .face canvas { opacity: 0; } #k-skippy.live .face canvas { opacity: 1; } #k-skippy.live .face img { display: none; }
@@ -128,9 +128,10 @@
     {# The trio (the Captain, 2026-11-02): play/pause, next and the star are one key, down the left edge, nearest the driver's hand #}
     <div class="unit" id="k-play" style="--i: 0">
       <i class="plate"></i><i class="claws"><b></b><b></b><b></b></i><span class="lamp"></span>
-      <span class="trio"><svg class="g" aria-hidden="true"><use id="k-play-g" href="#g-play"/></svg><svg class="g" aria-hidden="true"><use id="k-next-g" href="#g-next"/></svg><svg class="g fav-g" aria-hidden="true"><use href="#g-star"/></svg></span>
-      <i class="split s1"></i><i class="split s2"></i>
+      <span class="trio"><svg class="g" aria-hidden="true"><use id="k-play-g" href="#g-play"/></svg><svg class="g" aria-hidden="true"><use id="k-back-g" href="#g-back30"/></svg><svg class="g" aria-hidden="true"><use id="k-next-g" href="#g-next"/></svg><svg class="g fav-g" aria-hidden="true"><use href="#g-star"/></svg></span>
+      <i class="split s1"></i><i class="split s2"></i><i class="split s3"></i>
       <button class="hit play" type="button" aria-label="Play or pause" data-tel="drive:play-or-pause"></button>
+      <button class="hit back" type="button" aria-label="Back 30 seconds" data-tel="drive:back-30"></button>
       <button class="hit next" type="button" aria-label="Next song, or 30 seconds on in the book" data-tel="drive:next-song-or-30"></button>
       <button class="hit fav" type="button" aria-label="Add this song to my favorites" data-tel="drive:favorite"></button>
     </div>

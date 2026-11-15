@@ -26,6 +26,7 @@
     const row = S.sp && S.sp.row;
     $("#k-play-g").setAttribute("href", (row ? row.paused : au.paused) ? "#g-play" : "#g-pause");
     $("#k-next-g").setAttribute("href", S.mode === "book" ? "#g-fwd30" : "#g-next");
+    $("#k-back-g").setAttribute("href", S.mode === "book" ? "#g-back30" : "#g-back30");
   }
 
   // ── ducking: this page's own player follows Skippy's voice ──
@@ -360,6 +361,7 @@
       now("star", "In your favorites: " + (info.t || track) + (info.a ? " · " + info.a : ""));
     } catch (e) { $("#k-play").dataset.s = "warn"; setTimeout(() => { delete $("#k-play").dataset.s; }, 4000); now("star", "Not saved: " + (e.message || e)); }
   }));
+  $("#k-play .hit.back").addEventListener("click", back);
   $("#k-play .hit.next").addEventListener("click", next);
   key("#k-play", () => {
     const row = S.sp.row;
