@@ -25,7 +25,6 @@
     lit("#k-book", S.mode === "book"); lit("#k-disc", S.mode === "discovery"); lit("#k-lib", S.mode === "library");
     const row = S.sp && S.sp.row;
     $("#k-play-g").setAttribute("href", (row ? row.paused : au.paused) ? "#g-play" : "#g-pause");
-    $("#k-next-g").setAttribute("href", S.mode === "book" ? "#g-fwd30" : "#g-next");
     $("#k-back-g").setAttribute("href", S.mode === "book" ? "#g-back30" : "#g-back30");
   }
 
@@ -328,19 +327,19 @@
   if ("mediaSession" in navigator) {
     const set = (a, f) => { try { navigator.mediaSession.setActionHandler(a, () => { heard(a); f(); }); } catch (e) { /* not here */ } };
     set("play", () => play()); set("pause", () => stopHere());
-    set("nexttrack", () => next()); set("seekforward", () => next());
+    set("nexttrack", () => nextSong()); set("seekforward", () => back7());
     set("previoustrack", () => back()); set("seekbackward", () => back());
   }
-  const KNOB = { MediaTrackNext: next, MediaFastForward: next, MediaTrackPrevious: back, MediaRewind: back };
+  const KNOB = { MediaTrackNext: nextSong, MediaFastForward: back7, MediaTrackPrevious: back, MediaRewind: back };
   document.addEventListener("keydown", e => {
     if (!/^(Media|Audio|Arrow)/.test(e.key)) return;
     heard("key-" + e.key.toLowerCase().replace(/[^a-z0-9]+/g, "").slice(0, 30));
-    if (KNOB[e.key]) { e.preventDefault(); KNOB[e.key](); }
+    if (KNOB[e.key]) { e.preventDefault(); KNOB[e.key](); } else if (e.key === "ArrowRight" && S.mode === "book") { e.preventDefault(); back7(); }
   });
 
   // ── the keys ──
-  function next() {
-    if (S.mode === "book") { au.currentTime = Math.min((au.duration || 1e9) - 1, au.currentTime + 30); saveBook(true); }
+  function back7() {
+    if (S.mode === "book") { au.currentTime = Math.max(0, au.currentTime - 420); saveBook(true); }
     else if (S.mode) nextSong();
   }
   const key = (id, fn) => $(id + " .hit").addEventListener("click", fn);
@@ -349,20 +348,19 @@
   const busy = (id, work) => window.SkippyKeys ? SkippyKeys.busy($(id), work) : work();
   key("#k-disc", () => busy("#k-disc", () => shuffle("discovery")));
   key("#k-lib", () => busy("#k-lib", () => shuffle("library")));
-  // the star: this song into his favorites (the pool "Shuffle library" plays), Bilby's or a Spotify row
-  $("#k-play .hit.fav").addEventListener("click", () => busy("#k-play", async () => {
-    const it = (S.mode === "discovery" || S.mode === "library") ? S.q[S.qi] : null;
-    if (!it) { now("star", "Nothing playing to add: favorites are songs, not the book"); return; }
-    const track = it.path || it.uri;
-    const info = it.kind === "spotify" ? (S.sp.info.get(it.uri) || {}) : (S.lib.get(it.path) || {});
-    try {
-      await postJSON(cfg.favAdd, { track, title: info.t || "", artist: info.a || "", name: "the car" });
-      $("#k-play").dataset.s = "on"; setTimeout(() => { delete $("#k-play").dataset.s; }, 2500);
-      now("star", "In your favorites: " + (info.t || track) + (info.a ? " · " + info.a : ""));
-    } catch (e) { $("#k-play").dataset.s = "warn"; setTimeout(() => { delete $("#k-play").dataset.s; }, 4000); now("star", "Not saved: " + (e.message || e)); }
-  }));
+  // the star: set or clear a bookmark in the audiobook at the current position
+  $("#k-play .hit.fav").addEventListener("click", () => {
+    if (S.mode !== "book" || !au.src) { now("star", "No book playing to bookmark"); return; }
+    const bm = JSON.parse(localStorage.getItem("drive-bookmarks") || "{}");
+    const pos = Math.round(au.currentTime);
+    if (bm._) { delete bm._; now("star", "Bookmark cleared"); }
+    else { bm._ = pos; now("star", "Bookmark set at " + formatTime(pos)); }
+    localStorage.setItem("drive-bookmarks", JSON.stringify(bm));
+    $("#k-bm-g").setAttribute("href", bm._ ? "#g-bookmark" : "#g-back7");
+  });
+  function formatTime(s) { const m = Math.floor(s / 60); return m + ":" + String(Math.round(s % 60)).padStart(2, "0"); }
   $("#k-play .hit.back").addEventListener("click", back);
-  $("#k-play .hit.next").addEventListener("click", next);
+  $("#k-play .hit.bm").addEventListener("click", back7);
   key("#k-play", () => {
     const row = S.sp.row;
     if (row) {                                           // a Spotify row: the car's own player pauses, and plays on from where it was
@@ -777,5 +775,5 @@
   }
 
   paint();
-  window.DriveApp = { S, voice, get ear() { return ear; }, get vision() { return vision; }, shuffle, playBook, next, pollHouse, saveBook };
+  window.DriveApp = { S, voice, get ear() { return ear; }, get vision() { return vision; }, shuffle, playBook, back7, pollHouse, saveBook };
 })();

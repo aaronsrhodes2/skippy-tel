@@ -35,16 +35,16 @@ def test_the_voice_key_keeps_one_glyph():
 def test_drive_has_a_favorites_key():
     html = (PORTAL / "templates" / "drive.html").read_text(encoding="utf-8")
     js = (PORTAL / "static" / "drive-app.js").read_text(encoding="utf-8")
-    # one trio key down the left edge: play/pause, next, the star (the Captain, 2026-11-02), first in the deck
+    # one trio key down the left edge: play/pause, back30, back7/bookmark, star (the Captain, 2026-11-02), first in the deck
     deck = html[html.index('<div class="deck">'):]
     assert deck.index('id="k-play"') < deck.index('id="k-book"') and "#k-play { grid-column: 1; grid-row: 1 / span 2; }" in html
-    assert all(f'class="hit {h}"' in html for h in ("play", "next", "fav")) and "data-fav-add=" in html and "music.favorites_add" in html
-    assert "postJSON(cfg.favAdd" in js and 'busy("#k-lib"' in js and 'data-tap="' in html and "sendBeacon(cfg.tap" in js
+    assert all(f'class="hit {h}"' in html for h in ("play", "back", "bm", "fav")) and "#g-bookmark" in html
+    assert 'busy("#k-lib"' in js and 'data-tap="' in html and "sendBeacon(cfg.tap" in js
 
 
 def test_the_steering_wheel_knob_skips_whichever_signal_the_car_sends():
     js = (PORTAL / "static" / "drive-app.js").read_text(encoding="utf-8")
     for action in ("nexttrack", "seekforward", "previoustrack", "seekbackward"):
         assert f'set("{action}"' in js
-    assert "MediaTrackNext: next" in js and "MediaFastForward: next" in js
+    assert "MediaTrackNext: nextSong" in js and "MediaFastForward: back7" in js
     assert '"drive:in-" + what' in js and 'heard("system-pause")' in js      # one drive tells which signal the knob sends
