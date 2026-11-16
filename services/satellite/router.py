@@ -38,6 +38,7 @@ BLOCK = int(RATE * BLOCK_S)
 DUCK = 0.25
 RAMP = 0.15                       # how far a layer's gain moves per block (about 0.3 s from full to ducked)
 RESCAN_S = 20.0
+NET_RETRY_S = 0.3                 # while a voice clip waits, a missing network output is retried this often
 SLACK_S = 0.4                     # a sink more than this past its delay (its device runs slow) drops a block to catch up
 SOLO_DELAY_S = 0.15               # a room's only voice: the queue kept ahead of it, so a late mixer block never stutters (SATELLITE_SOLO_DELAY)
 
@@ -277,6 +278,7 @@ class Router:
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._last_scan = -1e9
+        self._last_net_try = -1e9
         self.autostart = autostart
         self.calibrator = None                                    # sync.Calibrator, set by shared(): measures each voice clip against the pod
         self.prefer = [c for c in (prefer or []) if len(c) > 1]   # ["enclave", "hdmi"]: the first of them that is open plays, the rest don't
@@ -411,6 +413,11 @@ class Router:
             self.scan()
         with self.lock:
             plays = list(self.plays.values())
+        if any(p.layer == "voice" and not p.started for p in plays) and now - self._last_net_try >= NET_RETRY_S:
+            self._last_net_try = now                              # Skippy is waiting on a network output that dropped: look again now, not in 20 s
+            for s in self.sinks.values():
+                if s.net and not s.open:
+                    s.try_open()
         voice = any(p.layer == "voice" for p in plays)
         if voice != self._voice_on:                               # an edge, once: a reply, an alarm, a timer or an announcement began, or the last of them ended
             self._voice_on = voice
@@ -491,6 +498,8 @@ def _reinit_portaudio() -> None:
 # That answer is kept fresh by a poller thread: net_find never blocks the mixer, which calls it from its own thread.
 NET_STATUS_PORT = 1780            # snapserver's JSON-RPC (tailnet only)
 NET_POLL_S = 3.0
+NET_MISSES = 3                    # polls in a row that must say "not playing" before the speaker counts as off (2026-11-16: one slow answer from
+                                  # skippy-core's snapserver closed the Enclave's output and the next voice clip was dropped, music ducked, no words)
 NET_LATENCY_S = 0.3               # snapserver's buffer (core/install/enclave.sh): the part known up front; the rest is measured
 NET_DITHER_LSB = 3                # a noise floor ~80 dB down, never exact digital zero: the Enclave's amp gated itself on silence and woke with a
                                   # scratch before every sound (the Captain, 2026-11-01). SATELLITE_NET_DITHER=0 turns it off
@@ -535,11 +544,15 @@ class NetWatch:
             threading.Thread(target=self._loop, daemon=True, name=f"net-watch-{host}").start()
 
     def _loop(self) -> None:
+        misses = 0
         while True:
             try:
-                self.playing = self.check(self.host)
+                now = self.check(self.host)
             except Exception:                                     # noqa: BLE001 — unreachable is just "not playing"
-                self.playing = None
+                now = None
+            misses = 0 if now else misses + 1
+            if now or misses >= NET_MISSES or self.playing is None:
+                self.playing = now                                # a speaker that played stays "playing" through a miss or two
             self.ready.set()
             time.sleep(NET_POLL_S)
 

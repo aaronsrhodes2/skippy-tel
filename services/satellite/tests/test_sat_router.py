@@ -392,3 +392,45 @@ def test_the_per_app_ducker_leaves_the_house_radios_process_alone(monkeypatch, t
     assert browser.v == 1.0
     pidfile.unlink()
     assert speaker_out.radio_pid() == 0                                         # no radio known: nothing special to skip
+
+
+def test_a_voice_clip_waiting_on_a_dropped_network_output_retries_it_at_once_not_at_the_next_scan():
+    """2026-11-16: the Enclave's output closed on one slow status poll; the clip waited for the 20 s rescan and was dropped (music ducked, no words)."""
+    w = World(present=())
+    t = {"now": 100.0}
+    r = rt.Router([("enclave", "tcp://core:4953", 0.0)], find=w.find, stream_factory=w.factory, reinit=w.reinit, log=lambda *a: None,
+                  clock=lambda: t["now"], autostart=False)
+    r._last_scan = t["now"]                                         # the scan just ran: the next one is 20 s away
+    p = r.play(rt.ClipSource(tone(1.0)), targets={"enclave"})
+    r.mix_once()
+    assert p.id in r.plays and not r.available("enclave")
+    w.present.add("tcp://core:4953")                                # the speaker answers again
+    t["now"] += 0.5
+    r.mix_once()
+    assert r.available("enclave") and p.started
+
+
+def test_one_missed_status_poll_does_not_turn_a_playing_speaker_off(monkeypatch):
+    answers = iter(["skippy-core", None, "skippy-core", None, None, None])
+    seen = []
+
+    class Stop(BaseException):
+        pass
+
+    def check(_host):
+        try:
+            return next(answers)
+        except StopIteration:
+            raise Stop
+
+    watch = rt.NetWatch("core", check=check, start=False)
+
+    def sleep(_s):
+        seen.append(watch.playing)
+    monkeypatch.setattr(rt.time, "sleep", sleep)
+    try:
+        watch._loop()
+    except Stop:
+        pass
+    assert seen[:4] == ["skippy-core"] * 4                         # one miss, a recovery, a second miss: still playing
+    assert seen[5] is None                                          # three misses in a row: off
