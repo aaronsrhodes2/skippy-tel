@@ -35,7 +35,7 @@
   const duck = window.SkippyDuck ? SkippyDuck.follow({ level: f => { au.volume = Math.max(0, Math.min(1, f)); }, paused: () => au.paused, resume: () => play() }) : null;
   au.addEventListener("pause", () => { if (!ours && !au.ended) heard("system-pause"); if (duck && !au.ended) duck.paused(ours); ours = false; if (S.mode === "book") saveBook(true); paint(); });
   au.addEventListener("play", paint);
-  const stopHere = () => { ours = true; au.pause(); };
+  const stopHere = () => { ours = true; au.pause(); if (window.AudioSession) AudioSession.reportStop(); };
   async function play() {
     try { await au.play(); if (S.tapWaits) $("#now-t").textContent = S.nowText || ""; S.tapWaits = false; }
     catch (e) { S.tapWaits = true; $("#now-t").textContent = (S.label || "") + (S.label ? " · " : "") + "tap anywhere"; }
@@ -70,6 +70,8 @@
     au.addEventListener("loadedmetadata", () => { au.currentTime = pos; }, { once: true });
     meta(b.t, b.a, "Audiobooks");
     await play();
+    if (window.AudioSession) AudioSession.reportPlay({ title: b.t, author: b.a, chapter: P.chapterAt(b.ch, pos),
+                                                        file_id: b.id, stream_url: bu(`a/${b.id}`), pos: pos || 0 });
   }
   // The car's place goes home every few seconds, marked as playing in the car, so the house resumes where the car stopped (and pauses its copy).
   const SAVE_MS = 5000;
@@ -255,6 +257,7 @@
     S.startAt = 0;
     meta(t.t, t.a, S.mode === "library" ? "Bilby Shuffle · library" : "Bilby Shuffle · discovery");
     await play();
+    if (window.AudioSession) AudioSession.reportPlay({ title: t.t, author: t.a, file_id: it.path, stream_url: mu("a", it.path) });
   }
   au.addEventListener("ended", () => { if (S.mode === "discovery" || S.mode === "library") nextSong(); else if (S.mode === "book") saveBook(true); });
   // The door gave out under a song or a book: the same one goes on from the Funnel, from where it stopped (static/direct.js). False when it was not on the door.
@@ -774,6 +777,9 @@
     setInterval(look, 15000);
   }
 
+  if (window.AudioSession) {
+    AudioSession.init({ source: "drive", onTakeover: function (src) { S.pauseAt = Date.now(); au.pause(); } });
+  }
   paint();
   window.DriveApp = { S, voice, get ear() { return ear; }, get vision() { return vision; }, shuffle, playBook, back7, pollHouse, saveBook };
 })();

@@ -219,6 +219,7 @@ def gather() -> dict:
     probes.start("health", core_health)
     probes.start("services", lambda: fetch(f"{API}/services"))
     probes.start("session", lambda: fetch(f"{API}/music/session"))
+    probes.start("audio", lambda: fetch(f"{API}/audio/session"))
     probes.start("bilby", bilby_state)
     # What people did on the portal lately (flask-api's site_events table); the Activity widget on /me shows it.
     probes.start("site_activity", lambda: fetch(f"{API}/telemetry/site_summary"))
@@ -236,6 +237,7 @@ def gather() -> dict:
     got = probes.finish()
     services = got.get("services") if isinstance(got.get("services"), dict) else {}
     session = got.get("session") if isinstance(got.get("session"), dict) else {}
+    audio  = got.get("audio") if isinstance(got.get("audio"), dict) else {}
     setlist = got.get("setlist") if isinstance(got.get("setlist"), list) else None
     up_next = got.get("up_next") if isinstance(got.get("up_next"), dict) else {}
     return {
@@ -245,6 +247,8 @@ def gather() -> dict:
                      for s in services.get("services", []) if isinstance(s, dict)],
         "music_session": {k: session.get(k) for k in
                           ("mode", "status", "now_playing", "queue_remaining", "source")} if session else None,
+        "audio_session": {k: audio.get(k) for k in
+                          ("session_id", "mode", "status", "now_playing", "source")} if audio else None,
         "bilby": bilby,
         "setlist": (setlist or [])[-20:],
         "up_next": up_next.get("track") if up_next.get("ok") else None,

@@ -75,6 +75,7 @@ def _empty_session() -> dict:
         "queue":       [],
         "history":     [],   # last 20 file_ids played (dedup in DJ)
         "dj_seed":     None,
+        "source":      None,   # "music", "audiobook", "drive" — which source owns the session
     }
 
 
@@ -109,7 +110,7 @@ def _session_response(sess: dict) -> dict:
         "status":           sess["status"],
         "now_playing":      sess["now_playing"],
         "queue_remaining":  len(sess.get("queue", [])),
-        "source":           "local" if bilby_local.available() else "drive",
+        "source":           sess.get("source") or ("local" if bilby_local.available() else "drive"),
     }
 
 
@@ -197,6 +198,7 @@ def start_session():
     sess["session_id"] = uuid.uuid4().hex[:8]
     sess["mode"]       = mode
     sess["status"]     = "playing"
+    sess["source"]     = "music"
 
     if mode == "dj":
         track = backend.now_playing() or backend.next_track()
@@ -302,6 +304,115 @@ def control():
             return envelope({"status": "stopped"})
         _session["status"] = "paused" if action == "pause" else "playing"
         return envelope(_session_response(_session))
+
+
+# ── Unified audio session (cross-source coordination) ───────────────────────
+
+@bp.get("/audio/session")
+def get_audio_session():
+    """Return the current unified audio session (any source).
+    Used by all browser clients to coordinate playback."""
+    with _lock:
+        sess = _session
+    if not sess or sess["status"] == "stopped" or not sess.get("source"):
+        return envelope({"session_id": None, "mode": None, "status": "stopped",
+                         "now_playing": None, "source": None})
+    return envelope(_session_response(sess))
+
+
+@bp.post("/audio/session")
+def set_audio_session():
+    """Start or control a unified audio session.
+
+    Body:
+      { "source": "music" | "audiobook" | "drive",
+        "action": "start" | "pause" | "resume" | "stop",
+        ... source-specific fields
+      }
+
+    When a new source starts, any session from a different source is stopped.
+    """
+    global _session
+    body = request.get_json(silent=True) or {}
+    source = (body.get("source") or "").lower()
+    action = (body.get("action") or "start").lower()
+
+    if source not in ("music", "audiobook", "drive"):
+        return error("source must be music, audiobook, or drive",
+                     error_type="bad_request", status=400)
+
+    if action == "stop":
+        with _lock:
+            _session = _empty_session()
+        return envelope({"status": "stopped"})
+
+    if action in ("pause", "resume"):
+        with _lock:
+            if not _session or not _session.get("source"):
+                return error("No active session", error_type="no_session", status=404)
+            _session["status"] = "paused" if action == "pause" else "playing"
+            return envelope(_session_response(_session))
+
+    # action == "start": stop any session from a different source
+    with _lock:
+        if _session and _session.get("source") and _session["source"] != source:
+            # Different source starting: stop the current one
+            print(f"[audio/session] {source} starting, stopping { _session['source']}", flush=True)
+            _session = _empty_session()
+
+        sess = _empty_session()
+        sess["session_id"] = uuid.uuid4().hex[:8]
+        sess["source"] = source
+        sess["status"] = "playing"
+
+        if source == "music":
+            # Music: same as existing start_session
+            mode = body.get("mode", "dj").lower()
+            if mode not in ("dj", "playlist", "single"):
+                mode = "dj"
+            sess["mode"] = mode
+            backend = _backend()
+            track = backend.now_playing() or backend.next_track()
+            if track:
+                sess["now_playing"] = _track_to_now_playing(track)
+            else:
+                return error("No tracks available", error_type="no_tracks", status=404)
+
+        elif source == "audiobook":
+            # Audiobook: minimal session with book metadata
+            sess["mode"] = "book"
+            sess["now_playing"] = {
+                "artist":     body.get("author") or "Unknown",
+                "title":      body.get("title") or "Unknown",
+                "album":      body.get("chapter") or "",
+                "file_id":    body.get("file_id") or "",
+                "stream_url": body.get("stream_url") or "",
+                "art_url":    body.get("art_url") or "",
+            }
+            # Position from the browser
+            if "pos" in body:
+                sess["pos"] = float(body["pos"])
+
+        elif source == "drive":
+            # Drive dashboard: minimal session
+            sess["mode"] = body.get("mode", "music") or "music"
+            sess["now_playing"] = {
+                "artist":     body.get("artist") or "",
+                "title":      body.get("title") or "",
+                "album":      body.get("album") or "",
+                "file_id":    body.get("file_id") or "",
+                "stream_url": body.get("stream_url") or "",
+                "art_url":    body.get("art_url") or "",
+            }
+            if "pos" in body:
+                sess["pos"] = float(body["pos"])
+
+        if not sess.get("now_playing"):
+            return error("No track data", error_type="bad_request", status=400)
+
+        _session = sess
+
+    return envelope(_session_response(_session))
 
 
 # ── Bilby status (for SkippyChat header glyph + SkippyDroid) ─────────────────

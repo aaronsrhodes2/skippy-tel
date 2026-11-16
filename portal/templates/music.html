@@ -21,7 +21,7 @@
    The three URLs below are the only things the page needs from this template. #}
 <section id="bp" class="bp" data-state="boot" data-playing="0" data-sheet=""
          data-gate-url="{{ url_for('music.player_gate') }}" data-checkin-url="{{ url_for('music.player_checkin') }}"
-         data-command-url="{{ url_for('music.player_command') }}" data-rooms='{{ rooms|tojson }}'{% if fav_url %} data-fav-url="{{ fav_url }}"{% endif %} aria-label="Bilby's Audio Service">
+         data-command-url="{{ url_for('music.player_command') }}" data-bilby-push-url="{{ url_for('music.bilby_push_proxy') }}" data-rooms='{{ rooms|tojson }}'{% if fav_url %} data-fav-url="{{ fav_url }}"{% endif %} aria-label="Bilby's Audio Service">
   <noscript><p class="warn" style="margin:12px">Bilby's Audio Service needs JavaScript.</p></noscript>
 
   {# The browser only lets a page make sound after a tap on it. After a reload (or a remote Play from another device) this is
@@ -173,5 +173,6 @@
   <audio id="au1" preload="auto"></audio>
 </section>
 <script src="{{ url_for('static', filename='bilby-player.js') }}"></script>
+<script src="{{ url_for('static', filename='audio-session.js') }}"></script>
 <script src="{{ url_for('static', filename='bilby-app.js') }}"></script>
 {% endblock %}

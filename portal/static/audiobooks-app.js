@@ -282,6 +282,11 @@
     catch (e) { $("#tapbar").hidden = false; }          // the browser wants a tap first
     mediaSession();
     paintAll();
+    // Report to unified audio session
+    if (window.AudioSession) {
+      AudioSession.reportPlay({ title: b.t, author: b.a, chapter: S.cur ? P.chapterAt(b.ch, pos) : 0,
+                                file_id: b.id, stream_url: gu(`audio/${b.id}`), art_url: gu(`cover/${b.id}`), pos: pos || 0 });
+    }
   }
 
   function startBook(b, restart) {
@@ -297,8 +302,13 @@
       if (!S.remote.book) return remoteCmd(`book:play:${S.cur.id}` + resumeSuffix(S.cur));       // the box has told us nothing yet: start it from the place
       return remoteCmd(playingNow() ? "book:pause" : "book:resume");
     }
-    if (au.paused) { au.play().then(() => { root.dataset.playing = "1"; $("#tapbar").hidden = true; paintAll(); }).catch(() => { $("#tapbar").hidden = false; }); }
-    else { S.pauseAt = Date.now(); au.pause(); }
+    if (au.paused) {
+      au.play().then(() => { root.dataset.playing = "1"; $("#tapbar").hidden = true; paintAll(); }).catch(() => { $("#tapbar").hidden = false; });
+      if (window.AudioSession) AudioSession.reportResume();
+    } else {
+      S.pauseAt = Date.now(); au.pause();
+      if (window.AudioSession) AudioSession.reportPause();
+    }
   }
 
   const resumeSuffix = b => { const r = P.resumeAt(S.places[b.id], b.d); return r ? `:${r.toFixed(1)}` : ""; };
@@ -599,6 +609,13 @@
     else if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
     else if (e.key === "Escape") { if (!$("#menu").hidden) closeMenu(); else if (!$("#np").hidden) $("#np").hidden = true; else if (S.sheet) closeSheet(); }
   });
+
+  // ── Audio session coordination ────────────────────────────────────────────────
+  if (window.AudioSession) {
+    AudioSession.init({ source: "audiobook", onTakeover: function (src) {
+      if (src !== "audiobook") { S.pauseAt = Date.now(); au.pause(); }
+    }});
+  }
 
   window.__books = S;                 // for the dev harness and the browser tests
   boot();

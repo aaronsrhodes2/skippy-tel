@@ -9,6 +9,9 @@ Source priority chain (applied in order, first non-null wins):
                             to proactively send now-playing data to SkippyTel.
                             Served for up to PUSH_TTL_S seconds after the last
                             push. Survives brief Tailscale drops during a show.
+                            Accepts metadata only (title, artist) OR full
+                            playback state (track, title, artist, pos, playing,
+                            queue, idx, kind).
 
   3. Drive Bilby          — SkippyTel-side random queue from the Drive Music/
                             folder. Auto-syncs to the pushed track title when
@@ -20,7 +23,7 @@ Endpoints
 ─────────
 GET  /bilby/status          — Now Playing (priority chain above)
 GET  /bilby/status?source=X — Force a specific source
-POST /bilby/push            — Mac Bilby pushes now-playing here (see below)
+POST /bilby/push            — Push now-playing metadata or full playback state
 POST /bilby/next            — Skip / pick next (source-aware)
 POST /bilby/stop            — Stop playback (source-aware)
 GET  /bilby/stream/<id>     — Redirect to /dropship/image/<id> for audio bytes
@@ -36,6 +39,12 @@ Mac Bilby push wiring (add to stage9_dj_suggest.py on the Mac):
             timeout=3)
         except: pass
     threading.Thread(target=_push, daemon=True).start()
+
+Browser push wiring (bilby-app.js):
+  After each check-in the browser POSTs its full playback state to
+  flask-api's /bilby/push (via the portal's /listen/bilby-push proxy).
+  Body: {"track": path, "title": str, "artist": str, "pos": float,
+         "playing": bool, "queue": [...], "idx": int, "kind": "song"}
 """
 import time
 
@@ -55,7 +64,7 @@ bp = Blueprint("bilby", __name__)
 # TTL: 30 seconds — stale data is worse than "none" for the now-playing card.
 PUSH_TTL_S: int = 30
 
-_pushed_now_playing: dict | None = None   # {title, artist, bpm?, key?}
+_pushed_now_playing: dict | None = None   # {title, artist, bpm?, key?, track?, pos?, playing?, kind?}
 _pushed_at: float = 0.0
 
 
@@ -70,15 +79,19 @@ def _pushed_state_fresh() -> dict | None:
 
 @bp.post("/bilby/push")
 def bilby_push():
-    """Mac Bilby calls this when the now-playing track changes.
+    """Accepts now-playing metadata OR full playback state.
 
-    Body (JSON):
+    Metadata body (legacy, from Mac Bilby / Traktor):
       { "title": str, "artist": str, "bpm"?: float, "key"?: str }
+
+    Full playback body (from browser / audiobook page):
+      { "track": str, "title": str, "artist": str, "pos": float,
+        "playing": bool, "queue"?: [str], "idx": int, "kind": "song"|"spotify"|"book" }
 
     Side-effects:
       - Caches the state for PUSH_TTL_S seconds.
-      - If BILBY_DRIVE_FOLDER_ID is configured, searches Drive for the same
-        track and queues it so the phone player stays in sync with Traktor.
+      - If BILBY_DRIVE_FOLDER_ID is configured and metadata-only, searches Drive
+        for the same track and queues it.
     """
     global _pushed_now_playing, _pushed_at
 
@@ -89,19 +102,31 @@ def bilby_push():
     if not title and not artist:
         return error("title or artist is required", error_type="bad_request", status=400)
 
+    # Detect full playback state vs metadata-only
+    is_full = "track" in body or "playing" in body or "idx" in body or "kind" in body
+
     _pushed_now_playing = {
         "title":  title,
         "artist": artist,
         "bpm":    body.get("bpm"),
         "key":    body.get("key"),
+        # Full playback fields
+        "track":  body.get("track"),
+        "pos":    body.get("pos"),
+        "playing": body.get("playing"),
+        "kind":   body.get("kind"),
+        "idx":    body.get("idx"),
+        "queue":  body.get("queue"),
     }
     _pushed_at = time.time()
 
-    # ── Drive auto-sync ───────────────────────────────────────────────────
+    # ── Drive auto-sync (metadata only) ───────────────────────────────────
     # If Drive Bilby is configured, queue the same track so the phone
     # player matches what Traktor is playing. Best-effort, non-blocking.
     synced = False
-    if settings.bilby_drive_folder_id and title:
+    if is_full or (not settings.bilby_drive_folder_id):
+        pass  # full playback state: no Drive sync needed
+    elif title:
         try:
             from app.clients import bilby_local as backend  # noqa: PLC0415
             track = backend.search_track(artist, title)

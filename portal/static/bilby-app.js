@@ -27,7 +27,7 @@
     get(k, d) { try { const v = localStorage.getItem("music." + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem("music." + k, JSON.stringify(v)); } catch (e) { /* full or blocked: carry on without */ } },
   };
-  const cfg = { gate: root.dataset.gateUrl, checkin: root.dataset.checkinUrl, command: root.dataset.commandUrl, fav: root.dataset.favUrl || "" };
+  const cfg = { gate: root.dataset.gateUrl, checkin: root.dataset.checkinUrl, command: root.dataset.commandUrl, bilbyPush: root.dataset.bilbyPushUrl || "", fav: root.dataset.favUrl || "" };
   const env = C.detectEnv(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
   const coarse = window.matchMedia && matchMedia("(pointer: coarse)").matches;
   root.classList.toggle("coarse", !!coarse);
@@ -438,7 +438,7 @@
         const old = act(); S.ourPauseAt = Date.now(); old.el.pause(); ai = 1 - ai; unload(old);       // the song was preloaded: swap, no download
       } else load(act(), tIdx, o.from);
       applyVolume();
-      const p = tryPlay(act());
+      const p = tryPlay(act()).then(() => { if (window.AudioSession) { const it = S.q.items[S.q.qi]; AudioSession.reportPlay({ title: it && it.t, author: it && S.lib.get(it.t) && S.lib.get(it.t).a, file_id: it && it.t, stream_url: it && mu("a", it.t) }); } }, () => {});
       preloadNext();
       return p;
     };
@@ -466,7 +466,7 @@
     return startTrack(np, { play: true });
   }
   /** Pause on purpose (so the pause handler can tell it from one the system did). */
-  function pauseNow() { S.want = false; S.ourPauseAt = Date.now(); if (isPlaying()) act().el.pause(); }
+  function pauseNow() { S.want = false; S.ourPauseAt = Date.now(); if (isPlaying()) act().el.pause(); if (window.AudioSession) AudioSession.reportPause(); }
   function endOfQueue(auto) {
     S.want = false;
     const s = act();
@@ -679,7 +679,7 @@
       if (!S.q.cur) return djStart();
       const s = act();
       if (!s.path || s.t !== S.q.cur.t) return startTrack(S.q.qi, { from: S.resumeAt, play: true });
-      if (s.el.paused || s.el.ended) { if (s.el.ended) s.el.currentTime = 0; return tryPlay(s); }
+      if (s.el.paused || s.el.ended) { if (s.el.ended) s.el.currentTime = 0; return tryPlay(s).then(() => { if (window.AudioSession) AudioSession.reportResume(); }); }
       pauseNow();
     },
     resume() { if (!isPlaying()) return actions.toggle(); },
@@ -1797,6 +1797,12 @@
       connect.others = Array.isArray(reply.devices) ? reply.devices : [];
       for (const c of reply.commands || []) remote(c);
       connectChanged();
+      // Push full playback state to flask-api so the home-reporter knows what's playing
+      if (st) {
+        const pushState = { ...st, kind: C.kindOf(st) };
+        fetch(cfg.bilbyPush, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+                               body: JSON.stringify(pushState) }).catch(() => {});
+      }
     } catch (e) { /* offline: the next check-in catches up */ } finally { connect.busy = false; }
   }
   let publishTimer = 0;
@@ -2121,5 +2127,8 @@
   showQueueCount(); syncSignal();
   loadLibrary();
   // exposed for the tests that drive the page by hand (portal/tests/dev_music.py) and for debugging in the console
+  if (window.AudioSession) {
+    AudioSession.init({ source: "music", onTakeover: function (src) { S.want = false; S.ourPauseAt = Date.now(); for (const s of S.slots) if (s.el) s.el.pause(); } });
+  }
   window.BilbyApp = { S, actions, gate, slots, list, qList, go, rail, toast, startTrack, tryPlay, renderView, checkin, connect, sink, room, persist, blobs, rec, recoverNow, get lib() { return S.lib; } };
 })();
